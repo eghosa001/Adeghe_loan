@@ -1,0 +1,228 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/business_providers.dart';
+import '../../data/models/financial_settings_entity.dart';
+
+class FinancialSettingsTab extends ConsumerStatefulWidget {
+  const FinancialSettingsTab({super.key});
+  @override
+  ConsumerState<FinancialSettingsTab> createState() =>
+      _FinancialSettingsTabState();
+}
+
+class _FinancialSettingsTabState extends ConsumerState<FinancialSettingsTab> {
+  final _formKey = GlobalKey<FormState>();
+  final _currencyCtrl = TextEditingController();
+  final _interestCtrl = TextEditingController();
+  final _insuranceCtrl = TextEditingController();
+  final _commissionCtrl = TextEditingController();
+  final _processingCtrl = TextEditingController();
+  final _penaltyCtrl = TextEditingController();
+  bool _hasPrefilled = false;
+  bool _isEditing = false;
+
+  @override
+  void dispose() {
+    _currencyCtrl.dispose();
+    _interestCtrl.dispose();
+    _insuranceCtrl.dispose();
+    _commissionCtrl.dispose();
+    _processingCtrl.dispose();
+    _penaltyCtrl.dispose();
+    super.dispose();
+  }
+
+  void _prefill(FinancialSettings s) {
+    if (_hasPrefilled) return;
+    _currencyCtrl.text = s.currency;
+    _interestCtrl.text = s.defaultInterestRate.toString();
+    _insuranceCtrl.text = s.defaultInsuranceFee.toString();
+    _commissionCtrl.text = s.defaultCommission.toString();
+    _processingCtrl.text = s.defaultProcessingFee.toString();
+    _penaltyCtrl.text = s.defaultPenaltyRules;
+    _hasPrefilled = true;
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    final interest = double.tryParse(_interestCtrl.text.trim()) ?? double.nan;
+    final insurance =
+        double.tryParse(_insuranceCtrl.text.trim()) ?? double.nan;
+    final commission =
+        double.tryParse(_commissionCtrl.text.trim()) ?? double.nan;
+    final processing =
+        double.tryParse(_processingCtrl.text.trim()) ?? double.nan;
+    if (interest.isNaN ||
+        insurance.isNaN ||
+        commission.isNaN ||
+        processing.isNaN) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Enter valid numeric values')));
+      }
+      return;
+    }
+
+    final map = {
+      'currency': _currencyCtrl.text.trim(),
+      'default_interest': interest.toString(),
+      'default_insurance': insurance.toString(),
+      'default_commission': commission.toString(),
+      'default_processing': processing.toString(),
+      'default_penalty_rules': _penaltyCtrl.text.trim(),
+    };
+    await ref.read(businessRepoProvider).saveSettings(map);
+    ref.invalidate(financialSettingsProvider);
+    setState(() {
+      _isEditing = false;
+      _hasPrefilled = false;
+    });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Financial defaults saved')));
+    }
+  }
+
+  Widget _buildDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 160,
+            child: Text(
+              label,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value.isEmpty ? '-' : value,
+              style: Theme.of(context).textTheme.bodyLarge,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSettingsView(FinancialSettings settings) {
+    return ListView(
+      padding: const EdgeInsets.all(16.0),
+      children: [
+        Icon(Icons.attach_money_rounded,
+            size: 64,
+            color: Theme.of(context).colorScheme.primary),
+        const SizedBox(height: 24),
+        _buildDetailRow('Currency', settings.currency),
+        const Divider(),
+        _buildDetailRow(
+            'Interest Rate', '${settings.defaultInterestRate}%'),
+        const Divider(),
+        _buildDetailRow(
+            'Insurance Fee', settings.defaultInsuranceFee.toString()),
+        const Divider(),
+        _buildDetailRow(
+            'Commission', settings.defaultCommission.toString()),
+        const Divider(),
+        _buildDetailRow(
+            'Processing Fee', settings.defaultProcessingFee.toString()),
+        const Divider(),
+        _buildDetailRow('Penalty Rules', settings.defaultPenaltyRules),
+      ],
+    );
+  }
+
+  Widget _buildEditForm(FinancialSettings settings) {
+    _prefill(settings);
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Form(
+        key: _formKey,
+        child: ListView(
+          children: [
+            TextFormField(
+                controller: _currencyCtrl,
+                decoration:
+                    const InputDecoration(labelText: 'Currency Symbol'),
+                validator: (v) => v!.isEmpty ? 'Required' : null),
+            const SizedBox(height: 12),
+            TextFormField(
+                controller: _interestCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Default Interest Rate (%)'),
+                keyboardType:
+                    TextInputType.numberWithOptions(decimal: true)),
+            const SizedBox(height: 12),
+            TextFormField(
+                controller: _insuranceCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Default Insurance Fee'),
+                keyboardType:
+                    TextInputType.numberWithOptions(decimal: true)),
+            const SizedBox(height: 12),
+            TextFormField(
+                controller: _commissionCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Default Commission'),
+                keyboardType:
+                    TextInputType.numberWithOptions(decimal: true)),
+            const SizedBox(height: 12),
+            TextFormField(
+                controller: _processingCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Default Processing Fee'),
+                keyboardType:
+                    TextInputType.numberWithOptions(decimal: true)),
+            const SizedBox(height: 12),
+            TextFormField(
+                controller: _penaltyCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Penalty Rules (JSON/text)'),
+                maxLines: 3),
+            const SizedBox(height: 20),
+            ElevatedButton(
+                onPressed: _save, child: const Text('Save Defaults')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final settingsAsync = ref.watch(financialSettingsProvider);
+
+    return Scaffold(
+      body: settingsAsync.when(
+        data: (settings) => _isEditing
+            ? _buildEditForm(settings)
+            : _buildSettingsView(settings),
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, stack) =>
+            Center(child: Text('Error loading settings: $error')),
+      ),
+      floatingActionButton: settingsAsync.whenOrNull(
+        data: (_) => FloatingActionButton(
+          onPressed: () {
+            if (_isEditing) {
+              if (_formKey.currentState?.validate() ?? false) {
+                _save();
+              }
+            } else {
+              setState(() {
+                _isEditing = true;
+                _hasPrefilled = false;
+              });
+            }
+          },
+          child: Icon(_isEditing ? Icons.check : Icons.edit),
+        ),
+      ),
+    );
+  }
+}
