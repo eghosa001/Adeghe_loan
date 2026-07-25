@@ -79,19 +79,11 @@ class _BusinessSettingsScreenState
   }
 
   @override
-  void initState() {
-    super.initState();
-    _loadProfile();
-  }
-
-  Future<void> _loadProfile() async {
-    final profile = await ref.read(businessProfileProvider.future);
-    if (mounted) _prefill(profile);
-  }
-
-  @override
   Widget build(BuildContext context) {
     final profileAsync = ref.watch(businessProfileProvider);
+    profileAsync.whenData((profile) {
+      _prefill(profile);
+    });
 
     return Scaffold(
       appBar: AppBar(title: const Text('Business Profile')),
