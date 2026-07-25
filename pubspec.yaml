@@ -42,3 +42,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - attached_assets/full_horizontal_logo_1784971585520.png

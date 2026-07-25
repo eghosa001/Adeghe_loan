@@ -59,12 +59,12 @@ class _SecuritySettingsScreenState
           leading: const Icon(Icons.pin),
           title: const Text('Change PIN'),
           trailing: const Icon(Icons.chevron_right),
-          onTap: () => GoRouter.of(context).go('/auth/change_pin'),
+          onTap: () => context.push('/auth/change_pin'),
         ),
         ListTile(
           leading: const Icon(Icons.lock_reset),
           title: const Text('Forgot PIN / Reset'),
-          onTap: () => GoRouter.of(context).go('/auth/forgot_pin'),
+          onTap: () => context.push('/auth/forgot_pin'),
         ),
       ]),
     );

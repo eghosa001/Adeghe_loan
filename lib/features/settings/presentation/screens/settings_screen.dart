@@ -19,7 +19,7 @@ class SettingsScreen extends StatelessWidget {
             title: const Text('Business Profile'),
             subtitle: const Text('Edit business details and logo'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => GoRouter.of(context).go('/settings/business'),
+            onTap: () => context.push('/settings/business'),
           ),
           ListTile(
             leading: const Icon(Icons.money),
@@ -27,7 +27,7 @@ class SettingsScreen extends StatelessWidget {
             subtitle: const Text('Default interest, fees and currency'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () =>
-                GoRouter.of(context).go('/settings/business/financial_defaults'),
+                context.push('/settings/business/financial_defaults'),
           ),
           const Divider(),
           _SectionHeader(title: 'Security'),
@@ -36,7 +36,7 @@ class SettingsScreen extends StatelessWidget {
             title: const Text('Security Settings'),
             subtitle: const Text('Change PIN and manage biometrics'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => GoRouter.of(context).go('/settings/security'),
+            onTap: () => context.push('/settings/security'),
           ),
           const Divider(),
           _SectionHeader(title: 'Data'),
@@ -45,10 +45,20 @@ class SettingsScreen extends StatelessWidget {
             title: const Text('Backup & Restore'),
             subtitle: const Text('Create encrypted app backups or restore data'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => GoRouter.of(context).go('/settings/backup'),
+            onTap: () => context.push('/settings/backup'),
           ),
           const Divider(),
           _SectionHeader(title: 'About'),
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Center(
+              child: Image.asset(
+                'attached_assets/full_horizontal_logo_1784971585520.png',
+                width: 220,
+                fit: BoxFit.contain,
+              ),
+            ),
+          ),
           ListTile(
             leading: const Icon(Icons.info_outline),
             title: const Text('About ${AppConstants.appName}'),

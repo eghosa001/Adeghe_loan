@@ -58,6 +58,7 @@ class DashboardScreen extends ConsumerWidget {
                         subtitle: Text(
                             'Outstanding: ${CurrencyUtils.format(loan.outstandingBalance)}'),
                         trailing: _StatusChip(status: loan.status.name),
+                        onTap: () => context.push('/loans/${loan.id}'),
                       ),
                     )),
               ],
@@ -85,6 +86,7 @@ class DashboardScreen extends ConsumerWidget {
                               .first,
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
+                        onTap: () => context.push('/collections'),
                       ),
                     )),
               ],
@@ -112,6 +114,7 @@ class _StatCardsRow extends StatelessWidget {
                 value: data.totalCustomers.toString(),
                 icon: Icons.people_outline,
                 color: Colors.blue,
+                onTap: () => context.push('/customers'),
               ),
             ),
             const SizedBox(width: 12),
@@ -121,6 +124,7 @@ class _StatCardsRow extends StatelessWidget {
                 value: data.activeLoans.toString(),
                 icon: Icons.account_balance_wallet_outlined,
                 color: Colors.green,
+                onTap: () => context.push('/reports'),
               ),
             ),
           ],
@@ -134,6 +138,7 @@ class _StatCardsRow extends StatelessWidget {
                 value: data.dailyActiveLoans.toString(),
                 icon: Icons.today,
                 color: Colors.lightGreen,
+                onTap: () => context.push('/reports'),
               ),
             ),
             const SizedBox(width: 12),
@@ -143,6 +148,7 @@ class _StatCardsRow extends StatelessWidget {
                 value: data.weeklyActiveLoans.toString(),
                 icon: Icons.date_range,
                 color: Colors.green.shade700,
+                onTap: () => context.push('/reports'),
               ),
             ),
           ],
@@ -156,6 +162,7 @@ class _StatCardsRow extends StatelessWidget {
                 value: CurrencyUtils.format(data.totalDisbursed),
                 icon: Icons.trending_up,
                 color: Colors.orange,
+                onTap: () => context.push('/reports'),
               ),
             ),
             const SizedBox(width: 12),
@@ -165,6 +172,7 @@ class _StatCardsRow extends StatelessWidget {
                 value: CurrencyUtils.format(data.totalCollected),
                 icon: Icons.savings_outlined,
                 color: Colors.teal,
+                onTap: () => context.push('/collections'),
               ),
             ),
           ],
@@ -178,6 +186,7 @@ class _StatCardsRow extends StatelessWidget {
                 value: CurrencyUtils.format(data.dailyOutstandingBalance),
                 icon: Icons.calendar_today,
                 color: Colors.redAccent,
+                onTap: () => context.push('/collections'),
               ),
             ),
             const SizedBox(width: 12),
@@ -187,6 +196,7 @@ class _StatCardsRow extends StatelessWidget {
                 value: CurrencyUtils.format(data.weeklyOutstandingBalance),
                 icon: Icons.view_week,
                 color: Colors.red.shade700,
+                onTap: () => context.push('/collections'),
               ),
             ),
           ],
@@ -198,6 +208,7 @@ class _StatCardsRow extends StatelessWidget {
           icon: Icons.receipt_long_outlined,
           color: Colors.red,
           fullWidth: true,
+          onTap: () => context.push('/collections'),
         ),
       ],
     );
@@ -211,6 +222,7 @@ class _StatCard extends StatelessWidget {
     required this.icon,
     required this.color,
     this.fullWidth = false,
+    this.onTap,
   });
 
   final String label;
@@ -218,10 +230,11 @@ class _StatCard extends StatelessWidget {
   final IconData icon;
   final Color color;
   final bool fullWidth;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    final card = Card(
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Row(
@@ -249,6 +262,13 @@ class _StatCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+
+    if (onTap == null) return card;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: card,
     );
   }
 }
@@ -285,22 +305,22 @@ class _QuickActionsSection extends StatelessWidget {
         _QuickAction(
           icon: Icons.person_add_outlined,
           label: 'New\nCustomer',
-          onTap: () => GoRouter.of(context).go('/customers/new'),
+          onTap: () => context.push('/customers/new'),
         ),
         _QuickAction(
           icon: Icons.request_quote_outlined,
           label: 'New\nLoan',
-          onTap: () => GoRouter.of(context).go('/customers'),
+          onTap: () => context.push('/customers'),
         ),
         _QuickAction(
           icon: Icons.payment,
           label: 'Record\nPayment',
-          onTap: () => GoRouter.of(context).go('/customers'),
+          onTap: () => context.push('/collections'),
         ),
         _QuickAction(
           icon: Icons.receipt_long_outlined,
           label: 'Collection\nList',
-          onTap: () => GoRouter.of(context).go('/dashboard'),
+          onTap: () => context.push('/collections'),
         ),
       ],
     );

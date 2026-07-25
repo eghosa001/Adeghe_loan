@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -21,6 +22,16 @@ class DocumentService {
     final file = File('${directory.path}/$fileName.pdf');
     await file.writeAsBytes(await document.save());
     return file;
+  }
+
+  static Future<Uint8List?> _loadDefaultLogo() async {
+    try {
+      final bytes = await rootBundle.load(
+          'attached_assets/full_horizontal_logo_1784971585520.png');
+      return bytes.buffer.asUint8List();
+    } catch (_) {
+      return null;
+    }
   }
 
   static pw.Widget _buildHeader(String title, Uint8List? logoBytes) {
@@ -54,10 +65,11 @@ class DocumentService {
     Uint8List? borrowerSignature,
     Uint8List? guarantorSignature,
   }) async {
+    final effectiveLogoBytes = logoBytes ?? await _loadDefaultLogo();
     final doc = pw.Document();
     doc.addPage(pw.MultiPage(
       build: (context) => [
-        _buildHeader('LOAN AGREEMENT', logoBytes),
+        _buildHeader('LOAN AGREEMENT', effectiveLogoBytes),
         pw.SizedBox(height: 12),
         pw.Text('Business: ${business.name}'),
         pw.Text('Customer: ${customer.fullName}'),
@@ -117,10 +129,11 @@ class DocumentService {
     required Payment payment,
     Uint8List? logoBytes,
   }) async {
+    final effectiveLogoBytes = logoBytes ?? await _loadDefaultLogo();
     final doc = pw.Document();
     doc.addPage(pw.MultiPage(
       build: (context) => [
-        _buildHeader('PAYMENT RECEIPT', logoBytes),
+        _buildHeader('PAYMENT RECEIPT', effectiveLogoBytes),
         pw.SizedBox(height: 12),
         pw.Text('Receipt #: ${payment.receiptNumber}'),
         pw.Text('Date: ${payment.paymentDate.toIso8601String()}'),

@@ -199,8 +199,21 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(child: CircularProgressIndicator()),
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Image.asset(
+              'attached_assets/full_horizontal_logo_1784971585520.png',
+              width: 240,
+              fit: BoxFit.contain,
+            ),
+            const SizedBox(height: 32),
+            const CircularProgressIndicator(),
+          ],
+        ),
+      ),
     );
   }
 }

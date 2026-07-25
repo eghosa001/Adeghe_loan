@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/security/secure_storage_service.dart';
 import '../../../../core/security/biometric_service.dart';
 import '../providers/auth_provider.dart';
@@ -64,8 +65,12 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.lock_outline, size: 64),
-            const SizedBox(height: 16),
+            Image.asset(
+              'attached_assets/full_horizontal_logo_1784971585520.png',
+              width: 200,
+              fit: BoxFit.contain,
+            ),
+            const SizedBox(height: 24),
             Text('Enter PIN', style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 24),
             Row(
@@ -94,7 +99,7 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen> {
             const SizedBox(height: 24),
             _buildNumpad(),
             TextButton(
-                onPressed: () => GoRouter.of(context).go('/auth/forgot_pin'),
+                onPressed: () => context.push('/auth/forgot_pin'),
                 child: const Text('Forgot PIN?')),
           ],
         ),

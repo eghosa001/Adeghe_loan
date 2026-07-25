@@ -22,28 +22,16 @@ class AppDrawer extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  CircleAvatar(
-                    backgroundColor: colorScheme.onPrimary,
-                    radius: 28,
-                    child: Icon(
-                      Icons.account_balance,
-                      color: colorScheme.primary,
-                      size: 28,
-                    ),
+                  Image.asset(
+                    'attached_assets/full_horizontal_logo_1784971585520.png',
+                    width: 180,
+                    fit: BoxFit.contain,
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    AppConstants.appName,
-                    style: TextStyle(
-                      color: colorScheme.onPrimary,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                  const SizedBox(height: 16),
                   Text(
                     'Loan Management',
                     style: TextStyle(
-                      color: colorScheme.onPrimary.withValues(alpha: 0.8),
+                      color: colorScheme.onPrimary.withValues(alpha: 0.9),
                       fontSize: 14,
                     ),
                   ),
