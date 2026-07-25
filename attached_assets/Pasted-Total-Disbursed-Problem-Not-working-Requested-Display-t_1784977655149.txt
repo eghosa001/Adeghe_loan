@@ -1,0 +1,325 @@
+Total Disbursed
+
+Problem:
+
+Not working.
+
+Requested:
+
+Display total money disbursed accurately.
+
+Total Collected
+
+Originally showing wrong information.
+
+You requested:
+
+Instead of customers,
+
+show:
+
+money collected today
+money collected this week
+money collected over date ranges
+
+Ability to filter:
+
+one customer
+date range
+today
+week
+month
+Outstanding Loans
+
+You requested:
+
+Daily outstanding
+
+Weekly outstanding
+
+Accurate totals.
+
+Active Loans
+
+You requested:
+
+Daily active loans
+
+Weekly active loans
+
+Correct statistics.
+
+5. Repayment Module
+
+You requested improvements to repayment.
+
+Wanted:
+
+Reliable repayment recording
+
+Correct balance updates
+
+Correct outstanding amount
+
+Correct loan completion
+
+6. Savings Module
+
+You specifically reported:
+
+Withdrawal from savings does not work.
+
+You requested:
+
+Fix withdrawal functionality.
+
+7. Reports
+
+You requested many reporting improvements.
+
+Including:
+
+Collection reports
+
+Loan reports
+
+Customer reports
+
+Date filtering
+
+Daily reports
+
+Weekly reports
+
+Monthly reports
+
+Printable reports
+
+8. Excel Export
+
+One of your biggest requests.
+
+Originally:
+
+Excel contained unnecessary information.
+
+You wanted:
+
+Collection sheets to contain only:
+
+Customer Name
+
+Amount to Pay
+
+Optional group
+
+Nothing else.
+
+Reason:
+
+To make sheets printable.
+
+Reduce errors.
+
+Avoid "unmodifiable" problems.
+
+Cleaner field collection.
+
+9. Customer Lists
+
+You requested:
+
+Simpler customer payment lists.
+
+Sorted by:
+
+Group
+
+Customer name
+
+Amount owed
+
+Easy for collectors.
+
+10. Premium UI
+
+You specifically asked:
+
+Make every aspect of the app look premium.
+
+That includes:
+
+Modern cards
+
+Better spacing
+
+Professional typography
+
+Rounded buttons
+
+Better color palette
+
+Improved navigation
+
+Professional icons
+
+Cleaner dashboard
+
+Consistent design language
+
+11. Flutter Build
+
+You asked about:
+
+Flutter build
+
+Building release APK
+
+Flutter doctor
+
+Android SDK setup
+
+Gradle issues
+
+12. Error Fixes
+
+You requested fixes for:
+
+404 endpoint errors
+
+Gradle daemon crashes
+
+Android SDK missing
+
+Flutter lock issues
+
+SQLite errors
+
+Database exceptions
+
+Riverpod issues
+
+13. VS Code Workflow
+
+You asked for:
+
+Step-by-step VS Code instructions
+
+Individual code snippets
+
+Continue fixing project
+
+Sequential repair process
+
+14. AI Development Workflow
+
+You experimented with several AI tools.
+
+Asked about:
+
+OpenCode AI
+
+Running OpenCode in GitHub Codespaces
+
+Changing AI models
+
+Gemini links
+
+Replit AI
+
+Student discounts
+
+AI limits
+
+Best AI for coding
+
+15. Branding
+
+You wanted branding for the app.
+
+You asked for:
+
+Best free AI logo generators
+
+Best AI logo tools
+
+Logo prompt for:
+
+"Adeghe Professional Service"
+
+Owner of the loan application.
+
+16. Code Quality
+
+You repeatedly requested:
+
+Review the entire codebase
+
+Check every screen
+
+Find bugs
+
+Rewrite weak code
+
+Improve architecture
+
+Make code production-ready
+
+Reduce future bugs
+
+Write everything "to perfection"
+
+17. Financial Accuracy
+
+Your recurring priority has been ensuring all financial figures are correct.
+
+You wanted:
+
+Accurate disbursement totals
+
+Accurate collections
+
+Outstanding balances
+
+Loan balances
+
+Installment calculations
+
+Customer balances
+
+No duplicate calculations
+
+Reliable dashboard metrics
+
+18. Desired Final Product
+
+Across all conversations, your end goal appears to be a professional loan management application with:
+
+Customer management
+Loan management
+Savings accounts
+Daily collections
+Weekly collections
+Accurate reporting
+Excel exports
+Secure encrypted database
+PIN authentication
+Premium UI
+Fast performance
+Reliable calculations
+Print-ready collector sheets
+Production-quality code suitable for real-world use.
+The biggest feature requests you've made
+
+In order of emphasis, these have been your highest-priority requests:
+
+Fix loan creation completely.
+Fix dashboard calculations (especially Total Disbursed and Total Collected).
+Make all financial statistics accurate.
+Fix savings withdrawal.
+Improve Excel exports for collectors.
+Make the entire UI look premium.
+Eliminate database errors and migration issues.
+Review and polish the entire codebase to production quality.
+Ensure all reports (daily, weekly, customer, date range) work correctly.
+Make the app robust enough for use in an actual lending business.
