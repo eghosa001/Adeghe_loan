@@ -87,6 +87,29 @@ class ReportScreen extends ConsumerWidget {
               ),
             ],
           ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            children: [
+              ActionChip(
+                label: const Text('Today'),
+                onPressed: () {
+                  final now = DateTime.now();
+                  ref.read(reportStartDateProvider.notifier).state = now;
+                  ref.read(reportEndDateProvider.notifier).state = now;
+                },
+              ),
+              ActionChip(
+                label: const Text('This Week'),
+                onPressed: () {
+                  final now = DateTime.now();
+                  ref.read(reportStartDateProvider.notifier).state =
+                      now.subtract(const Duration(days: 6));
+                  ref.read(reportEndDateProvider.notifier).state = now;
+                },
+              ),
+            ],
+          ),
           const SizedBox(height: 24),
           reportAsync.when(
             loading: () => const Center(child: CircularProgressIndicator()),

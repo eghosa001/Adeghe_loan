@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:loantrack/core/utils/currency_utils.dart';
 import 'package:loantrack/core/utils/date_utils.dart';
-import 'package:loantrack/features/loans/data/models/loan_entity.dart';
 import 'package:loantrack/features/loans/domain/loan_calculator.dart';
 import 'package:loantrack/features/loans/presentation/providers/loan_providers.dart';
 
@@ -44,16 +43,11 @@ class LoanCreationScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.all(16.0),
         children: [
-          // Loan Type
-          SegmentedButton<LoanType>(
-            segments: const [
-              ButtonSegment(value: LoanType.daily, label: Text('Daily')),
-              ButtonSegment(value: LoanType.monthly, label: Text('Monthly')),
-            ],
-            selected: {formState.loanType},
-            onSelectionChanged: (selection) {
-              formNotifier.updateField(loanType: selection.first);
-            },
+          // Loan type is always Daily (monthly loans are not offered)
+          const ListTile(
+            leading: Icon(Icons.calendar_today),
+            title: Text('Daily Loan'),
+            subtitle: Text('Repayment is scheduled every day'),
           ),
           const SizedBox(height: 16),
 
@@ -69,8 +63,7 @@ class LoanCreationScreen extends ConsumerWidget {
                 interestRatePercent: double.tryParse(value) ?? 0.0),
           ),
           _buildTextField(
-            label:
-                'Duration (${formState.loanType == LoanType.daily ? 'Days' : 'Months'})',
+            label: 'Duration (Days)',
             onChanged: (value) =>
                 formNotifier.updateField(duration: int.tryParse(value) ?? 0),
           ),

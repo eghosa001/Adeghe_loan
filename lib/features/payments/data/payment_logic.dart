@@ -1,8 +1,6 @@
-/// Pure financial calculation functions for payment processing.
-///
-/// These functions are isolated from the database layer so they can be
-/// unit-tested without SQLite infrastructure.
-library payment_logic;
+// Pure financial calculation functions for payment processing.
+// These functions are isolated from the database layer so they can be
+// unit-tested without SQLite infrastructure.
 
 /// Overpayment calculation result.
 class PaymentAmounts {

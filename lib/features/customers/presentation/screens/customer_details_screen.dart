@@ -80,7 +80,8 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
     if (confirmed != true) return;
     await ref.read(customerRepositoryProvider).delete(widget.customer.id);
     ref.invalidate(customerListProvider);
-    if (mounted) context.go('/customers');
+    if (!mounted) return;
+    if (context.mounted) context.go('/customers');
   }
 
   @override

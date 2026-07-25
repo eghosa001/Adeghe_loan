@@ -37,10 +37,12 @@ class CollectionRepository {
           rs.status AS scheduleStatus,
           l.outstanding_balance AS outstandingBalance,
           l.status AS status,
-          l.notes AS remarks
+          l.notes AS remarks,
+          cg.name AS groupName
         FROM repayment_schedule rs
         INNER JOIN loans l ON rs.loan_id = l.id
         INNER JOIN customers c ON l.customer_id = c.id
+        LEFT JOIN customer_groups cg ON c.group_id = cg.id
         WHERE DATE(rs.due_date) = ?
           AND l.status = 'active'
           $groupClause
@@ -61,6 +63,7 @@ class CollectionRepository {
               (row['outstandingBalance'] as num?)?.toDouble() ?? 0.0,
           status: row['status'] as String? ?? '',
           scheduleStatus: row['scheduleStatus'] as String? ?? 'pending',
+          groupName: row['groupName'] as String?,
           remarks: row['remarks'] as String?,
         );
       }).toList(growable: false);
@@ -88,9 +91,11 @@ class CollectionRepository {
           COALESCE(SUM(p.amount), 0.0) AS amountPaid,
           l.outstanding_balance AS outstandingBalance,
           l.status AS status,
-          l.notes AS remarks
+          l.notes AS remarks,
+          cg.name AS groupName
         FROM loans l
         INNER JOIN customers c ON l.customer_id = c.id
+        LEFT JOIN customer_groups cg ON c.group_id = cg.id
         LEFT JOIN payments p ON p.loan_id = l.id
           AND DATE(p.payment_date) BETWEEN ? AND ?
         WHERE l.status = 'active'
@@ -112,6 +117,7 @@ class CollectionRepository {
               (row['outstandingBalance'] as num?)?.toDouble() ?? 0.0,
           status: row['status'] as String? ?? '',
           scheduleStatus: 'pending',
+          groupName: row['groupName'] as String?,
           remarks: row['remarks'] as String?,
         );
       }).toList(growable: false);

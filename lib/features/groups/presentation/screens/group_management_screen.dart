@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../data/models/customer_group_entity.dart';
 import '../providers/group_providers.dart';
 
 class GroupManagementScreen extends ConsumerWidget {

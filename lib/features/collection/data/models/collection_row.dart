@@ -9,6 +9,7 @@ class CollectionRow {
     required this.outstandingBalance,
     required this.status,
     required this.scheduleStatus,
+    this.groupName,
     this.remarks,
   });
 
@@ -22,6 +23,7 @@ class CollectionRow {
   final String status;
   /// Status from repayment_schedule: 'pending', 'paid', or 'partial'
   final String scheduleStatus;
+  final String? groupName;
   final String? remarks;
 
   bool get isPaid => scheduleStatus == 'paid';

@@ -16,26 +16,22 @@ class ExportManager {
     final sheetName = 'Collection ${date.day}-${date.month}-${date.year}';
     final sheet = excel[sheetName];
 
-    // Print-ready collector sheet: only the fields collectors need.
+    // Print-ready collector sheet: exactly the fields collectors need,
+    // nothing else. Include Group only if at least one customer is grouped.
+    final hasGroups = rows.any((r) =>
+        r.groupName != null && r.groupName!.trim().isNotEmpty);
     final headers = [
       'Customer Name',
       'Amount to Pay',
-      'Paid',
-      'Status',
+      if (hasGroups) 'Group',
     ];
     sheet.appendRow(headers);
 
     for (final row in rows) {
-      final statusLabel = row.isPaid
-          ? 'Paid'
-          : row.isPartial
-              ? 'Partial'
-              : 'Scheduled';
       sheet.appendRow([
         row.customerName,
         row.amountDue.toStringAsFixed(2),
-        row.amountPaid.toStringAsFixed(2),
-        statusLabel,
+        if (hasGroups) row.groupName ?? '',
       ]);
     }
 

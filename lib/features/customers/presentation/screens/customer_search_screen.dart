@@ -74,6 +74,36 @@ class CustomerListScreen extends ConsumerWidget {
             );
           },
         ),
+        // Sort selector
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              const Text('Sort by:', style: TextStyle(fontSize: 12)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Consumer(builder: (context, ref, _) {
+                  final sortBy = ref.watch(customerSortByProvider);
+                  return DropdownButtonHideUnderline(
+                    child: DropdownButton<CustomerSortBy>(
+                      value: sortBy,
+                      isDense: true,
+                      items: const [
+                        DropdownMenuItem(
+                            value: CustomerSortBy.name, child: Text('Name')),
+                        DropdownMenuItem(
+                            value: CustomerSortBy.group, child: Text('Group')),
+                      ],
+                      onChanged: (value) => ref
+                          .read(customerSortByProvider.notifier)
+                          .state = value!,
+                    ),
+                  );
+                }),
+              ),
+            ],
+          ),
+        ),
         const SizedBox(height: 4),
         Expanded(
           child: customers.when(
