@@ -16,23 +16,26 @@ class CollectionRepository {
     try {
       final db = await _database;
       final dateStr = date.toIso8601String().split('T').first;
+
+      // Query repayment_schedule so both past and future scheduled
+      // installments are shown for the selected date.
       final rows = await db.rawQuery('''
         SELECT
           c.full_name AS customerName,
           c.phone AS phone,
           l.id AS loanId,
           l.loan_type AS loanType,
-          l.total_repayment AS amountDue,
-          COALESCE(SUM(p.amount), 0.0) AS amountPaid,
+          rs.amount AS amountDue,
+          rs.paid_amount AS amountPaid,
+          rs.status AS scheduleStatus,
           l.outstanding_balance AS outstandingBalance,
           l.status AS status,
           l.notes AS remarks
-        FROM loans l
+        FROM repayment_schedule rs
+        INNER JOIN loans l ON rs.loan_id = l.id
         INNER JOIN customers c ON l.customer_id = c.id
-        LEFT JOIN payments p ON p.loan_id = l.id
-          AND DATE(p.payment_date) = ?
-        WHERE l.status = 'active'
-        GROUP BY l.id
+        WHERE DATE(rs.due_date) = ?
+          AND l.status = 'active'
         ORDER BY c.full_name COLLATE NOCASE ASC
       ''', [dateStr]);
 
@@ -49,6 +52,7 @@ class CollectionRepository {
           outstandingBalance:
               (row['outstandingBalance'] as num?)?.toDouble() ?? 0.0,
           status: row['status'] as String? ?? '',
+          scheduleStatus: row['scheduleStatus'] as String? ?? 'pending',
           remarks: row['remarks'] as String?,
         );
       }).toList(growable: false);
@@ -99,6 +103,7 @@ class CollectionRepository {
           outstandingBalance:
               (row['outstandingBalance'] as num?)?.toDouble() ?? 0.0,
           status: row['status'] as String? ?? '',
+          scheduleStatus: 'pending',
           remarks: row['remarks'] as String?,
         );
       }).toList(growable: false);

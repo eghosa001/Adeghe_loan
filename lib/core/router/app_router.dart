@@ -195,6 +195,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final secure = ref.read(secureStorageProvider);
+      // Migrate old PINs: clears any stored PIN that lacks the 4-digit
+      // version marker so the user is prompted to re-set a 4-digit PIN.
+      await secure.migrateToFourDigitPin();
       final hasPin = await secure.hasPin();
       if (!mounted) return;
       if (!hasPin) {

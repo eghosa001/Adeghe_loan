@@ -9,6 +9,8 @@ class DashboardData {
     required this.weeklyActiveLoans,
     required this.totalDisbursed,
     required this.totalCollected,
+    required this.dailyCollected,
+    required this.weeklyCollected,
     required this.outstandingBalance,
     required this.dailyOutstandingBalance,
     required this.weeklyOutstandingBalance,
@@ -22,8 +24,14 @@ class DashboardData {
   final int weeklyActiveLoans;
   final double totalDisbursed;
   final double totalCollected;
+  /// Payments received today (completed status).
+  final double dailyCollected;
+  /// Payments received in the last 7 days (completed status).
+  final double weeklyCollected;
   final double outstandingBalance;
+  /// Installments due today that have not been fully paid (from repayment_schedule).
   final double dailyOutstandingBalance;
+  /// Installments due in the last 7 days that have not been fully paid.
   final double weeklyOutstandingBalance;
   final List<Loan> recentLoans;
   final List<Payment> recentPayments;

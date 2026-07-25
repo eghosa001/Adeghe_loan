@@ -21,10 +21,10 @@ class _PinSetupScreenState extends ConsumerState<PinSetupScreen> {
   void _onKey(String key) {
     setState(() {
       if (!_isConfirming) {
-        if (_pin.length < 8) _pin += key;
-        if (_pin.length >= 4) _isConfirming = true;
+        if (_pin.length < 4) _pin += key;
+        if (_pin.length == 4) _isConfirming = true;
       } else {
-        if (_confirm.length < 8) _confirm += key;
+        if (_confirm.length < 4) _confirm += key;
       }
     });
 
@@ -113,7 +113,7 @@ class _PinSetupScreenState extends ConsumerState<PinSetupScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: List.generate(
-          6,
+          4,
           (i) => Container(
                 margin: const EdgeInsets.symmetric(horizontal: 8),
                 width: 16,

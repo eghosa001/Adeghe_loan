@@ -19,51 +19,92 @@ class DashboardRepository {
     try {
       final db = await _database;
 
-      final customerCountResult = await db
-          .rawQuery('SELECT COUNT(*) AS count FROM customers');
+      // ── Customers ───────────────────────────────────────────────────────────
+      final customerCountResult =
+          await db.rawQuery('SELECT COUNT(*) AS count FROM customers');
       final totalCustomers =
           (customerCountResult.first['count'] as int?) ?? 0;
 
+      // ── Active Loans ─────────────────────────────────────────────────────────
       final activeLoansResult = await db.rawQuery(
           "SELECT COUNT(*) AS count FROM loans WHERE status = 'active'");
-      final activeLoans =
-          (activeLoansResult.first['count'] as int?) ?? 0;
+      final activeLoans = (activeLoansResult.first['count'] as int?) ?? 0;
 
+      // Loans created today
       final dailyActiveLoansResult = await db.rawQuery(
-          "SELECT COUNT(*) AS count FROM loans WHERE status = 'active' AND date(loan_date) = date('now')");
+          "SELECT COUNT(*) AS count FROM loans "
+          "WHERE status = 'active' AND DATE(loan_date) = DATE('now')");
       final dailyActiveLoans =
           (dailyActiveLoansResult.first['count'] as int?) ?? 0;
 
+      // Loans created in the last 7 days
       final weeklyActiveLoansResult = await db.rawQuery(
-          "SELECT COUNT(*) AS count FROM loans WHERE status = 'active' AND date(loan_date) >= date('now', '-6 days')");
+          "SELECT COUNT(*) AS count FROM loans "
+          "WHERE status = 'active' AND DATE(loan_date) >= DATE('now', '-6 days')");
       final weeklyActiveLoans =
           (weeklyActiveLoansResult.first['count'] as int?) ?? 0;
 
-      final disbursedResult = await db
-          .rawQuery('SELECT COALESCE(SUM(amount), 0.0) AS total FROM loans');
+      // ── Disbursed ─────────────────────────────────────────────────────────────
+      // Sum of all loans that were actually disbursed (active + completed + defaulted).
+      final disbursedResult = await db.rawQuery(
+          "SELECT COALESCE(SUM(amount), 0.0) AS total FROM loans "
+          "WHERE status IN ('active', 'completed', 'defaulted')");
       final totalDisbursed =
           (disbursedResult.first['total'] as num?)?.toDouble() ?? 0.0;
 
+      // ── Collected ─────────────────────────────────────────────────────────────
       final collectedResult = await db.rawQuery(
-          "SELECT COALESCE(SUM(amount), 0.0) AS total FROM payments WHERE status = 'completed'");
+          "SELECT COALESCE(SUM(amount), 0.0) AS total FROM payments "
+          "WHERE status = 'completed'");
       final totalCollected =
           (collectedResult.first['total'] as num?)?.toDouble() ?? 0.0;
 
+      final dailyCollectedResult = await db.rawQuery(
+          "SELECT COALESCE(SUM(amount), 0.0) AS total FROM payments "
+          "WHERE status = 'completed' AND DATE(payment_date) = DATE('now')");
+      final dailyCollected =
+          (dailyCollectedResult.first['total'] as num?)?.toDouble() ?? 0.0;
+
+      final weeklyCollectedResult = await db.rawQuery(
+          "SELECT COALESCE(SUM(amount), 0.0) AS total FROM payments "
+          "WHERE status = 'completed' "
+          "AND DATE(payment_date) >= DATE('now', '-6 days')");
+      final weeklyCollected =
+          (weeklyCollectedResult.first['total'] as num?)?.toDouble() ?? 0.0;
+
+      // ── Outstanding ───────────────────────────────────────────────────────────
+      // Total unpaid balance across all active loans.
       final outstandingResult = await db.rawQuery(
-          "SELECT COALESCE(SUM(outstanding_balance), 0.0) AS total FROM loans WHERE status = 'active'");
+          "SELECT COALESCE(SUM(outstanding_balance), 0.0) AS total "
+          "FROM loans WHERE status = 'active'");
       final outstandingBalance =
           (outstandingResult.first['total'] as num?)?.toDouble() ?? 0.0;
 
-      final dailyOutstandingResult = await db.rawQuery(
-          "SELECT COALESCE(SUM(outstanding_balance), 0.0) AS total FROM loans WHERE status = 'active' AND date(loan_date) = date('now')");
+      // Installments due TODAY that have not been fully paid.
+      final dailyOutstandingResult = await db.rawQuery('''
+        SELECT COALESCE(SUM(rs.amount - rs.paid_amount), 0.0) AS total
+        FROM repayment_schedule rs
+        INNER JOIN loans l ON rs.loan_id = l.id
+        WHERE DATE(rs.due_date) = DATE('now')
+          AND l.status = 'active'
+          AND rs.status != 'paid'
+      ''');
       final dailyOutstandingBalance =
           (dailyOutstandingResult.first['total'] as num?)?.toDouble() ?? 0.0;
 
-      final weeklyOutstandingResult = await db.rawQuery(
-          "SELECT COALESCE(SUM(outstanding_balance), 0.0) AS total FROM loans WHERE status = 'active' AND date(loan_date) >= date('now', '-6 days')");
+      // Installments due in the last 7 days that have not been fully paid.
+      final weeklyOutstandingResult = await db.rawQuery('''
+        SELECT COALESCE(SUM(rs.amount - rs.paid_amount), 0.0) AS total
+        FROM repayment_schedule rs
+        INNER JOIN loans l ON rs.loan_id = l.id
+        WHERE DATE(rs.due_date) BETWEEN DATE('now', '-6 days') AND DATE('now')
+          AND l.status = 'active'
+          AND rs.status != 'paid'
+      ''');
       final weeklyOutstandingBalance =
           (weeklyOutstandingResult.first['total'] as num?)?.toDouble() ?? 0.0;
 
+      // ── Recent items ──────────────────────────────────────────────────────────
       final recentLoanRows = await db.query(
         AppConstants.tableLoans,
         orderBy: 'loan_date DESC',
@@ -87,6 +128,8 @@ class DashboardRepository {
         weeklyActiveLoans: weeklyActiveLoans,
         totalDisbursed: totalDisbursed,
         totalCollected: totalCollected,
+        dailyCollected: dailyCollected,
+        weeklyCollected: weeklyCollected,
         outstandingBalance: outstandingBalance,
         dailyOutstandingBalance: dailyOutstandingBalance,
         weeklyOutstandingBalance: weeklyOutstandingBalance,

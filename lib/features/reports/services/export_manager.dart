@@ -16,28 +16,26 @@ class ExportManager {
     final sheetName = 'Collection ${date.day}-${date.month}-${date.year}';
     final sheet = excel[sheetName];
 
+    // Print-ready collector sheet: only the fields collectors need.
     final headers = [
-      'Customer',
-      'Phone',
-      'Loan ID',
-      'Loan Type',
-      'Amount Due',
-      'Amount Paid',
-      'Outstanding',
+      'Customer Name',
+      'Amount to Pay',
+      'Paid',
       'Status',
     ];
     sheet.appendRow(headers);
 
     for (final row in rows) {
+      final statusLabel = row.isPaid
+          ? 'Paid'
+          : row.isPartial
+              ? 'Partial'
+              : 'Scheduled';
       sheet.appendRow([
         row.customerName,
-        row.phone,
-        row.loanId,
-        row.loanType,
         row.amountDue.toStringAsFixed(2),
         row.amountPaid.toStringAsFixed(2),
-        row.outstandingBalance.toStringAsFixed(2),
-        row.status,
+        statusLabel,
       ]);
     }
 

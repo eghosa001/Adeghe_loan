@@ -37,12 +37,12 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen> {
   }
 
   void _onKey(String key) async {
-    if (_pin.length < 8) {
+    if (_pin.length < 4) {
       setState(() {
         _pin += key;
         _isError = false;
       });
-      if (_pin.length >= 4) {
+      if (_pin.length == 4) {
         final isValid = await _storage.verifyPin(_pin);
         if (isValid) {
           _unlockApp();
@@ -75,7 +75,7 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: List.generate(
-                  6,
+                  4,
                   (index) => Container(
                         margin: const EdgeInsets.symmetric(horizontal: 8),
                         width: 16,

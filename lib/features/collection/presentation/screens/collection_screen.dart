@@ -112,25 +112,44 @@ class CollectionScreen extends ConsumerWidget {
             separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (context, index) {
               final row = rows[index];
+              final statusLabel = row.isPaid
+                  ? 'Paid'
+                  : row.isPartial
+                      ? 'Partial'
+                      : 'Scheduled';
+              final statusColor = row.isPaid
+                  ? Colors.green
+                  : row.isPartial
+                      ? Colors.orange
+                      : Theme.of(context).colorScheme.primary;
               return ListTile(
                 title: Text(row.customerName),
-                subtitle: Text(
-                    '${row.loanType} loan — ${row.loanId}'),
+                subtitle: Text('${row.loanType} loan'),
                 trailing: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(
-                      CurrencyUtils.format(row.amountPaid),
-                      style: TextStyle(
-                        color: row.amountPaid > 0
-                            ? Colors.green
-                            : Theme.of(context).colorScheme.error,
-                        fontWeight: FontWeight.bold,
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: statusColor.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        statusLabel,
+                        style: TextStyle(
+                          color: statusColor,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                        ),
                       ),
                     ),
+                    const SizedBox(height: 4),
                     Text(
-                      'of ${CurrencyUtils.format(row.amountDue)}',
+                      row.isPaid
+                          ? CurrencyUtils.format(row.amountPaid)
+                          : '${CurrencyUtils.format(row.amountPaid)} / ${CurrencyUtils.format(row.amountDue)}',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
@@ -161,11 +180,12 @@ class _DatePickerTile extends StatelessWidget {
       subtitle: Text(AppDateUtils.formatRelative(selectedDate)),
       trailing: const Icon(Icons.edit_calendar),
       onTap: () async {
+        final now = DateTime.now();
         final picked = await showDatePicker(
           context: context,
           initialDate: selectedDate,
           firstDate: DateTime(2020),
-          lastDate: DateTime.now(),
+          lastDate: DateTime(now.year + 5, now.month, now.day),
         );
         if (picked != null) onDatePicked(picked);
       },

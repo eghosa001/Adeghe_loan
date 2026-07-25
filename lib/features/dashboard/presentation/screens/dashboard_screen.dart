@@ -158,7 +158,7 @@ class _StatCardsRow extends StatelessWidget {
           children: [
             Expanded(
               child: _StatCard(
-                label: 'Disbursed',
+                label: 'Total Disbursed',
                 value: CurrencyUtils.format(data.totalDisbursed),
                 icon: Icons.trending_up,
                 color: Colors.orange,
@@ -168,7 +168,7 @@ class _StatCardsRow extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: _StatCard(
-                label: 'Collected',
+                label: 'Total Collected',
                 value: CurrencyUtils.format(data.totalCollected),
                 icon: Icons.savings_outlined,
                 color: Colors.teal,
@@ -182,7 +182,31 @@ class _StatCardsRow extends StatelessWidget {
           children: [
             Expanded(
               child: _StatCard(
-                label: 'Daily Outstanding',
+                label: 'Collected Today',
+                value: CurrencyUtils.format(data.dailyCollected),
+                icon: Icons.today,
+                color: Colors.teal.shade300,
+                onTap: () => context.push('/collections'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _StatCard(
+                label: 'Collected (7d)',
+                value: CurrencyUtils.format(data.weeklyCollected),
+                icon: Icons.date_range,
+                color: Colors.teal.shade700,
+                onTap: () => context.push('/collections'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _StatCard(
+                label: 'Due Today',
                 value: CurrencyUtils.format(data.dailyOutstandingBalance),
                 icon: Icons.calendar_today,
                 color: Colors.redAccent,
@@ -192,7 +216,7 @@ class _StatCardsRow extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: _StatCard(
-                label: 'Weekly Outstanding',
+                label: 'Due (7d)',
                 value: CurrencyUtils.format(data.weeklyOutstandingBalance),
                 icon: Icons.view_week,
                 color: Colors.red.shade700,
@@ -203,7 +227,7 @@ class _StatCardsRow extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         _StatCard(
-          label: 'Total Outstanding',
+          label: 'Total Outstanding Balance',
           value: CurrencyUtils.format(data.outstandingBalance),
           icon: Icons.receipt_long_outlined,
           color: Colors.red,
