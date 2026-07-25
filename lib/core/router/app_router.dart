@@ -15,8 +15,10 @@ import '../../features/customers/data/models/customer_entity.dart';
 import '../../features/customers/presentation/screens/customer_details_screen.dart';
 import '../../features/customers/presentation/screens/customer_form_screen.dart';
 import '../../features/customers/presentation/screens/customer_search_screen.dart';
+import '../../features/documents/data/models/document_entity.dart';
 import '../../features/documents/presentation/screens/document_list_screen.dart';
 import '../../features/documents/presentation/screens/document_upload_screen.dart';
+import '../../features/documents/presentation/screens/secure_preview_screen.dart';
 import '../../features/loans/presentation/screens/loan_creation_screen.dart';
 import '../../features/loans/presentation/screens/loan_details_screen.dart';
 import '../../features/loans/presentation/screens/repayment_calendar_view.dart';
@@ -132,6 +134,12 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/collections',
       builder: (context, state) => const CollectionScreen(),
+    ),
+    GoRoute(
+      path: '/documents/preview',
+      builder: (context, state) => SecurePreviewScreen(
+        document: state.extra as CustomerDocument,
+      ),
     ),
     GoRoute(
       path: '/reports',

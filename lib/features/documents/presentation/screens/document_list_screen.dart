@@ -3,13 +3,13 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:loantrack/core/security/file_encryption_service.dart';
 
 import '../../data/document_repository.dart';
 import '../../data/models/document_entity.dart';
 import '../providers/document_providers.dart';
-import 'secure_preview_screen.dart';
 
 class DocumentListScreen extends ConsumerStatefulWidget {
   const DocumentListScreen({super.key, required this.customerId});
@@ -156,9 +156,8 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
                     subtitle:
                         Text('${document.originalName}\nEncrypted on device'),
                     isThreeLine: true,
-                    onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) =>
-                            SecurePreviewScreen(document: document))),
+                    onTap: () => context.push('/documents/preview',
+                        extra: document),
                     trailing: PopupMenuButton<String>(
                         onSelected: (action) {
                           if (action == 'replace') _replace(document);
