@@ -130,6 +130,28 @@ class _StatCardsRow extends StatelessWidget {
           children: [
             Expanded(
               child: _StatCard(
+                label: 'Daily Active',
+                value: data.dailyActiveLoans.toString(),
+                icon: Icons.today,
+                color: Colors.lightGreen,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _StatCard(
+                label: 'Weekly Active',
+                value: data.weeklyActiveLoans.toString(),
+                icon: Icons.date_range,
+                color: Colors.green.shade700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _StatCard(
                 label: 'Disbursed',
                 value: CurrencyUtils.format(data.totalDisbursed),
                 icon: Icons.trending_up,
@@ -148,8 +170,30 @@ class _StatCardsRow extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _StatCard(
+                label: 'Daily Outstanding',
+                value: CurrencyUtils.format(data.dailyOutstandingBalance),
+                icon: Icons.calendar_today,
+                color: Colors.redAccent,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _StatCard(
+                label: 'Weekly Outstanding',
+                value: CurrencyUtils.format(data.weeklyOutstandingBalance),
+                icon: Icons.view_week,
+                color: Colors.red.shade700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
         _StatCard(
-          label: 'Outstanding',
+          label: 'Total Outstanding',
           value: CurrencyUtils.format(data.outstandingBalance),
           icon: Icons.receipt_long_outlined,
           color: Colors.red,

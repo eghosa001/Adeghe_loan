@@ -1,12 +1,12 @@
 class AppConstants {
   AppConstants._();
 
-  static const String appName = 'LoanTrack';
+  static const String appName = 'Adeghe Professional Services';
   static const String appVersion = '1.0.0';
   static const int appBuildNumber = 1;
 
   // Database
-  static const String databaseName = 'loantrack.db';
+  static const String databaseName = 'adeghe_loans.db';
   static const int databaseVersion = 6;
 
   static const String tableCustomers = 'customers';
@@ -59,7 +59,7 @@ class AppConstants {
 
   // Backup
   static const String backupFileExtension = '.ltbackup';
-  static const String backupFolderName = 'LoanTrack_Backups';
+  static const String backupFolderName = 'Adeghe_Backups';
 
   // Formats / locale defaults
   static const String dateFormatDisplay = 'dd MMM yyyy';

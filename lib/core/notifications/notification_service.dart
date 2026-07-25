@@ -31,9 +31,9 @@ class NotificationService {
     if (!_initialized) await initialize();
 
     const androidDetails = AndroidNotificationDetails(
-      'loantrack_channel',
-      'LoanTrack Notifications',
-      channelDescription: 'General notifications from LoanTrack',
+      'adeghe_channel',
+      'Adeghe Professional Services',
+      channelDescription: 'General notifications from Adeghe Professional Services',
       importance: Importance.high,
       priority: Priority.high,
     );
@@ -50,8 +50,8 @@ class NotificationService {
     if (!_initialized) await initialize();
 
     const androidDetails = AndroidNotificationDetails(
-      'loantrack_reminders',
-      'Loan Reminders',
+      'adeghe_reminders',
+      'Adeghe Loan Reminders',
       channelDescription: 'Reminders for upcoming loan payments',
       importance: Importance.high,
       priority: Priority.high,

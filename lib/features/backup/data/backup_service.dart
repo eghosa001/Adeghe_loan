@@ -28,7 +28,7 @@ class BackupService {
     }
 
     final backupFileName =
-        'loantrack_backup_${DateTime.now().toIso8601String().replaceAll(':', '-')}${AppConstants.backupFileExtension}';
+        'adeghe_backup_${DateTime.now().toIso8601String().replaceAll(':', '-')}${AppConstants.backupFileExtension}';
     final target = File(join((await backupDirectory).path, backupFileName));
     final result = await source.copy(target.path);
     await _databaseService.database;

@@ -29,6 +29,16 @@ class DashboardRepository {
       final activeLoans =
           (activeLoansResult.first['count'] as int?) ?? 0;
 
+      final dailyActiveLoansResult = await db.rawQuery(
+          "SELECT COUNT(*) AS count FROM loans WHERE status = 'active' AND date(loan_date) = date('now')");
+      final dailyActiveLoans =
+          (dailyActiveLoansResult.first['count'] as int?) ?? 0;
+
+      final weeklyActiveLoansResult = await db.rawQuery(
+          "SELECT COUNT(*) AS count FROM loans WHERE status = 'active' AND date(loan_date) >= date('now', '-6 days')");
+      final weeklyActiveLoans =
+          (weeklyActiveLoansResult.first['count'] as int?) ?? 0;
+
       final disbursedResult = await db
           .rawQuery('SELECT COALESCE(SUM(amount), 0.0) AS total FROM loans');
       final totalDisbursed =
@@ -43,6 +53,16 @@ class DashboardRepository {
           "SELECT COALESCE(SUM(outstanding_balance), 0.0) AS total FROM loans WHERE status = 'active'");
       final outstandingBalance =
           (outstandingResult.first['total'] as num?)?.toDouble() ?? 0.0;
+
+      final dailyOutstandingResult = await db.rawQuery(
+          "SELECT COALESCE(SUM(outstanding_balance), 0.0) AS total FROM loans WHERE status = 'active' AND date(loan_date) = date('now')");
+      final dailyOutstandingBalance =
+          (dailyOutstandingResult.first['total'] as num?)?.toDouble() ?? 0.0;
+
+      final weeklyOutstandingResult = await db.rawQuery(
+          "SELECT COALESCE(SUM(outstanding_balance), 0.0) AS total FROM loans WHERE status = 'active' AND date(loan_date) >= date('now', '-6 days')");
+      final weeklyOutstandingBalance =
+          (weeklyOutstandingResult.first['total'] as num?)?.toDouble() ?? 0.0;
 
       final recentLoanRows = await db.query(
         AppConstants.tableLoans,
@@ -63,9 +83,13 @@ class DashboardRepository {
       return Result.success(DashboardData(
         totalCustomers: totalCustomers,
         activeLoans: activeLoans,
+        dailyActiveLoans: dailyActiveLoans,
+        weeklyActiveLoans: weeklyActiveLoans,
         totalDisbursed: totalDisbursed,
         totalCollected: totalCollected,
         outstandingBalance: outstandingBalance,
+        dailyOutstandingBalance: dailyOutstandingBalance,
+        weeklyOutstandingBalance: weeklyOutstandingBalance,
         recentLoans: recentLoans,
         recentPayments: recentPayments,
       ));
