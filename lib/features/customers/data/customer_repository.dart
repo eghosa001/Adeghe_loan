@@ -31,26 +31,31 @@ class CustomerRepository {
 
     if (term.isNotEmpty) {
       conditions.add(
-          '''(id LIKE ? OR full_name LIKE ? OR phone LIKE ? OR
-             COALESCE(bvn, '') LIKE ? OR COALESCE(nin, '') LIKE ? OR
-             COALESCE(residential_address, '') LIKE ?)''');
+          '''(c.id LIKE ? OR c.full_name LIKE ? OR c.phone LIKE ? OR
+             COALESCE(c.bvn, '') LIKE ? OR COALESCE(c.nin, '') LIKE ? OR
+             COALESCE(c.residential_address, '') LIKE ?)''');
       args.addAll(List.filled(6, '%$term%'));
     }
 
     if (groupId != null && groupId.isNotEmpty) {
-      conditions.add('group_id = ?');
+      conditions.add('c.group_id = ?');
       args.add(groupId);
     }
 
-    final where = conditions.isEmpty ? null : conditions.join(' AND ');
-    final whereArgs = args.isEmpty ? null : args;
+    final where = conditions.isEmpty ? '1=1' : conditions.join(' AND ');
 
-    final rows = await db.query(
-      'customers',
-      where: where,
-      whereArgs: whereArgs,
-      orderBy: 'full_name COLLATE NOCASE ASC',
-    );
+    final rows = await db.rawQuery('''
+      SELECT c.*,
+        COALESCE(
+          (SELECT SUM(l.outstanding_balance)
+           FROM loans l
+           WHERE l.customer_id = c.id AND l.status = 'active'),
+          0.0
+        ) AS total_owed
+      FROM customers c
+      WHERE $where
+      ORDER BY c.full_name COLLATE NOCASE ASC
+    ''', args);
     return rows.map(Customer.fromMap).toList(growable: false);
   }
 

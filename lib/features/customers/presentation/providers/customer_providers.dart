@@ -8,7 +8,7 @@ final customerSearchQueryProvider = StateProvider<String>((ref) => '');
 /// Null means "all groups". A group ID string filters the customer list.
 final customerGroupFilterProvider = StateProvider<String?>((ref) => null);
 
-enum CustomerSortBy { name, group }
+enum CustomerSortBy { name, group, amountOwed }
 
 final customerSortByProvider = StateProvider<CustomerSortBy>(
     (ref) => CustomerSortBy.name);
@@ -34,12 +34,24 @@ final customerListProvider = FutureProvider<List<Customer>>((ref) async {
         return a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase());
       });
       break;
+    case CustomerSortBy.amountOwed:
+      customers.sort((a, b) {
+        final owedCompare = (b.totalOwed ?? 0).compareTo(a.totalOwed ?? 0);
+        if (owedCompare != 0) return owedCompare;
+        return a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase());
+      });
+      break;
   }
   return customers;
 });
 
 final customerProvider = FutureProvider.family<Customer?, String>((ref, id) {
   return ref.watch(customerRepositoryProvider).getById(id);
+});
+
+/// All customers with their active loan balance, used by the Reports screen.
+final customerReportListProvider = FutureProvider<List<Customer>>((ref) async {
+  return ref.watch(customerRepositoryProvider).search('', groupId: null);
 });
 
 void refreshCustomers(Ref ref) {

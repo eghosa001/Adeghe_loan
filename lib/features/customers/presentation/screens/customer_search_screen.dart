@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:loantrack/core/utils/currency_utils.dart';
 import 'package:loantrack/core/widgets/app_drawer.dart';
 
 import '../../data/models/customer_entity.dart';
@@ -93,6 +94,9 @@ class CustomerListScreen extends ConsumerWidget {
                             value: CustomerSortBy.name, child: Text('Name')),
                         DropdownMenuItem(
                             value: CustomerSortBy.group, child: Text('Group')),
+                        DropdownMenuItem(
+                            value: CustomerSortBy.amountOwed,
+                            child: Text('Amount Owed')),
                       ],
                       onChanged: (value) => ref
                           .read(customerSortByProvider.notifier)
@@ -148,8 +152,11 @@ class _CustomerTile extends StatelessWidget {
               ? '?'
               : customer.fullName[0].toUpperCase())),
       title: Text(customer.fullName),
-      subtitle: Text('${customer.id}\n${customer.phone}'),
-      isThreeLine: true,
+      subtitle: Text(
+        '${customer.id}\n${customer.phone}'
+        '${customer.totalOwed != null && customer.totalOwed! > 0 ? '\nOwed: ${CurrencyUtils.format(customer.totalOwed!)}' : ''}',
+      ),
+      isThreeLine: customer.totalOwed != null && customer.totalOwed! > 0,
       trailing: Chip(
           label: Text(customer.status.name),
           labelStyle: TextStyle(color: color)),

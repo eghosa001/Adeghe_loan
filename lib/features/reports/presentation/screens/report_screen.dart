@@ -7,6 +7,7 @@ import '../../../../core/utils/date_utils.dart';
 import '../../data/models/report_summary.dart';
 import '../providers/report_provider.dart';
 import '../../services/export_manager.dart';
+import '../../../customers/presentation/providers/customer_providers.dart';
 
 class ReportScreen extends ConsumerWidget {
   const ReportScreen({super.key});
@@ -170,6 +171,56 @@ class ReportScreen extends ConsumerWidget {
         ),
         const SizedBox(height: 24),
         _ChartPlaceholder(summary: summary),
+        const SizedBox(height: 24),
+        Text(
+          'Customer Report',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+        ),
+        const SizedBox(height: 12),
+        Consumer(
+          builder: (context, ref, _) {
+            final customersAsync = ref.watch(customerReportListProvider);
+            return customersAsync.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Text('Error: $e'),
+              data: (customers) {
+                if (customers.isEmpty) {
+                  return const Card(
+                    child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text('No customers found.'),
+                    ),
+                  );
+                }
+                final sorted = [...customers]
+                  ..sort((a, b) =>
+                      (b.totalOwed ?? 0).compareTo(a.totalOwed ?? 0));
+                return Card(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: sorted.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final c = sorted[index];
+                      return ListTile(
+                        dense: true,
+                        title: Text(c.fullName),
+                        subtitle: Text(c.phone),
+                        trailing: Text(
+                          CurrencyUtils.format(c.totalOwed ?? 0),
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      );
+                    },
+                  ),
+                );
+              },
+            );
+          },
+        ),
       ],
     );
   }
