@@ -4,6 +4,7 @@ import 'package:loantrack/core/widgets/app_drawer.dart';
 
 import '../../../../core/utils/currency_utils.dart';
 import '../../../../core/utils/date_utils.dart';
+import '../../../groups/presentation/providers/group_providers.dart';
 import '../../../reports/services/export_manager.dart';
 import '../providers/collection_provider.dart';
 
@@ -14,6 +15,8 @@ class CollectionScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final collectionAsync = ref.watch(collectionListProvider);
     final selectedDate = ref.watch(collectionDateFilterProvider);
+    final selectedGroup = ref.watch(collectionGroupFilterProvider);
+    final groupsAsync = ref.watch(groupListProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -28,7 +31,9 @@ class CollectionScreen extends ConsumerWidget {
                   result, selectedDate);
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Exported: ${file.path.split('/').last}')),
+                  SnackBar(
+                      content: Text(
+                          'Exported: ${file.path.split('/').last}')),
                 );
               }
             },
@@ -58,6 +63,44 @@ class CollectionScreen extends ConsumerWidget {
             selectedDate: selectedDate,
             onDatePicked: (date) {
               ref.read(collectionDateFilterProvider.notifier).state = date;
+            },
+          ),
+          // Group filter chips
+          groupsAsync.when(
+            loading: () => const SizedBox.shrink(),
+            error: (_, __) => const SizedBox.shrink(),
+            data: (groups) {
+              if (groups.isEmpty) return const SizedBox.shrink();
+              return SizedBox(
+                height: 44,
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  scrollDirection: Axis.horizontal,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: FilterChip(
+                        label: const Text('All'),
+                        selected: selectedGroup == null,
+                        onSelected: (_) => ref
+                            .read(collectionGroupFilterProvider.notifier)
+                            .state = null,
+                      ),
+                    ),
+                    ...groups.map((g) => Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: FilterChip(
+                            label: Text(g.name),
+                            selected: selectedGroup == g.id,
+                            onSelected: (_) => ref
+                                .read(collectionGroupFilterProvider.notifier)
+                                .state =
+                                selectedGroup == g.id ? null : g.id,
+                          ),
+                        )),
+                  ],
+                ),
+              );
             },
           ),
           Expanded(

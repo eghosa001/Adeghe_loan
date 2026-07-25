@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../core/di/providers.dart';
 import 'models/customer_entity.dart';
@@ -29,21 +30,25 @@ class CustomerRepository {
     final args = <Object?>[];
 
     if (term.isNotEmpty) {
-      conditions.add('''(id LIKE ? OR full_name LIKE ? OR phone LIKE ? OR
-           COALESCE(bvn, '') LIKE ? OR COALESCE(nin, '') LIKE ? OR
-           COALESCE(residential_address, '') LIKE ?)''');
+      conditions.add(
+          '''(id LIKE ? OR full_name LIKE ? OR phone LIKE ? OR
+             COALESCE(bvn, '') LIKE ? OR COALESCE(nin, '') LIKE ? OR
+             COALESCE(residential_address, '') LIKE ?)''');
       args.addAll(List.filled(6, '%$term%'));
     }
-    if (groupId != null) {
+
+    if (groupId != null && groupId.isNotEmpty) {
       conditions.add('group_id = ?');
       args.add(groupId);
     }
 
     final where = conditions.isEmpty ? null : conditions.join(' AND ');
+    final whereArgs = args.isEmpty ? null : args;
+
     final rows = await db.query(
       'customers',
       where: where,
-      whereArgs: args.isEmpty ? null : args,
+      whereArgs: whereArgs,
       orderBy: 'full_name COLLATE NOCASE ASC',
     );
     return rows.map(Customer.fromMap).toList(growable: false);
@@ -58,11 +63,31 @@ class CustomerRepository {
   Future<void> save(Customer customer) async {
     final db = await _database;
     await _validateUnique(db, customer);
-    await db.insert(
-      'customers',
-      customer.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+
+    final isNew = await db
+        .query('customers', columns: ['id'], where: 'id = ?', whereArgs: [customer.id])
+        .then((rows) => rows.isEmpty);
+
+    await db.transaction((txn) async {
+      await txn.insert(
+        'customers',
+        customer.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      // Auto-create a savings account for new customers
+      if (isNew) {
+        await txn.insert(
+          'savings_accounts',
+          {
+            'id': const Uuid().v4(),
+            'customer_id': customer.id,
+            'balance': 0.0,
+            'created_at': DateTime.now().toIso8601String(),
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+      }
+    });
   }
 
   Future<void> delete(String id) async {

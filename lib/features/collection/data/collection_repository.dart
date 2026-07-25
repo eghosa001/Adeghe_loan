@@ -12,10 +12,17 @@ class CollectionRepository {
     return _dbService.database;
   }
 
-  Future<Result<List<CollectionRow>>> getDailyCollection(DateTime date) async {
+  Future<Result<List<CollectionRow>>> getDailyCollection(DateTime date,
+      {String? groupId}) async {
     try {
       final db = await _database;
       final dateStr = date.toIso8601String().split('T').first;
+
+      final groupClause =
+          groupId != null && groupId.isNotEmpty ? 'AND c.group_id = ?' : '';
+      final queryArgs = groupId != null && groupId.isNotEmpty
+          ? [dateStr, groupId]
+          : [dateStr];
 
       // Query repayment_schedule so both past and future scheduled
       // installments are shown for the selected date.
@@ -36,8 +43,9 @@ class CollectionRepository {
         INNER JOIN customers c ON l.customer_id = c.id
         WHERE DATE(rs.due_date) = ?
           AND l.status = 'active'
+          $groupClause
         ORDER BY c.full_name COLLATE NOCASE ASC
-      ''', [dateStr]);
+      ''', queryArgs);
 
       final collectionRows = rows.map((row) {
         final amountPaid = (row['amountPaid'] as num?)?.toDouble() ?? 0.0;

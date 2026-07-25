@@ -15,10 +15,14 @@ final collectionDateFilterProvider = StateProvider<DateTime>((ref) {
   return DateTime(now.year, now.month, now.day);
 });
 
+/// Null means "all groups"; a non-null value filters by that group ID.
+final collectionGroupFilterProvider = StateProvider<String?>((ref) => null);
+
 final collectionListProvider = FutureProvider<List<CollectionRow>>((ref) async {
   final repo = await ref.watch(_collectionRepositoryProvider.future);
   final date = ref.watch(collectionDateFilterProvider);
-  final result = await repo.getDailyCollection(date);
+  final groupId = ref.watch(collectionGroupFilterProvider);
+  final result = await repo.getDailyCollection(date, groupId: groupId);
   return result.when(
     success: (rows) => rows,
     failure: (f) => throw f,

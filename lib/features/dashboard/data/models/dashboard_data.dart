@@ -34,8 +34,8 @@ class DashboardData {
   final double dailyOutstandingBalance;
   /// Installments due in the last 7 days that have not been fully paid.
   final double weeklyOutstandingBalance;
+  /// Total savings balance held across all customer savings accounts.
+  final double totalSavingsBalance;
   final List<Loan> recentLoans;
   final List<Payment> recentPayments;
-  /// Total savings held across all customer savings accounts.
-  final double totalSavingsBalance;
 }

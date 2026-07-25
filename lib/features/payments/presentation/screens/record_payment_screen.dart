@@ -59,7 +59,7 @@ class _RecordPaymentScreenState extends ConsumerState<RecordPaymentScreen> {
     }
     setState(() => _loading = true);
     try {
-      final repo = ref.read(paymentRepositoryProvider);
+      final repo = await ref.read(paymentRepositoryProvider.future);
       final payment = await repo.createPayment(
         loanId: widget.loanId,
         customerId: widget.customerId,
@@ -76,7 +76,7 @@ class _RecordPaymentScreenState extends ConsumerState<RecordPaymentScreen> {
         ref.invalidate(collectionListProvider);
         ref.invalidate(loanDetailsProvider(widget.loanId));
         ref.invalidate(paymentsForLoanProvider(widget.loanId));
-        ref.invalidate(savingsAccountProvider(widget.customerId));
+        ref.invalidate(savingsBalanceProvider(widget.customerId));
         ref.invalidate(savingsTransactionsProvider(widget.customerId));
         Navigator.of(context).pop();
       }

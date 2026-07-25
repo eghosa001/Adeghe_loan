@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/models/customer_group_entity.dart';
 import '../providers/group_providers.dart';
 
 class GroupManagementScreen extends ConsumerWidget {
@@ -12,9 +13,9 @@ class GroupManagementScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Customer Groups')),
       floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showGroupDialog(context, ref, null),
         icon: const Icon(Icons.group_add),
         label: const Text('New group'),
-        onPressed: () => _showGroupDialog(context, ref),
       ),
       body: groupsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -35,27 +36,31 @@ class GroupManagementScreen extends ConsumerWidget {
                 padding: const EdgeInsets.only(bottom: 88),
                 itemCount: groups.length,
                 separatorBuilder: (_, __) => const Divider(height: 1),
-                itemBuilder: (context, i) {
-                  final g = groups[i];
+                itemBuilder: (context, index) {
+                  final group = groups[index];
                   return ListTile(
                     leading: CircleAvatar(
-                      child: Text(g.name[0].toUpperCase()),
+                      child: Text(group.name[0].toUpperCase()),
                     ),
-                    title: Text(g.name),
-                    subtitle: g.description != null ? Text(g.description!) : null,
-                    trailing: PopupMenuButton<_GroupAction>(
-                      onSelected: (action) {
-                        if (action == _GroupAction.edit) {
-                          _showGroupDialog(context, ref, group: g);
-                        } else {
-                          _confirmDelete(context, ref, g.id, g.name);
-                        }
-                      },
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(
-                            value: _GroupAction.edit, child: Text('Edit')),
-                        PopupMenuItem(
-                            value: _GroupAction.delete, child: Text('Delete')),
+                    title: Text(group.name),
+                    subtitle: group.description != null
+                        ? Text(group.description!)
+                        : null,
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.edit_outlined),
+                          tooltip: 'Rename',
+                          onPressed: () =>
+                              _showGroupDialog(context, ref, group),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          tooltip: 'Delete',
+                          onPressed: () =>
+                              _confirmDelete(context, ref, group),
+                        ),
                       ],
                     ),
                   );
@@ -65,79 +70,98 @@ class GroupManagementScreen extends ConsumerWidget {
     );
   }
 
-  void _showGroupDialog(BuildContext context, WidgetRef ref,
-      {CustomerGroup? group}) {
-    final nameCtrl = TextEditingController(text: group?.name ?? '');
-    final descCtrl = TextEditingController(text: group?.description ?? '');
-    showDialog<void>(
+  Future<void> _showGroupDialog(
+      BuildContext context, WidgetRef ref, CustomerGroup? existing) async {
+    final nameCtrl =
+        TextEditingController(text: existing?.name ?? '');
+    final descCtrl =
+        TextEditingController(text: existing?.description ?? '');
+    final formKey = GlobalKey<FormState>();
+
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(group == null ? 'New Group' : 'Edit Group'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameCtrl,
-              decoration: const InputDecoration(labelText: 'Group name *'),
-              textCapitalization: TextCapitalization.words,
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: descCtrl,
-              decoration: const InputDecoration(labelText: 'Description (optional)'),
-              maxLines: 2,
-            ),
-          ],
+        title: Text(existing == null ? 'New Group' : 'Edit Group'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: 'Group name'),
+                autofocus: true,
+                validator: (v) =>
+                    v == null || v.trim().isEmpty ? 'Name is required' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: descCtrl,
+                decoration:
+                    const InputDecoration(labelText: 'Description (optional)'),
+                maxLines: 2,
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
           FilledButton(
-            onPressed: () async {
-              final name = nameCtrl.text.trim();
-              if (name.isEmpty) return;
-              final repo = ref.read(groupRepositoryProvider);
-              if (group == null) {
-                await repo.create(name, description: descCtrl.text);
-              } else {
-                await repo.update(group.id,
-                    name: name, description: descCtrl.text);
-              }
-              ref.invalidate(groupListProvider);
-              if (ctx.mounted) Navigator.pop(ctx);
-            },
-            child: const Text('Save'),
-          ),
+              onPressed: () {
+                if (formKey.currentState!.validate()) {
+                  Navigator.pop(ctx, true);
+                }
+              },
+              child: const Text('Save')),
         ],
       ),
     );
+
+    if (confirmed != true || !context.mounted) return;
+
+    final repo = ref.read(groupRepositoryProvider);
+    try {
+      if (existing == null) {
+        await repo.create(
+            name: nameCtrl.text, description: descCtrl.text);
+      } else {
+        await repo.update(existing.copyWith(
+            name: nameCtrl.text.trim(),
+            description: descCtrl.text.trim().isEmpty
+                ? null
+                : descCtrl.text.trim()));
+      }
+      ref.invalidate(groupListProvider);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    }
   }
 
-  void _confirmDelete(
-      BuildContext context, WidgetRef ref, String id, String name) {
-    showDialog<void>(
+  Future<void> _confirmDelete(
+      BuildContext context, WidgetRef ref, CustomerGroup group) async {
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete group?'),
         content: Text(
-            '"$name" will be deleted. Customers in this group will be unassigned.'),
+            'Customers in "${group.name}" will be unassigned from this group.'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
           FilledButton(
-            onPressed: () async {
-              await ref.read(groupRepositoryProvider).delete(id);
-              ref.invalidate(groupListProvider);
-              if (ctx.mounted) Navigator.pop(ctx);
-            },
-            child: const Text('Delete'),
-          ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete')),
         ],
       ),
     );
+    if (confirmed != true || !context.mounted) return;
+    await ref.read(groupRepositoryProvider).delete(group.id);
+    ref.invalidate(groupListProvider);
   }
 }
-
-enum _GroupAction { edit, delete }

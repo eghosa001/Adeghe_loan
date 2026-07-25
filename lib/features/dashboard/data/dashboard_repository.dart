@@ -144,9 +144,9 @@ class DashboardRepository {
         outstandingBalance: outstandingBalance,
         dailyOutstandingBalance: dailyOutstandingBalance,
         weeklyOutstandingBalance: weeklyOutstandingBalance,
+        totalSavingsBalance: totalSavingsBalance,
         recentLoans: recentLoans,
         recentPayments: recentPayments,
-        totalSavingsBalance: totalSavingsBalance,
       ));
     } on DatabaseException catch (e) {
       return Result.failure(

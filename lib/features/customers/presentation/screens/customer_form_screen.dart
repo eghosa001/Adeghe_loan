@@ -26,7 +26,7 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
   int _step = 0;
   String? _passportPath;
   CustomerStatus _status = CustomerStatus.active;
-  String? _groupId;
+  String? _selectedGroupId;
   bool _saving = false;
 
   static const _keys = [
@@ -64,7 +64,7 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
     final customer = widget.customer;
     _passportPath = customer?.passportPath;
     _status = customer?.status ?? CustomerStatus.active;
-    _groupId = customer?.groupId;
+    _selectedGroupId = customer?.groupId;
     final values = <String, String?>{
       'fullName': customer?.fullName,
       'gender': customer?.gender,
@@ -128,8 +128,10 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
   }
 
   Future<void> _selectDateOfBirth() async {
-    final eighteenYearsAgo = DateTime.now().subtract(const Duration(days: 365 * 18));
-    final initial = DateTime.tryParse(_value('dateOfBirth')) ?? eighteenYearsAgo;
+    final eighteenYearsAgo =
+        DateTime.now().subtract(const Duration(days: 365 * 18));
+    final initial =
+        DateTime.tryParse(_value('dateOfBirth')) ?? eighteenYearsAgo;
     final date = await showDatePicker(
       context: context,
       initialDate: initial,
@@ -178,7 +180,7 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
           existing?.dateRegistered ?? DateTime.now().toIso8601String(),
       status: _status,
       creditScore: existing?.creditScore ?? 0,
-      groupId: _groupId,
+      groupId: _selectedGroupId,
     );
     try {
       await ref.read(customerRepositoryProvider).save(customer);
@@ -247,6 +249,8 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final groupsAsync = ref.watch(groupListProvider);
+
     return Scaffold(
       appBar: AppBar(title: Text(_title)),
       body: Form(
@@ -329,6 +333,27 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                 title: const Text('Review'),
                 isActive: _step >= 3,
                 content: Column(children: [
+                  // Group dropdown
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: groupsAsync.when(
+                      loading: () => const LinearProgressIndicator(),
+                      error: (_, __) => const SizedBox.shrink(),
+                      data: (groups) => DropdownButtonFormField<String?>(
+                        value: _selectedGroupId,
+                        decoration:
+                            const InputDecoration(labelText: 'Customer group'),
+                        items: [
+                          const DropdownMenuItem(
+                              value: null, child: Text('— No group —')),
+                          ...groups.map((g) => DropdownMenuItem(
+                              value: g.id, child: Text(g.name))),
+                        ],
+                        onChanged: (value) =>
+                            setState(() => _selectedGroupId = value),
+                      ),
+                    ),
+                  ),
                   DropdownButtonFormField<CustomerStatus>(
                       value: _status,
                       decoration: const InputDecoration(labelText: 'Status'),
@@ -338,29 +363,6 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                           .toList(),
                       onChanged: (status) =>
                           setState(() => _status = status!)),
-                  const SizedBox(height: 12),
-                  // Group selector
-                  Consumer(builder: (context, ref, _) {
-                    final groupsAsync = ref.watch(groupListProvider);
-                    return groupsAsync.when(
-                      loading: () => const LinearProgressIndicator(),
-                      error: (_, __) => const SizedBox.shrink(),
-                      data: (groups) => groups.isEmpty
-                          ? const SizedBox.shrink()
-                          : DropdownButtonFormField<String?>(
-                              value: _groupId,
-                              decoration: const InputDecoration(
-                                  labelText: 'Customer Group (optional)'),
-                              items: [
-                                const DropdownMenuItem(
-                                    value: null, child: Text('None')),
-                                ...groups.map((g) => DropdownMenuItem(
-                                    value: g.id, child: Text(g.name))),
-                              ],
-                              onChanged: (id) =>
-                                  setState(() => _groupId = id)),
-                    );
-                  }),
                   const SizedBox(height: 12),
                   _field('notes', 'Notes', maxLines: 4),
                 ])),

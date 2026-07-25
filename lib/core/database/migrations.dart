@@ -1,4 +1,5 @@
 import 'package:sqflite_sqlcipher/sqflite.dart';
+import 'package:uuid/uuid.dart';
 
 class DatabaseMigrations {
   DatabaseMigrations._();
@@ -12,6 +13,7 @@ class DatabaseMigrations {
     if (oldVersion < 7) await _v7(db);
   }
 
+  // v2 — add indexes for performance
   static Future<void> _v2(Database db) async {
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(full_name)');
@@ -29,6 +31,7 @@ class DatabaseMigrations {
         'CREATE INDEX IF NOT EXISTS idx_documents_customer ON documents(customer_id)');
   }
 
+  // v3 — add original_name and mime_type to documents table
   static Future<void> _v3(Database db) async {
     await db.execute(
         "ALTER TABLE documents ADD COLUMN original_name TEXT NOT NULL DEFAULT 'Document'");
@@ -38,6 +41,7 @@ class DatabaseMigrations {
         'CREATE INDEX IF NOT EXISTS idx_documents_customer ON documents(customer_id)');
   }
 
+  // v4 — add repayment_schedule table
   static Future<void> _v4(Database db) async {
     await db.execute('''
       CREATE TABLE repayment_schedule (
@@ -55,11 +59,13 @@ class DatabaseMigrations {
         'CREATE INDEX IF NOT EXISTS idx_repayment_schedule_loan ON repayment_schedule(loan_id)');
   }
 
+  // v5 — add payment status column
   static Future<void> _v5(Database db) async {
     await db.execute(
         "ALTER TABLE payments ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'");
   }
 
+  // v6 — add audit_logs table
   static Future<void> _v6(Database db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS audit_logs (
@@ -74,6 +80,7 @@ class DatabaseMigrations {
         'CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp)');
   }
 
+  // v7 — customer groups + savings accounts + savings transactions
   static Future<void> _v7(Database db) async {
     // Customer groups
     await db.execute('''
@@ -103,6 +110,8 @@ class DatabaseMigrations {
         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
       )
     ''');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_savings_accounts_customer ON savings_accounts(customer_id)');
 
     // Savings transaction ledger
     await db.execute('''
@@ -111,13 +120,35 @@ class DatabaseMigrations {
         savings_account_id TEXT NOT NULL,
         type TEXT NOT NULL,
         amount REAL NOT NULL,
-        note TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL,
         reference_loan_payment_id TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL,
         FOREIGN KEY (savings_account_id) REFERENCES savings_accounts(id) ON DELETE CASCADE
       )
     ''');
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_savings_txn_account ON savings_transactions(savings_account_id)');
+        'CREATE INDEX IF NOT EXISTS idx_savings_transactions_account ON savings_transactions(savings_account_id)');
+
+    // Back-fill savings accounts for existing customers who predate this migration
+    final existing = await db.query('customers', columns: ['id']);
+    final now = DateTime.now().toIso8601String();
+    for (final row in existing) {
+      final customerId = row['id'] as String;
+      final alreadyHas = await db.query(
+        'savings_accounts',
+        columns: ['id'],
+        where: 'customer_id = ?',
+        whereArgs: [customerId],
+        limit: 1,
+      );
+      if (alreadyHas.isEmpty) {
+        await db.insert('savings_accounts', {
+          'id': const Uuid().v4(),
+          'customer_id': customerId,
+          'balance': 0.0,
+          'created_at': now,
+        });
+      }
+    }
   }
 }

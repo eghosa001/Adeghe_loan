@@ -4,6 +4,8 @@ import '../../data/customer_repository.dart';
 import '../../data/models/customer_entity.dart';
 
 final customerSearchQueryProvider = StateProvider<String>((ref) => '');
+
+/// Null means "all groups". A group ID string filters the customer list.
 final customerGroupFilterProvider = StateProvider<String?>((ref) => null);
 
 final customerRepositoryProvider = Provider<CustomerRepository>((ref) {

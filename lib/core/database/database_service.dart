@@ -234,9 +234,9 @@ class DatabaseService {
         savings_account_id TEXT NOT NULL,
         type TEXT NOT NULL,
         amount REAL NOT NULL,
-        note TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL,
         reference_loan_payment_id TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL,
         FOREIGN KEY (savings_account_id) REFERENCES savings_accounts(id) ON DELETE CASCADE
       )
     ''');
@@ -258,6 +258,8 @@ class DatabaseService {
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_customers_nin ON customers(nin)');
     await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_customers_group ON customers(group_id)');
+    await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_loans_customer ON loans(customer_id)');
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_payments_loan ON payments(loan_id)');
@@ -266,8 +268,8 @@ class DatabaseService {
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp)');
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_customers_group ON customers(group_id)');
+        'CREATE INDEX IF NOT EXISTS idx_savings_accounts_customer ON savings_accounts(customer_id)');
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_savings_txn_account ON savings_transactions(savings_account_id)');
+        'CREATE INDEX IF NOT EXISTS idx_savings_transactions_account ON savings_transactions(savings_account_id)');
   }
 }

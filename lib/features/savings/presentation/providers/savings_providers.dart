@@ -1,29 +1,19 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/di/providers.dart';
 import '../../data/savings_repository.dart';
-import '../../data/models/savings_account_entity.dart';
+import '../../data/models/savings_transaction_entity.dart';
 
-export '../../data/models/savings_account_entity.dart';
-
-final savingsRepositoryProvider = FutureProvider<SavingsRepository>((ref) async {
-  final service = await ref.watch(databaseServiceProvider.future);
-  return SavingsRepository(service);
+final savingsRepositoryProvider = Provider<SavingsRepository>((ref) {
+  return SavingsRepository(ref);
 });
 
-final savingsAccountProvider =
-    FutureProvider.family<SavingsAccount?, String>((ref, customerId) async {
-  final repo = await ref.watch(savingsRepositoryProvider.future);
-  return repo.getByCustomer(customerId);
+final savingsBalanceProvider =
+    FutureProvider.family<double, String>((ref, customerId) {
+  return ref.watch(savingsRepositoryProvider).getSavingsBalance(customerId);
 });
 
 final savingsTransactionsProvider =
-    FutureProvider.family<List<SavingsTransaction>, String>((ref, customerId) async {
-  final repo = await ref.watch(savingsRepositoryProvider.future);
-  return repo.getTransactions(customerId);
-});
-
-final totalSavingsBalanceProvider = FutureProvider<double>((ref) async {
-  final repo = await ref.watch(savingsRepositoryProvider.future);
-  return repo.totalSavingsBalance();
+    FutureProvider.family<List<SavingsTransaction>, String>(
+        (ref, customerId) async {
+  return ref.watch(savingsRepositoryProvider).getTransactions(customerId);
 });

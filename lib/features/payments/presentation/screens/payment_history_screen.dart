@@ -174,7 +174,7 @@ class _PaymentCard extends StatelessWidget {
     if (confirmed != true || !context.mounted) return;
 
     try {
-      final repo = ref.read(paymentRepositoryProvider);
+      final repo = await ref.read(paymentRepositoryProvider.future);
       await repo.reversePayment(payment.id);
       ref.invalidate(paymentsForLoanProvider(payment.loanId));
       if (context.mounted) {

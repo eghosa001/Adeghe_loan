@@ -6,8 +6,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../data/models/customer_entity.dart';
 import '../providers/customer_providers.dart';
+import '../../../savings/presentation/screens/savings_section.dart';
 import '../../../groups/presentation/providers/group_providers.dart';
-import '../../../savings/presentation/screens/savings_screen.dart';
 
 class CustomerDetailScreen extends ConsumerWidget {
   const CustomerDetailScreen({super.key, required this.customerId});
@@ -38,7 +38,7 @@ class _CustomerView extends ConsumerStatefulWidget {
 
 class _CustomerViewState extends ConsumerState<_CustomerView>
     with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+  late final TabController _tabController;
 
   @override
   void initState() {
@@ -60,7 +60,7 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
     ref.invalidate(customerListProvider);
   }
 
-  Future<void> _delete() async {
+  Future<void> _delete(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -107,9 +107,8 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
         ),
         actions: [
           IconButton(
-              onPressed: () => context.push(
-                  '/customers/${customer.id}/edit',
-                  extra: customer),
+              onPressed: () =>
+                  context.push('/customers/${customer.id}/edit', extra: customer),
               icon: const Icon(Icons.edit),
               tooltip: 'Edit customer'),
           PopupMenuButton<CustomerStatus>(
@@ -126,7 +125,7 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
             ],
           ),
           IconButton(
-              onPressed: _delete,
+              onPressed: () => _delete(context),
               icon: const Icon(Icons.delete_outline),
               tooltip: 'Delete customer'),
         ],
@@ -134,102 +133,113 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
       body: TabBarView(
         controller: _tabController,
         children: [
-          // ── Profile tab ──────────────────────────────────────────────────────
-          ListView(padding: const EdgeInsets.all(16), children: [
-            Center(
-                child: CircleAvatar(
-                    radius: 48,
-                    backgroundImage: customer.passportPath == null
-                        ? null
-                        : FileImage(File(customer.passportPath!)),
-                    child: customer.passportPath == null
-                        ? Text(customer.fullName[0].toUpperCase(),
-                            style:
-                                Theme.of(context).textTheme.headlineMedium)
-                        : null)),
-            const SizedBox(height: 12),
-            Center(
-                child: Text(customer.fullName,
-                    style: Theme.of(context).textTheme.headlineSmall)),
-            Center(child: Text(customer.id)),
-            if (groupName != null) ...[
-              const SizedBox(height: 4),
-              Center(
-                child: Chip(
-                  avatar: const Icon(Icons.group_outlined, size: 16),
-                  label: Text(groupName),
-                  visualDensity: VisualDensity.compact,
-                ),
-              ),
-            ],
-            const SizedBox(height: 20),
-            _Section(title: 'Contact', entries: {
-              'Phone': customer.phone,
-              'Alternative phone': customer.altPhone,
-              'Email': customer.email,
-              'Address': customer.residentialAddress,
-              'Business address': customer.businessAddress
-            }),
-            _Section(title: 'Personal & identity', entries: {
-              'Gender': customer.gender,
-              'Date of birth': customer.dateOfBirth,
-              'Occupation': customer.occupation,
-              'Employer': customer.employer,
-              'NIN': customer.nin,
-              'BVN': customer.bvn,
-              'ID': [customer.idType, customer.idNumber]
-                  .whereType<String>()
-                  .join(' • ')
-            }),
-            _Section(title: 'Next of kin & guarantors', entries: {
-              'Next of kin': customer.nextOfKin,
-              'Relationship': customer.nextOfKinRelation,
-              'Next of kin phone': customer.nextOfKinPhone,
-              'Guarantor 1': customer.guarantor1Name,
-              'Guarantor 2': customer.guarantor2Name,
-              'Guarantor phone': customer.guarantorPhone,
-              'Guarantor address': customer.guarantorAddress
-            }),
-            _Section(title: 'Account', entries: {
-              'Status': customer.status.name,
-              'Group': groupName,
-              'Credit score': customer.creditScore.toStringAsFixed(0),
-              'Notes': customer.notes
-            }),
-            const SizedBox(height: 8),
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.folder_outlined),
-                title: const Text('Documents'),
-                subtitle:
-                    const Text('View and manage encrypted customer files'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () =>
-                    context.push('/customers/${customer.id}/documents'),
-              ),
-            ),
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.attach_money),
-                title: const Text('Issue loan'),
-                subtitle:
-                    const Text('Create a new loan for this customer'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () =>
-                    context.push('/customers/${customer.id}/loans/new'),
-              ),
-            ),
-          ]),
-
-          // ── Savings tab ──────────────────────────────────────────────────────
-          ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              SavingsSection(customerId: customer.id),
-            ],
-          ),
+          _ProfileTab(customer: customer, groupName: groupName),
+          _SavingsTab(customerId: customer.id),
         ],
       ),
+    );
+  }
+}
+
+class _ProfileTab extends ConsumerWidget {
+  const _ProfileTab({required this.customer, this.groupName});
+  final Customer customer;
+  final String? groupName;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      Center(
+          child: CircleAvatar(
+              radius: 48,
+              backgroundImage: customer.passportPath == null
+                  ? null
+                  : FileImage(File(customer.passportPath!)),
+              child: customer.passportPath == null
+                  ? Text(customer.fullName[0].toUpperCase(),
+                      style: Theme.of(context).textTheme.headlineMedium)
+                  : null)),
+      const SizedBox(height: 12),
+      Center(
+          child: Text(customer.fullName,
+              style: Theme.of(context).textTheme.headlineSmall)),
+      Center(child: Text(customer.id)),
+      if (groupName != null) ...[
+        const SizedBox(height: 4),
+        Center(
+          child: Chip(
+            avatar: const Icon(Icons.group_outlined, size: 16),
+            label: Text(groupName!),
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
+      ],
+      const SizedBox(height: 20),
+      _Section(title: 'Contact', entries: {
+        'Phone': customer.phone,
+        'Alternative phone': customer.altPhone,
+        'Email': customer.email,
+        'Address': customer.residentialAddress,
+        'Business address': customer.businessAddress
+      }),
+      _Section(title: 'Personal & identity', entries: {
+        'Gender': customer.gender,
+        'Date of birth': customer.dateOfBirth,
+        'Occupation': customer.occupation,
+        'Employer': customer.employer,
+        'NIN': customer.nin,
+        'BVN': customer.bvn,
+        'ID': [customer.idType, customer.idNumber]
+            .whereType<String>()
+            .join(' • ')
+      }),
+      _Section(title: 'Next of kin & guarantors', entries: {
+        'Next of kin': customer.nextOfKin,
+        'Relationship': customer.nextOfKinRelation,
+        'Next of kin phone': customer.nextOfKinPhone,
+        'Guarantor 1': customer.guarantor1Name,
+        'Guarantor 2': customer.guarantor2Name,
+        'Guarantor phone': customer.guarantorPhone,
+        'Guarantor address': customer.guarantorAddress
+      }),
+      _Section(title: 'Account', entries: {
+        'Status': customer.status.name,
+        'Group': groupName,
+        'Credit score': customer.creditScore.toStringAsFixed(0),
+        'Notes': customer.notes
+      }),
+      const SizedBox(height: 8),
+      Card(
+        child: ListTile(
+          leading: const Icon(Icons.folder_outlined),
+          title: const Text('Documents'),
+          subtitle: const Text('View and manage encrypted customer files'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => context.push('/customers/${customer.id}/documents'),
+        ),
+      ),
+      Card(
+        child: ListTile(
+          leading: const Icon(Icons.attach_money),
+          title: const Text('Issue loan'),
+          subtitle: const Text('Create a new loan for this customer'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => context.push('/customers/${customer.id}/loans/new'),
+        ),
+      ),
+    ]);
+  }
+}
+
+class _SavingsTab extends StatelessWidget {
+  const _SavingsTab({required this.customerId});
+  final String customerId;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [SavingsSection(customerId: customerId)],
     );
   }
 }
