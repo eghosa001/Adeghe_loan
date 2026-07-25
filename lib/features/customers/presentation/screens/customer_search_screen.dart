@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:loantrack/core/widgets/app_drawer.dart';
 
 import '../../data/models/customer_entity.dart';
 import '../providers/customer_providers.dart';
@@ -13,6 +14,7 @@ class CustomerListScreen extends ConsumerWidget {
     final customers = ref.watch(customerListProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('Customers')),
+      drawer: const AppDrawer(currentRoute: '/customers'),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => context.push('/customers/new'),
         icon: const Icon(Icons.person_add),

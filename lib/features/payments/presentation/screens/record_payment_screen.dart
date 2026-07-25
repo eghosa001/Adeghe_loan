@@ -77,7 +77,7 @@ class _RecordPaymentScreenState extends ConsumerState<RecordPaymentScreen> {
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<PaymentMethod>(
-              initialValue: _method,
+              value: _method,
               decoration: const InputDecoration(labelText: 'Payment method'),
               items: PaymentMethod.values
                   .map((method) => DropdownMenuItem(value: method, child: Text(method.name.toUpperCase())))

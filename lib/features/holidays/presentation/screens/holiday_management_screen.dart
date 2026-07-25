@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:loantrack/core/utils/date_utils.dart';
+import 'package:loantrack/core/widgets/app_drawer.dart';
 import 'package:loantrack/features/holidays/data/models/holiday_entity.dart';
 import 'package:loantrack/features/holidays/presentation/providers/holiday_provider.dart';
 import 'package:uuid/uuid.dart';
@@ -16,6 +17,7 @@ class HolidayManagementScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Holiday Management'),
       ),
+      drawer: const AppDrawer(currentRoute: '/holidays'),
       body: holidaysAsync.when(
         data: (holidays) {
           if (holidays.isEmpty) {

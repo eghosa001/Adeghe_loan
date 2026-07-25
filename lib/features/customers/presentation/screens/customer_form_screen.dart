@@ -326,7 +326,7 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                 isActive: _step >= 3,
                 content: Column(children: [
                   DropdownButtonFormField<CustomerStatus>(
-                      initialValue: _status,
+                      value: _status,
                       decoration: const InputDecoration(labelText: 'Status'),
                       items: CustomerStatus.values
                           .map((status) => DropdownMenuItem(

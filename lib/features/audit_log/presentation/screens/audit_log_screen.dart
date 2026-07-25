@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:loantrack/core/widgets/app_drawer.dart';
 
 import '../../../../core/di/providers.dart';
 import '../../../../core/utils/date_utils.dart';
@@ -53,6 +54,7 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
       appBar: AppBar(
         title: const Text('Audit Log'),
       ),
+      drawer: const AppDrawer(currentRoute: '/audit-log'),
       body: Column(
         children: [
           Padding(

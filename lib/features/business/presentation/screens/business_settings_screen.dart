@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:loantrack/core/widgets/app_drawer.dart';
 import '../providers/business_providers.dart';
 import 'package:loantrack/core/di/providers.dart';
 import 'package:image_picker/image_picker.dart';
@@ -87,6 +88,7 @@ class _BusinessSettingsScreenState
 
     return Scaffold(
       appBar: AppBar(title: const Text('Business Profile')),
+      drawer: const AppDrawer(currentRoute: '/settings/business'),
       body: profileAsync.when(
         data: (_) => Padding(
           padding: const EdgeInsets.all(16.0),

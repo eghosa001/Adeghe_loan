@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:loantrack/core/widgets/app_drawer.dart';
 
 import '../../../../core/utils/currency_utils.dart';
 import '../../../../core/utils/date_utils.dart';
@@ -19,6 +20,12 @@ class ReportScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Reports'),
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
+        ),
         actions: [
           PopupMenuButton<String>(
             icon: const Icon(Icons.file_download),
@@ -55,6 +62,7 @@ class ReportScreen extends ConsumerWidget {
           ),
         ],
       ),
+      drawer: const AppDrawer(currentRoute: '/reports'),
       body: ListView(
         padding: const EdgeInsets.all(16.0),
         children: [

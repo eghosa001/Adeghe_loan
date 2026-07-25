@@ -106,7 +106,7 @@ class _DocumentUploadScreenState extends ConsumerState<DocumentUploadScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             DropdownButtonFormField<CustomerDocumentType>(
-              initialValue: _selectedType,
+              value: _selectedType,
               decoration: const InputDecoration(
                 labelText: 'Document type',
                 border: OutlineInputBorder(),

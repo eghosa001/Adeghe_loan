@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:loantrack/core/widgets/app_drawer.dart';
 
 import '../../../../core/utils/currency_utils.dart';
 import '../../../../core/utils/date_utils.dart';
@@ -33,6 +34,23 @@ class CollectionScreen extends ConsumerWidget {
             },
           ),
         ],
+      ),
+      drawer: const AppDrawer(currentRoute: '/collections'),
+      floatingActionButton: FloatingActionButton.extended(
+        icon: const Icon(Icons.file_download),
+        label: const Text('Download Excel'),
+        onPressed: () async {
+          final result = await ref.read(collectionListProvider.future);
+          final file = await ExportManager.exportCollectionToExcel(
+              result, selectedDate);
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                  content: Text(
+                      'Spreadsheet saved: ${file.path.split('/').last}')),
+            );
+          }
+        },
       ),
       body: Column(
         children: [

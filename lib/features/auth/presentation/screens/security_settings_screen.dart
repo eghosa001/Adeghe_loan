@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:loantrack/core/widgets/app_drawer.dart';
 import '../../../../core/security/secure_storage_service.dart';
 import '../../../../core/security/biometric_service.dart';
 
@@ -46,6 +47,7 @@ class _SecuritySettingsScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Security Settings')),
+      drawer: const AppDrawer(currentRoute: '/settings/security'),
       body: ListView(padding: const EdgeInsets.all(8.0), children: [
         ListTile(
           leading: const Icon(Icons.fingerprint),

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as path;
+import 'package:loantrack/core/widgets/app_drawer.dart';
 
 import '../../../../core/database/database_service.dart';
 import '../../../../core/di/providers.dart';
@@ -103,6 +104,7 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Backup & Restore')),
+      drawer: const AppDrawer(currentRoute: '/settings/backup'),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-
 import 'package:loantrack/core/constants/app_constants.dart';
+import 'package:loantrack/core/widgets/app_drawer.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -10,6 +10,7 @@ class SettingsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
+      drawer: const AppDrawer(currentRoute: '/settings'),
       body: ListView(
         children: [
           _SectionHeader(title: 'Business'),
