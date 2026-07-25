@@ -6,7 +6,7 @@ import '../security/secure_storage_service.dart';
 import 'migrations.dart';
 
 class DatabaseService {
-  static const int _databaseVersion = 6;
+  static const int _databaseVersion = 7;
   final SecureStorageService _secureStorage;
 
   DatabaseService(this._secureStorage);
@@ -68,6 +68,15 @@ class DatabaseService {
     ''');
 
     await db.execute('''
+      CREATE TABLE customer_groups (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
       CREATE TABLE customers (
         id TEXT PRIMARY KEY,
         passport_path TEXT,
@@ -101,7 +110,8 @@ class DatabaseService {
         date_registered TEXT NOT NULL,
         notes TEXT,
         status TEXT NOT NULL,
-        credit_score REAL DEFAULT 0.0
+        credit_score REAL DEFAULT 0.0,
+        group_id TEXT REFERENCES customer_groups(id) ON DELETE SET NULL
       )
     ''');
 
@@ -208,6 +218,29 @@ class DatabaseService {
       )
     ''');
 
+    await db.execute('''
+      CREATE TABLE savings_accounts (
+        id TEXT PRIMARY KEY,
+        customer_id TEXT NOT NULL UNIQUE,
+        balance REAL NOT NULL DEFAULT 0.0,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE savings_transactions (
+        id TEXT PRIMARY KEY,
+        savings_account_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        amount REAL NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        reference_loan_payment_id TEXT,
+        FOREIGN KEY (savings_account_id) REFERENCES savings_accounts(id) ON DELETE CASCADE
+      )
+    ''');
+
     await _createIndexes(db);
   }
 
@@ -232,5 +265,9 @@ class DatabaseService {
         'CREATE INDEX IF NOT EXISTS idx_documents_customer ON documents(customer_id)');
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_customers_group ON customers(group_id)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_savings_txn_account ON savings_transactions(savings_account_id)');
   }
 }

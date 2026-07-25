@@ -3,6 +3,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../../core/database/database_service.dart';
 import 'models/payment_entity.dart';
+import '../../../features/savings/data/models/savings_account_entity.dart';
 
 class PaymentRepository {
   PaymentRepository(this._dbService);
@@ -138,8 +139,9 @@ class PaymentRepository {
         whereArgs: [loanId],
       );
 
-      // Keep repayment_schedule in sync.
-      await _applyPaymentToSchedule(txn, loanId, amount);
+      // Keep repayment_schedule in sync (only up to the outstanding amount).
+      final appliedAmount = amount.clamp(0.0, outstanding);
+      await _applyPaymentToSchedule(txn, loanId, appliedAmount);
 
       final receiptNumber = await _generateReceiptNumber();
       final payment = Payment(
@@ -156,7 +158,55 @@ class PaymentRepository {
         status: PaymentStatus.completed,
       );
       await txn.insert('payments', payment.toMap());
+
+      // If the customer paid more than what was owed, credit the surplus
+      // to their savings account within the same transaction.
+      final surplus = amount - outstanding;
+      if (surplus > 0.001) {
+        await _creditSavingsOverpayment(
+            txn, customerId, surplus, payment.id);
+      }
+
       return payment;
+    });
+  }
+
+  /// Credits [surplus] to the customer's savings account as an overpayment.
+  /// Auto-creates the savings account if it does not exist yet.
+  Future<void> _creditSavingsOverpayment(
+    Transaction txn,
+    String customerId,
+    double surplus,
+    String paymentId,
+  ) async {
+    final rows = await txn.query('savings_accounts',
+        where: 'customer_id = ?', whereArgs: [customerId]);
+
+    final String accountId;
+    if (rows.isEmpty) {
+      accountId = const Uuid().v4();
+      await txn.insert('savings_accounts', {
+        'id': accountId,
+        'customer_id': customerId,
+        'balance': surplus,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } else {
+      accountId = rows.first['id'] as String;
+      await txn.rawUpdate(
+        'UPDATE savings_accounts SET balance = balance + ? WHERE id = ?',
+        [surplus, accountId],
+      );
+    }
+
+    await txn.insert('savings_transactions', {
+      'id': const Uuid().v4(),
+      'savings_account_id': accountId,
+      'type': SavingsTransactionType.overpayment.value,
+      'amount': surplus,
+      'note': 'Overpayment credit from loan repayment',
+      'created_at': DateTime.now().toIso8601String(),
+      'reference_loan_payment_id': paymentId,
     });
   }
 

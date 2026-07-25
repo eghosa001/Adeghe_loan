@@ -121,6 +121,17 @@ class DashboardRepository {
       final recentPayments =
           recentPaymentRows.map(Payment.fromMap).toList(growable: false);
 
+      // ── Savings ───────────────────────────────────────────────────────────────
+      double totalSavingsBalance = 0.0;
+      try {
+        final savingsResult = await db.rawQuery(
+            'SELECT COALESCE(SUM(balance), 0.0) AS total FROM savings_accounts');
+        totalSavingsBalance =
+            (savingsResult.first['total'] as num?)?.toDouble() ?? 0.0;
+      } catch (_) {
+        // Table may not exist on older installs before migration runs
+      }
+
       return Result.success(DashboardData(
         totalCustomers: totalCustomers,
         activeLoans: activeLoans,
@@ -135,6 +146,7 @@ class DashboardRepository {
         weeklyOutstandingBalance: weeklyOutstandingBalance,
         recentLoans: recentLoans,
         recentPayments: recentPayments,
+        totalSavingsBalance: totalSavingsBalance,
       ));
     } on DatabaseException catch (e) {
       return Result.failure(

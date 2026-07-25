@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../data/models/customer_entity.dart';
 import '../providers/customer_providers.dart';
+import '../../../groups/presentation/providers/group_providers.dart';
+import '../../../savings/presentation/screens/savings_screen.dart';
 
 class CustomerDetailScreen extends ConsumerWidget {
   const CustomerDetailScreen({super.key, required this.customerId});
@@ -26,20 +28,39 @@ class CustomerDetailScreen extends ConsumerWidget {
   }
 }
 
-class _CustomerView extends ConsumerWidget {
+class _CustomerView extends ConsumerStatefulWidget {
   const _CustomerView({required this.customer});
   final Customer customer;
 
-  Future<void> _changeStatus(
-      BuildContext context, WidgetRef ref, CustomerStatus status) async {
+  @override
+  ConsumerState<_CustomerView> createState() => _CustomerViewState();
+}
+
+class _CustomerViewState extends ConsumerState<_CustomerView>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _changeStatus(CustomerStatus status) async {
     await ref
         .read(customerRepositoryProvider)
-        .changeStatus(customer.id, status);
-    ref.invalidate(customerProvider(customer.id));
+        .changeStatus(widget.customer.id, status);
+    ref.invalidate(customerProvider(widget.customer.id));
     ref.invalidate(customerListProvider);
   }
 
-  Future<void> _delete(BuildContext context, WidgetRef ref) async {
+  Future<void> _delete() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -57,107 +78,158 @@ class _CustomerView extends ConsumerWidget {
       ),
     );
     if (confirmed != true) return;
-    await ref.read(customerRepositoryProvider).delete(customer.id);
+    await ref.read(customerRepositoryProvider).delete(widget.customer.id);
     ref.invalidate(customerListProvider);
-    if (context.mounted) context.go('/customers');
+    if (mounted) context.go('/customers');
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
+    final customer = widget.customer;
+    // Resolve group name if set
+    final groupAsync = customer.groupId != null
+        ? ref.watch(groupListProvider)
+        : const AsyncValue<List<CustomerGroup>>.data([]);
+    final groupName = groupAsync.valueOrNull
+        ?.where((g) => g.id == customer.groupId)
+        .firstOrNull
+        ?.name;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Customer profile'), actions: [
-        IconButton(
-            onPressed: () =>
-                context.push('/customers/${customer.id}/edit', extra: customer),
-            icon: const Icon(Icons.edit),
-            tooltip: 'Edit customer'),
-        PopupMenuButton<CustomerStatus>(
-          onSelected: (status) => _changeStatus(context, ref, status),
-          itemBuilder: (context) => [
-            const PopupMenuItem(
-                value: CustomerStatus.archived,
-                child: Text('Archive customer')),
-            const PopupMenuItem(
-                value: CustomerStatus.blacklisted,
-                child: Text('Blacklist customer')),
-            const PopupMenuItem(
-                value: CustomerStatus.active, child: Text('Mark active')),
+      appBar: AppBar(
+        title: const Text('Customer profile'),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(icon: Icon(Icons.person_outline), text: 'Profile'),
+            Tab(icon: Icon(Icons.savings_outlined), text: 'Savings'),
           ],
         ),
-        IconButton(
-            onPressed: () => _delete(context, ref),
-            icon: const Icon(Icons.delete_outline),
-            tooltip: 'Delete customer'),
-      ]),
-      body: ListView(padding: const EdgeInsets.all(16), children: [
-        Center(
-            child: CircleAvatar(
-                radius: 48,
-                backgroundImage: customer.passportPath == null
-                    ? null
-                    : FileImage(File(customer.passportPath!)),
-                child: customer.passportPath == null
-                    ? Text(customer.fullName[0].toUpperCase(),
-                        style: Theme.of(context).textTheme.headlineMedium)
-                    : null)),
-        const SizedBox(height: 12),
-        Center(
-            child: Text(customer.fullName,
-                style: Theme.of(context).textTheme.headlineSmall)),
-        Center(child: Text(customer.id)),
-        const SizedBox(height: 20),
-        _Section(title: 'Contact', entries: {
-          'Phone': customer.phone,
-          'Alternative phone': customer.altPhone,
-          'Email': customer.email,
-          'Address': customer.residentialAddress,
-          'Business address': customer.businessAddress
-        }),
-        _Section(title: 'Personal & identity', entries: {
-          'Gender': customer.gender,
-          'Date of birth': customer.dateOfBirth,
-          'Occupation': customer.occupation,
-          'Employer': customer.employer,
-          'NIN': customer.nin,
-          'BVN': customer.bvn,
-          'ID': [customer.idType, customer.idNumber]
-              .whereType<String>()
-              .join(' • ')
-        }),
-        _Section(title: 'Next of kin & guarantors', entries: {
-          'Next of kin': customer.nextOfKin,
-          'Relationship': customer.nextOfKinRelation,
-          'Next of kin phone': customer.nextOfKinPhone,
-          'Guarantor 1': customer.guarantor1Name,
-          'Guarantor 2': customer.guarantor2Name,
-          'Guarantor phone': customer.guarantorPhone,
-          'Guarantor address': customer.guarantorAddress
-        }),
-        _Section(title: 'Account', entries: {
-          'Status': customer.status.name,
-          'Credit score': customer.creditScore.toStringAsFixed(0),
-          'Notes': customer.notes
-        }),
-        const SizedBox(height: 8),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.folder_outlined),
-            title: const Text('Documents'),
-            subtitle: const Text('View and manage encrypted customer files'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => context.push('/customers/${customer.id}/documents'),
+        actions: [
+          IconButton(
+              onPressed: () => context.push(
+                  '/customers/${customer.id}/edit',
+                  extra: customer),
+              icon: const Icon(Icons.edit),
+              tooltip: 'Edit customer'),
+          PopupMenuButton<CustomerStatus>(
+            onSelected: _changeStatus,
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                  value: CustomerStatus.archived,
+                  child: Text('Archive customer')),
+              const PopupMenuItem(
+                  value: CustomerStatus.blacklisted,
+                  child: Text('Blacklist customer')),
+              const PopupMenuItem(
+                  value: CustomerStatus.active, child: Text('Mark active')),
+            ],
           ),
-        ),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.attach_money),
-            title: const Text('Issue loan'),
-            subtitle: const Text('Create a new loan for this customer'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => context.push('/customers/${customer.id}/loans/new'),
+          IconButton(
+              onPressed: _delete,
+              icon: const Icon(Icons.delete_outline),
+              tooltip: 'Delete customer'),
+        ],
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          // ── Profile tab ──────────────────────────────────────────────────────
+          ListView(padding: const EdgeInsets.all(16), children: [
+            Center(
+                child: CircleAvatar(
+                    radius: 48,
+                    backgroundImage: customer.passportPath == null
+                        ? null
+                        : FileImage(File(customer.passportPath!)),
+                    child: customer.passportPath == null
+                        ? Text(customer.fullName[0].toUpperCase(),
+                            style:
+                                Theme.of(context).textTheme.headlineMedium)
+                        : null)),
+            const SizedBox(height: 12),
+            Center(
+                child: Text(customer.fullName,
+                    style: Theme.of(context).textTheme.headlineSmall)),
+            Center(child: Text(customer.id)),
+            if (groupName != null) ...[
+              const SizedBox(height: 4),
+              Center(
+                child: Chip(
+                  avatar: const Icon(Icons.group_outlined, size: 16),
+                  label: Text(groupName),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ],
+            const SizedBox(height: 20),
+            _Section(title: 'Contact', entries: {
+              'Phone': customer.phone,
+              'Alternative phone': customer.altPhone,
+              'Email': customer.email,
+              'Address': customer.residentialAddress,
+              'Business address': customer.businessAddress
+            }),
+            _Section(title: 'Personal & identity', entries: {
+              'Gender': customer.gender,
+              'Date of birth': customer.dateOfBirth,
+              'Occupation': customer.occupation,
+              'Employer': customer.employer,
+              'NIN': customer.nin,
+              'BVN': customer.bvn,
+              'ID': [customer.idType, customer.idNumber]
+                  .whereType<String>()
+                  .join(' • ')
+            }),
+            _Section(title: 'Next of kin & guarantors', entries: {
+              'Next of kin': customer.nextOfKin,
+              'Relationship': customer.nextOfKinRelation,
+              'Next of kin phone': customer.nextOfKinPhone,
+              'Guarantor 1': customer.guarantor1Name,
+              'Guarantor 2': customer.guarantor2Name,
+              'Guarantor phone': customer.guarantorPhone,
+              'Guarantor address': customer.guarantorAddress
+            }),
+            _Section(title: 'Account', entries: {
+              'Status': customer.status.name,
+              'Group': groupName,
+              'Credit score': customer.creditScore.toStringAsFixed(0),
+              'Notes': customer.notes
+            }),
+            const SizedBox(height: 8),
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.folder_outlined),
+                title: const Text('Documents'),
+                subtitle:
+                    const Text('View and manage encrypted customer files'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () =>
+                    context.push('/customers/${customer.id}/documents'),
+              ),
+            ),
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.attach_money),
+                title: const Text('Issue loan'),
+                subtitle:
+                    const Text('Create a new loan for this customer'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () =>
+                    context.push('/customers/${customer.id}/loans/new'),
+              ),
+            ),
+          ]),
+
+          // ── Savings tab ──────────────────────────────────────────────────────
+          ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              SavingsSection(customerId: customer.id),
+            ],
           ),
-        ),
-      ]),
+        ],
+      ),
     );
   }
 }

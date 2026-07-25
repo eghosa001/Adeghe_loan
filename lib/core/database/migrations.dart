@@ -9,6 +9,7 @@ class DatabaseMigrations {
     if (oldVersion < 4) await _v4(db);
     if (oldVersion < 5) await _v5(db);
     if (oldVersion < 6) await _v6(db);
+    if (oldVersion < 7) await _v7(db);
   }
 
   static Future<void> _v2(Database db) async {
@@ -71,5 +72,52 @@ class DatabaseMigrations {
     ''');
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp)');
+  }
+
+  static Future<void> _v7(Database db) async {
+    // Customer groups
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS customer_groups (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_customer_groups_name ON customer_groups(name)');
+
+    // Add group_id FK to customers
+    await db.execute(
+        'ALTER TABLE customers ADD COLUMN group_id TEXT REFERENCES customer_groups(id) ON DELETE SET NULL');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_customers_group ON customers(group_id)');
+
+    // Savings accounts (one per customer)
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS savings_accounts (
+        id TEXT PRIMARY KEY,
+        customer_id TEXT NOT NULL UNIQUE,
+        balance REAL NOT NULL DEFAULT 0.0,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+      )
+    ''');
+
+    // Savings transaction ledger
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS savings_transactions (
+        id TEXT PRIMARY KEY,
+        savings_account_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        amount REAL NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        reference_loan_payment_id TEXT,
+        FOREIGN KEY (savings_account_id) REFERENCES savings_accounts(id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_savings_txn_account ON savings_transactions(savings_account_id)');
   }
 }

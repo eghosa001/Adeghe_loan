@@ -21,19 +21,29 @@ class CustomerRepository {
     return service.database;
   }
 
-  Future<List<Customer>> search(String query) async {
+  Future<List<Customer>> search(String query, {String? groupId}) async {
     final db = await _database;
     final term = query.trim();
-    final where = term.isEmpty
-        ? null
-        : '''id LIKE ? OR full_name LIKE ? OR phone LIKE ? OR
-             COALESCE(bvn, '') LIKE ? OR COALESCE(nin, '') LIKE ? OR
-             COALESCE(residential_address, '') LIKE ?''';
-    final args = term.isEmpty ? null : List.filled(6, '%$term%');
+
+    final conditions = <String>[];
+    final args = <Object?>[];
+
+    if (term.isNotEmpty) {
+      conditions.add('''(id LIKE ? OR full_name LIKE ? OR phone LIKE ? OR
+           COALESCE(bvn, '') LIKE ? OR COALESCE(nin, '') LIKE ? OR
+           COALESCE(residential_address, '') LIKE ?)''');
+      args.addAll(List.filled(6, '%$term%'));
+    }
+    if (groupId != null) {
+      conditions.add('group_id = ?');
+      args.add(groupId);
+    }
+
+    final where = conditions.isEmpty ? null : conditions.join(' AND ');
     final rows = await db.query(
       'customers',
       where: where,
-      whereArgs: args,
+      whereArgs: args.isEmpty ? null : args,
       orderBy: 'full_name COLLATE NOCASE ASC',
     );
     return rows.map(Customer.fromMap).toList(growable: false);

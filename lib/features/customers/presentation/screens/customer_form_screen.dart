@@ -9,6 +9,7 @@ import '../../../../core/di/providers.dart';
 import '../../data/customer_repository.dart';
 import '../../data/models/customer_entity.dart';
 import '../providers/customer_providers.dart';
+import '../../../groups/presentation/providers/group_providers.dart';
 
 class CustomerFormScreen extends ConsumerStatefulWidget {
   const CustomerFormScreen({super.key, this.customer});
@@ -25,6 +26,7 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
   int _step = 0;
   String? _passportPath;
   CustomerStatus _status = CustomerStatus.active;
+  String? _groupId;
   bool _saving = false;
 
   static const _keys = [
@@ -62,6 +64,7 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
     final customer = widget.customer;
     _passportPath = customer?.passportPath;
     _status = customer?.status ?? CustomerStatus.active;
+    _groupId = customer?.groupId;
     final values = <String, String?>{
       'fullName': customer?.fullName,
       'gender': customer?.gender,
@@ -175,6 +178,7 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
           existing?.dateRegistered ?? DateTime.now().toIso8601String(),
       status: _status,
       creditScore: existing?.creditScore ?? 0,
+      groupId: _groupId,
     );
     try {
       await ref.read(customerRepositoryProvider).save(customer);
@@ -332,7 +336,31 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                           .map((status) => DropdownMenuItem(
                               value: status, child: Text(status.name)))
                           .toList(),
-                      onChanged: (status) => setState(() => _status = status!)),
+                      onChanged: (status) =>
+                          setState(() => _status = status!)),
+                  const SizedBox(height: 12),
+                  // Group selector
+                  Consumer(builder: (context, ref, _) {
+                    final groupsAsync = ref.watch(groupListProvider);
+                    return groupsAsync.when(
+                      loading: () => const LinearProgressIndicator(),
+                      error: (_, __) => const SizedBox.shrink(),
+                      data: (groups) => groups.isEmpty
+                          ? const SizedBox.shrink()
+                          : DropdownButtonFormField<String?>(
+                              value: _groupId,
+                              decoration: const InputDecoration(
+                                  labelText: 'Customer Group (optional)'),
+                              items: [
+                                const DropdownMenuItem(
+                                    value: null, child: Text('None')),
+                                ...groups.map((g) => DropdownMenuItem(
+                                    value: g.id, child: Text(g.name))),
+                              ],
+                              onChanged: (id) =>
+                                  setState(() => _groupId = id)),
+                    );
+                  }),
                   const SizedBox(height: 12),
                   _field('notes', 'Notes', maxLines: 4),
                 ])),

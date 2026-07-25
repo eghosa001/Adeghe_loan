@@ -9,6 +9,7 @@ class RepaymentInstallment {
   final DateTime dueDate;
   final double amount;
   final RepaymentStatus status;
+  final double paidAmount;
 
   RepaymentInstallment({
     required this.id,
@@ -17,6 +18,7 @@ class RepaymentInstallment {
     required this.dueDate,
     required this.amount,
     this.status = RepaymentStatus.pending,
+    this.paidAmount = 0.0,
   });
 
   RepaymentInstallment copyWith({
@@ -26,6 +28,7 @@ class RepaymentInstallment {
     DateTime? dueDate,
     double? amount,
     RepaymentStatus? status,
+    double? paidAmount,
   }) {
     return RepaymentInstallment(
       id: id ?? this.id,
@@ -34,6 +37,7 @@ class RepaymentInstallment {
       dueDate: dueDate ?? this.dueDate,
       amount: amount ?? this.amount,
       status: status ?? this.status,
+      paidAmount: paidAmount ?? this.paidAmount,
     );
   }
 
@@ -45,6 +49,7 @@ class RepaymentInstallment {
       'due_date': AppDateUtils.formatForStorage(dueDate),
       'amount': amount,
       'status': status.name,
+      'paid_amount': paidAmount,
     };
   }
 
@@ -54,8 +59,11 @@ class RepaymentInstallment {
       loanId: map['loan_id'] as String,
       installmentNumber: map['installment_number'] as int,
       dueDate: AppDateUtils.tryParseStorage(map['due_date'] as String) ?? DateTime.now(),
-      amount: map['amount'] as double,
-      status: RepaymentStatus.values.firstWhere((e) => e.name == map['status'], orElse: () => RepaymentStatus.pending),
+      amount: (map['amount'] as num).toDouble(),
+      status: RepaymentStatus.values.firstWhere(
+          (e) => e.name == map['status'],
+          orElse: () => RepaymentStatus.pending),
+      paidAmount: (map['paid_amount'] as num?)?.toDouble() ?? 0.0,
     );
   }
 }

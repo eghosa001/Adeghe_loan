@@ -16,6 +16,7 @@ class DashboardData {
     required this.weeklyOutstandingBalance,
     required this.recentLoans,
     required this.recentPayments,
+    this.totalSavingsBalance = 0.0,
   });
 
   final int totalCustomers;
@@ -35,4 +36,6 @@ class DashboardData {
   final double weeklyOutstandingBalance;
   final List<Loan> recentLoans;
   final List<Payment> recentPayments;
+  /// Total savings held across all customer savings accounts.
+  final double totalSavingsBalance;
 }

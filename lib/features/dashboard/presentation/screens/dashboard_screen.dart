@@ -234,6 +234,17 @@ class _StatCardsRow extends StatelessWidget {
           fullWidth: true,
           onTap: () => context.push('/collections'),
         ),
+        if (data.totalSavingsBalance > 0) ...[
+          const SizedBox(height: 12),
+          _StatCard(
+            label: 'Total Savings Held',
+            value: CurrencyUtils.format(data.totalSavingsBalance),
+            icon: Icons.account_balance_outlined,
+            color: Colors.indigo,
+            fullWidth: true,
+            onTap: () => context.push('/customers'),
+          ),
+        ],
       ],
     );
   }

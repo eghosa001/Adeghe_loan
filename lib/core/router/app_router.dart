@@ -30,6 +30,7 @@ import '../../features/collection/presentation/screens/collection_screen.dart';
 import '../../features/reports/presentation/screens/report_screen.dart';
 import '../../features/audit_log/presentation/screens/audit_log_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
+import '../../features/groups/presentation/screens/group_management_screen.dart';
 
 final appRouter = GoRouter(
   initialLocation: '/splash',
@@ -61,6 +62,10 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/dashboard',
       builder: (context, state) => const DashboardScreen(),
+    ),
+    GoRoute(
+      path: '/groups',
+      builder: (context, state) => const GroupManagementScreen(),
     ),
     GoRoute(
       path: '/customers',
@@ -123,11 +128,17 @@ final appRouter = GoRouter(
         ),
         GoRoute(
           path: 'record-payment',
-          builder: (context, state) => RecordPaymentScreen(
-            loanId: state.params['id']!,
-            customerId: state.extra as String? ?? '',
-            currentBalance: 0,
-          ),
+          builder: (context, state) {
+            final extra = state.extra as Map<String, dynamic>? ?? {};
+            return RecordPaymentScreen(
+              loanId: state.params['id']!,
+              customerId: extra['customerId'] as String? ?? '',
+              currentBalance:
+                  (extra['currentBalance'] as num?)?.toDouble() ?? 0.0,
+              installmentDue:
+                  (extra['installmentDue'] as num?)?.toDouble(),
+            );
+          },
         ),
       ],
     ),

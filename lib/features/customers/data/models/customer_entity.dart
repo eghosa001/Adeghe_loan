@@ -46,6 +46,7 @@ class Customer {
     this.notes,
     this.status = CustomerStatus.active,
     this.creditScore = 0,
+    this.groupId,
   });
 
   final String id;
@@ -81,12 +82,15 @@ class Customer {
   final String? notes;
   final CustomerStatus status;
   final double creditScore;
+  final String? groupId;
 
   Customer copyWith({
     String? passportPath,
     String? fullName,
     String? phone,
     CustomerStatus? status,
+    String? groupId,
+    bool clearGroupId = false,
   }) =>
       Customer(
         id: id,
@@ -122,6 +126,7 @@ class Customer {
         notes: notes,
         status: status ?? this.status,
         creditScore: creditScore,
+        groupId: clearGroupId ? null : (groupId ?? this.groupId),
       );
 
   Map<String, Object?> toMap() => {
@@ -158,6 +163,7 @@ class Customer {
         'notes': notes,
         'status': status.value,
         'credit_score': creditScore,
+        'group_id': groupId,
       };
 
   factory Customer.fromMap(Map<String, Object?> map) => Customer(
@@ -194,5 +200,6 @@ class Customer {
         notes: map['notes'] as String?,
         status: CustomerStatusValue.fromValue(map['status'] as String?),
         creditScore: (map['credit_score'] as num?)?.toDouble() ?? 0,
+        groupId: map['group_id'] as String?,
       );
 }

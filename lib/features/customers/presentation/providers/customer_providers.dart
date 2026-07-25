@@ -4,6 +4,7 @@ import '../../data/customer_repository.dart';
 import '../../data/models/customer_entity.dart';
 
 final customerSearchQueryProvider = StateProvider<String>((ref) => '');
+final customerGroupFilterProvider = StateProvider<String?>((ref) => null);
 
 final customerRepositoryProvider = Provider<CustomerRepository>((ref) {
   return CustomerRepository(ref);
@@ -11,7 +12,8 @@ final customerRepositoryProvider = Provider<CustomerRepository>((ref) {
 
 final customerListProvider = FutureProvider<List<Customer>>((ref) async {
   final query = ref.watch(customerSearchQueryProvider);
-  return ref.watch(customerRepositoryProvider).search(query);
+  final groupId = ref.watch(customerGroupFilterProvider);
+  return ref.watch(customerRepositoryProvider).search(query, groupId: groupId);
 });
 
 final customerProvider = FutureProvider.family<Customer?, String>((ref, id) {

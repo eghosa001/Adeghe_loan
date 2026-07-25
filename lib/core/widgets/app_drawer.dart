@@ -54,6 +54,12 @@ class AppDrawer extends StatelessWidget {
                     currentRoute: currentRoute,
                   ),
                   _MenuItem(
+                    icon: Icons.group_outlined,
+                    label: 'Customer Groups',
+                    route: '/groups',
+                    currentRoute: currentRoute,
+                  ),
+                  _MenuItem(
                     icon: Icons.account_balance_wallet_outlined,
                     label: 'Collections',
                     route: '/collections',
