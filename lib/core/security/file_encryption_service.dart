@@ -7,6 +7,7 @@ import 'package:encrypt/encrypt.dart' as encrypt;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../core/constants/app_constants.dart';
 import 'secure_storage_service.dart';
 
 /// Encrypts customer documents before they are persisted on disk.
@@ -38,8 +39,8 @@ class FileEncryptionService {
     final payload = await File(encryptedPath).readAsBytes();
     if (payload.length <= _header.length + _ivLength ||
         !_matchesHeader(payload)) {
-      throw const FileEncryptionException(
-          'This document is not a valid encrypted LoanTrack file.');
+      throw FileEncryptionException(
+          'This document is not a valid encrypted ${AppConstants.appName} file.');
     }
     final ivStart = _header.length;
     final iv = encrypt.IV(payload.sublist(ivStart, ivStart + _ivLength));
