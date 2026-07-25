@@ -11,6 +11,13 @@ class DatabaseMigrations {
     if (oldVersion < 5) await _v5(db);
     if (oldVersion < 6) await _v6(db);
     if (oldVersion < 7) await _v7(db);
+    if (oldVersion < 8) await _v8(db);
+  }
+
+  // v8 — remove monthly loan columns since monthly loans are not supported
+  static Future<void> _v8(Database db) async {
+    await db.execute('ALTER TABLE loans DROP COLUMN duration_months');
+    await db.execute('ALTER TABLE loans DROP COLUMN monthly_payment');
   }
 
   // v2 — add indexes for performance

@@ -49,7 +49,7 @@ class AppConstants {
   static const double minLoanAmount = 1000;
   static const double maxLoanAmount = 50000000;
   static const int minLoanTermInDays = 7;
-  static const int maxLoanTermInMonths = 60;
+  static const int maxLoanTermInDays = 365;
   static const double defaultInterestRate = 5.0;
 
   // Pagination / limits

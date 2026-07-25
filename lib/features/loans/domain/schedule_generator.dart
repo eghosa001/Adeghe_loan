@@ -1,6 +1,5 @@
 import 'package:loantrack/core/utils/date_utils.dart';
 import 'package:loantrack/features/holidays/data/models/holiday_entity.dart';
-import 'package:loantrack/features/loans/data/models/loan_entity.dart';
 import 'package:loantrack/features/loans/data/models/repayment_installment_entity.dart';
 import 'package:uuid/uuid.dart';
 
@@ -9,37 +8,22 @@ import 'package:uuid/uuid.dart';
 class ScheduleGenerator {
   ScheduleGenerator._();
 
-  /// Generates a full repayment schedule for a given loan's parameters.
-  ///
-  /// - For [LoanType.daily], it counts forward [duration] working days.
-  /// - For [LoanType.monthly], it advances month-by-month, shifting any due
-  ///   date that falls on a non-working day to the next available working day.
+  /// Generates a full daily repayment schedule for a given loan's parameters.
+  /// Counts forward [duration] working days.
   static List<RepaymentInstallment> generate({
     required String loanId,
-    required LoanType loanType,
     required DateTime startDate,
-    required int duration, // Days for Daily, Months for Monthly
+    required int duration,
     required double installmentAmount,
     required List<Holiday> holidays,
   }) {
-    if (loanType == LoanType.daily) {
-      return _generateDaily(
-        loanId: loanId,
-        startDate: startDate,
-        duration: duration,
-        installmentAmount: installmentAmount,
-        holidays: holidays,
-      );
-    } else {
-      // Monthly
-      return _generateMonthly(
-        loanId: loanId,
-        startDate: startDate,
-        duration: duration,
-        installmentAmount: installmentAmount,
-        holidays: holidays,
-      );
-    }
+    return _generateDaily(
+      loanId: loanId,
+      startDate: startDate,
+      duration: duration,
+      installmentAmount: installmentAmount,
+      holidays: holidays,
+    );
   }
 
   static List<RepaymentInstallment> _generateDaily({
@@ -68,32 +52,6 @@ class ScheduleGenerator {
       installmentsAdded++;
       // Move to the next calendar day to start the search for the next installment
       currentDate = currentDate.add(const Duration(days: 1));
-    }
-    return schedule;
-  }
-
-  static List<RepaymentInstallment> _generateMonthly({
-    required String loanId,
-    required DateTime startDate,
-    required int duration,
-    required double installmentAmount,
-    required List<Holiday> holidays,
-  }) {
-    final schedule = <RepaymentInstallment>[];
-    for (var i = 1; i <= duration; i++) {
-      // Calculate the base due date for the month
-      var dueDate = AppDateUtils.addMonths(startDate, i);
-      // Adjust if it falls on a non-working day
-      dueDate = _findNextWorkingDay(dueDate, holidays);
-      schedule.add(
-        RepaymentInstallment(
-          id: const Uuid().v4(),
-          loanId: loanId,
-          installmentNumber: i,
-          dueDate: dueDate,
-          amount: installmentAmount,
-        ),
-      );
     }
     return schedule;
   }

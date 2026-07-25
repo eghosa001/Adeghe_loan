@@ -15,7 +15,6 @@ import 'package:loantrack/features/loans/domain/schedule_generator.dart';
 
 @immutable
 class LoanFormData {
-  final LoanType loanType;
   final double principal;
   final double interestRatePercent;
   final double insuranceFeePercent;
@@ -28,7 +27,6 @@ class LoanFormData {
   final LoanCalculationResult? calculationResult;
 
   const LoanFormData({
-    this.loanType = LoanType.daily,
     this.principal = 0.0,
     this.interestRatePercent = 0.0,
     this.insuranceFeePercent = 0.0,
@@ -42,7 +40,6 @@ class LoanFormData {
   });
 
   LoanFormData copyWith({
-    LoanType? loanType,
     double? principal,
     double? interestRatePercent,
     double? insuranceFeePercent,
@@ -55,7 +52,6 @@ class LoanFormData {
     LoanCalculationResult? calculationResult,
   }) {
     return LoanFormData(
-      loanType: loanType ?? this.loanType,
       principal: principal ?? this.principal,
       interestRatePercent: interestRatePercent ?? this.interestRatePercent,
       insuranceFeePercent: insuranceFeePercent ?? this.insuranceFeePercent,
@@ -77,14 +73,12 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
   final Ref _ref;
 
   void updateField({
-    LoanType? loanType,
     double? principal,
     double? interestRatePercent,
     int? duration,
     DateTime? repaymentStartDate,
   }) {
     state = state.copyWith(
-      loanType: loanType,
       principal: principal,
       interestRatePercent: interestRatePercent,
       duration: duration,
@@ -118,7 +112,6 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
 
     final schedule = ScheduleGenerator.generate(
       loanId: loanId,
-      loanType: state.loanType,
       startDate: state.repaymentStartDate,
       duration: state.duration,
       installmentAmount: state.calculationResult!.installmentAmount,
@@ -132,7 +125,7 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
     final loan = Loan(
         id: loanId,
         customerId: customerId,
-        loanType: state.loanType,
+        loanType: LoanType.daily,
         amount: state.principal,
         interestRate: state.interestRatePercent,
         duration: state.duration,

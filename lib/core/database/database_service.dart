@@ -6,7 +6,7 @@ import '../security/secure_storage_service.dart';
 import 'migrations.dart';
 
 class DatabaseService {
-  static const int _databaseVersion = 7;
+  static const int _databaseVersion = 8;
   final SecureStorageService _secureStorage;
 
   DatabaseService(this._secureStorage);
@@ -130,11 +130,9 @@ class DatabaseService {
         loan_date TEXT NOT NULL,
         start_date TEXT NOT NULL,
         duration_days INTEGER,
-        duration_months INTEGER,
         repayment_frequency TEXT,
         repayment_day INTEGER,
         daily_payment REAL,
-        monthly_payment REAL,
         total_repayment REAL NOT NULL,
         outstanding_balance REAL NOT NULL,
         expected_completion_date TEXT NOT NULL,

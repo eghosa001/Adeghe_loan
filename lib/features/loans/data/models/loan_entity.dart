@@ -1,6 +1,6 @@
 import 'package:loantrack/core/utils/date_utils.dart';
 
-enum LoanType { daily, monthly }
+enum LoanType { daily }
 
 enum LoanStatus { active, completed, defaulted, pending }
 
@@ -18,7 +18,7 @@ class Loan {
   final double processingFee; // This is a flat amount
   final double administrativeFee; // This is a flat amount
   final double otherCharges; // This is a flat amount
-  final int duration; // Days for Daily, Months for Monthly
+  final int duration; // Days
   final DateTime loanDate;
   final DateTime repaymentStartDate;
 
@@ -68,12 +68,9 @@ class Loan {
       'processing_fee': processingFee,
       'admin_fee': administrativeFee,
       'other_charges': otherCharges,
-      'duration_months': loanType == LoanType.monthly ? duration : null,
-      // NOTE: Assumes a 'duration_days' column was added for daily loans
-      'duration_days': loanType == LoanType.daily ? duration : null,
+      'duration_days': duration,
       'repayment_frequency': loanType.name,
-      'daily_payment': loanType == LoanType.daily ? installmentAmount : null,
-      'monthly_payment': loanType == LoanType.monthly ? installmentAmount : null,
+      'daily_payment': installmentAmount,
       'loan_date': AppDateUtils.formatForStorage(loanDate),
       'start_date': AppDateUtils.formatForStorage(repaymentStartDate),
       'total_repayment': totalRepayment,
@@ -100,14 +97,13 @@ class Loan {
       processingFee: (map['processing_fee'] as num?)?.toDouble() ?? 0.0,
       administrativeFee: (map['admin_fee'] as num?)?.toDouble() ?? 0.0,
       otherCharges: (map['other_charges'] as num?)?.toDouble() ?? 0.0,
-      duration: (map['duration_days'] ?? map['duration_months']) as int,
+      duration: map['duration_days'] as int,
       loanDate: AppDateUtils.tryParseStorage(map['loan_date'] as String)!,
       repaymentStartDate:
           AppDateUtils.tryParseStorage(map['start_date'] as String)!,
       totalRepayment: (map['total_repayment'] as num).toDouble(),
       outstandingBalance: (map['outstanding_balance'] as num).toDouble(),
-      installmentAmount:
-          ((map['daily_payment'] ?? map['monthly_payment']) as num).toDouble(),
+      installmentAmount: (map['daily_payment'] as num).toDouble(),
       expectedCompletionDate: AppDateUtils.tryParseStorage(
           map['expected_completion_date'] as String)!,
       collector: map['collector'] as String?,
