@@ -12,12 +12,19 @@ class DatabaseMigrations {
     if (oldVersion < 6) await _v6(db);
     if (oldVersion < 7) await _v7(db);
     if (oldVersion < 8) await _v8(db);
+    if (oldVersion < 9) await _v9(db);
   }
 
   // v8 — remove monthly loan columns since monthly loans are not supported
   static Future<void> _v8(Database db) async {
     await db.execute('ALTER TABLE loans DROP COLUMN duration_months');
     await db.execute('ALTER TABLE loans DROP COLUMN monthly_payment');
+  }
+
+  // v9 — add weekly loan support columns
+  static Future<void> _v9(Database db) async {
+    await db.execute('ALTER TABLE loans ADD COLUMN duration_weeks INTEGER');
+    await db.execute('ALTER TABLE loans ADD COLUMN weekly_payment REAL');
   }
 
   // v2 — add indexes for performance

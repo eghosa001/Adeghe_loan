@@ -1,5 +1,6 @@
 import 'package:loantrack/core/utils/date_utils.dart';
 import 'package:loantrack/features/holidays/data/models/holiday_entity.dart';
+import 'package:loantrack/features/loans/data/models/loan_entity.dart';
 import 'package:loantrack/features/loans/data/models/repayment_installment_entity.dart';
 import 'package:uuid/uuid.dart';
 
@@ -8,15 +9,26 @@ import 'package:uuid/uuid.dart';
 class ScheduleGenerator {
   ScheduleGenerator._();
 
-  /// Generates a full daily repayment schedule for a given loan's parameters.
-  /// Counts forward [duration] working days.
+  /// Generates a full repayment schedule for a given loan's parameters.
+  /// - Daily loans count forward [duration] working days.
+  /// - Weekly loans advance week-by-week, shifting non-working days forward.
   static List<RepaymentInstallment> generate({
     required String loanId,
+    required LoanType loanType,
     required DateTime startDate,
     required int duration,
     required double installmentAmount,
     required List<Holiday> holidays,
   }) {
+    if (loanType == LoanType.weekly) {
+      return _generateWeekly(
+        loanId: loanId,
+        startDate: startDate,
+        duration: duration,
+        installmentAmount: installmentAmount,
+        holidays: holidays,
+      );
+    }
     return _generateDaily(
       loanId: loanId,
       startDate: startDate,
@@ -52,6 +64,32 @@ class ScheduleGenerator {
       installmentsAdded++;
       // Move to the next calendar day to start the search for the next installment
       currentDate = currentDate.add(const Duration(days: 1));
+    }
+    return schedule;
+  }
+
+  static List<RepaymentInstallment> _generateWeekly({
+    required String loanId,
+    required DateTime startDate,
+    required int duration,
+    required double installmentAmount,
+    required List<Holiday> holidays,
+  }) {
+    final schedule = <RepaymentInstallment>[];
+    var currentDate = AppDateUtils.stripTime(startDate);
+    for (var i = 1; i <= duration; i++) {
+      currentDate = _findNextWorkingDay(currentDate, holidays);
+      schedule.add(
+        RepaymentInstallment(
+          id: const Uuid().v4(),
+          loanId: loanId,
+          installmentNumber: i,
+          dueDate: currentDate,
+          amount: installmentAmount,
+        ),
+      );
+      // Move to the next week for the following installment
+      currentDate = currentDate.add(const Duration(days: 7));
     }
     return schedule;
   }

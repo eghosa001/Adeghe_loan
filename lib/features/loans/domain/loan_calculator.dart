@@ -20,7 +20,7 @@ class LoanCalculationResult {
   /// The total amount the borrower must repay (principal + interest + charges).
   final double totalRepayment;
 
-  /// The daily installment amount.
+  /// The installment amount (daily or weekly).
   final double installmentAmount;
 
   LoanCalculationResult({
@@ -50,7 +50,7 @@ class LoanCalculator {
     required double processingFee,
     required double administrativeFee,
     required double otherCharges,
-    required int duration, // In days
+    required int duration, // In days or weeks
   }) {
     if (principal <= 0 || duration <= 0) {
       return LoanCalculationResult(
