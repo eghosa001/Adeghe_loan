@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'core/constants/app_constants.dart';
 import 'core/theme/app_theme.dart';
 import 'core/router/app_router.dart';
 import 'features/auth/presentation/providers/auth_provider.dart';
@@ -19,7 +20,7 @@ class MyApp extends ConsumerWidget {
         ref.read(authProvider.notifier).lock();
       },
       child: MaterialApp.router(
-        title: 'LoanTrack',
+        title: AppConstants.appName,
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
         routerConfig: appRouter,

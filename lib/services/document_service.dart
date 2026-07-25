@@ -7,6 +7,7 @@ import 'package:loantrack/features/business/data/models/business_profile_entity.
 import 'package:loantrack/features/customers/data/models/customer_entity.dart';
 import 'package:loantrack/features/loans/data/models/loan_entity.dart';
 import 'package:loantrack/features/payments/data/models/payment_entity.dart';
+import 'package:loantrack/core/constants/app_constants.dart';
 
 class DocumentService {
   DocumentService._();
@@ -29,7 +30,7 @@ class DocumentService {
         if (logoBytes != null)
           pw.Image(pw.MemoryImage(logoBytes), width: 100, height: 60)
         else
-          pw.Text('LoanTrack',
+          pw.Text(AppConstants.appName,
               style: pw.TextStyle(
                   fontSize: 20, fontWeight: pw.FontWeight.bold)),
         pw.Text(title,
