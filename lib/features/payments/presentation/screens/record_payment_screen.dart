@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/models/payment_entity.dart';
 import '../providers/payment_providers.dart';
+import '../../../collection/presentation/providers/collection_provider.dart';
+import '../../../dashboard/presentation/providers/dashboard_provider.dart';
+import '../../../loans/presentation/providers/loan_providers.dart';
 
 class RecordPaymentScreen extends ConsumerStatefulWidget {
   const RecordPaymentScreen({super.key, required this.loanId, required this.customerId, required this.currentBalance});
@@ -45,6 +48,10 @@ class _RecordPaymentScreenState extends ConsumerState<RecordPaymentScreen> {
       );
       if (mounted) {
         _showMessage('Payment recorded: ${payment.receiptNumber}');
+        ref.invalidate(dashboardDataProvider);
+        ref.invalidate(collectionListProvider);
+        ref.invalidate(loanDetailsProvider(widget.loanId));
+        ref.invalidate(paymentsForLoanProvider(widget.loanId));
         Navigator.of(context).pop();
       }
     } catch (e) {

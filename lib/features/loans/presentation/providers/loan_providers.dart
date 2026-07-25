@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:loantrack/features/customers/presentation/providers/customer_providers.dart';
+import 'package:loantrack/features/dashboard/presentation/providers/dashboard_provider.dart';
 import 'package:loantrack/features/holidays/presentation/providers/holiday_provider.dart';
 import 'package:loantrack/features/loans/data/loan_repository.dart';
 import 'package:loantrack/features/loans/data/models/loan_entity.dart';
@@ -143,7 +145,11 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
 
     final result = await loanRepo.saveLoanAndSchedule(loan, schedule);
     result.when(
-      success: (_) {},
+      success: (_) {
+        _ref.invalidate(dashboardDataProvider);
+        _ref.invalidate(customerListProvider);
+        _ref.invalidate(customerProvider(customerId));
+      },
       failure: (f) => throw f,
     );
   }

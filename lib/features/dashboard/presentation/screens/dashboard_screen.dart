@@ -251,11 +251,15 @@ class _StatCard extends StatelessWidget {
                   Text(label,
                       style: Theme.of(context).textTheme.bodySmall),
                   const SizedBox(height: 4),
-                  Text(value,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(fontWeight: FontWeight.bold)),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(value,
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold)),
+                  ),
                 ],
               ),
             ),

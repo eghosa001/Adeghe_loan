@@ -5,11 +5,6 @@ import 'package:intl/intl.dart';
 import '../../data/models/payment_entity.dart';
 import '../providers/payment_providers.dart';
 
-final _paymentsForLoanProvider =
-    FutureProvider.family<List<Payment>, String>((ref, loanId) async {
-  final repo = ref.watch(paymentRepositoryProvider);
-  return repo.getPaymentsForLoan(loanId);
-});
 
 class PaymentHistoryScreen extends ConsumerWidget {
   const PaymentHistoryScreen({
@@ -23,7 +18,7 @@ class PaymentHistoryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final paymentsAsync = ref.watch(_paymentsForLoanProvider(loanId));
+    final paymentsAsync = ref.watch(paymentsForLoanProvider(loanId));
 
     return Scaffold(
       appBar: AppBar(title: const Text('Payment History')),
@@ -181,7 +176,7 @@ class _PaymentCard extends StatelessWidget {
     try {
       final repo = ref.read(paymentRepositoryProvider);
       await repo.reversePayment(payment.id);
-      ref.invalidate(_paymentsForLoanProvider(payment.loanId));
+      ref.invalidate(paymentsForLoanProvider(payment.loanId));
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Payment reversed successfully')),
