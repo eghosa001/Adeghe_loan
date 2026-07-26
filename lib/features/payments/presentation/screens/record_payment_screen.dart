@@ -191,7 +191,7 @@ class _RecordPaymentScreenState extends ConsumerState<RecordPaymentScreen> {
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<PaymentMethod>(
-              value: _method,
+              initialValue: _method,
               decoration:
                   const InputDecoration(labelText: 'Payment method'),
               items: PaymentMethod.values
