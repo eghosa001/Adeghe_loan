@@ -19,6 +19,8 @@ class ReportRepository {
       final db = await _database;
       final startStr = AppDateUtils.formatForStorage(startDate);
       final endStr = AppDateUtils.formatForStorage(endDate);
+      // Payments stored as ISO-8601 timestamps; include the full final day.
+      final endDateTime = '$endStr 23:59:59';
 
       final disbursedResult = await db.rawQuery(
         'SELECT COALESCE(SUM(amount), 0.0) AS total FROM loans '
@@ -31,7 +33,7 @@ class ReportRepository {
       final collectedResult = await db.rawQuery(
         "SELECT COALESCE(SUM(amount), 0.0) AS total FROM payments "
         "WHERE payment_date BETWEEN ? AND ? AND status = 'completed'",
-        [startStr, endStr],
+        [startStr, endDateTime],
       );
       final totalCollected =
           (collectedResult.first['total'] as num?)?.toDouble() ?? 0.0;

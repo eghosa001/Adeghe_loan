@@ -203,12 +203,16 @@ class DatabaseMigrations {
         limit: 1,
       );
       if (alreadyHas.isEmpty) {
-        await db.insert('savings_accounts', {
-          'id': const Uuid().v4(),
-          'customer_id': customerId,
-          'balance': 0.0,
-          'created_at': now,
-        });
+        await db.insert(
+          'savings_accounts',
+          {
+            'id': const Uuid().v4(),
+            'customer_id': customerId,
+            'balance': 0.0,
+            'created_at': now,
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
       }
     }
   }

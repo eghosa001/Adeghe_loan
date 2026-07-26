@@ -1,3 +1,5 @@
+import 'package:loantrack/core/utils/date_utils.dart';
+
 enum PaymentMethod { cash, transfer, pos, cheque, mobileMoney }
 
 enum PaymentType { partial, full, advance, overpayment }
@@ -36,7 +38,7 @@ class Payment {
         'loan_id': loanId,
         'customer_id': customerId,
         'amount': amount,
-        'payment_date': paymentDate.toIso8601String(),
+        'payment_date': AppDateUtils.formatForStorage(paymentDate),
         'payment_method': method.name,
         'reference_no': referenceNumber,
         'receipt_no': receiptNumber,
@@ -50,7 +52,7 @@ class Payment {
         loanId: map['loan_id'] as String,
         customerId: map['customer_id'] as String,
         amount: (map['amount'] as num).toDouble(),
-        paymentDate: DateTime.parse(map['payment_date'] as String),
+        paymentDate: AppDateUtils.tryParseStorage(map['payment_date'] as String)!,
         method: PaymentMethod.values.firstWhere(
             (method) => method.name == map['payment_method'],
             orElse: () => PaymentMethod.cash),

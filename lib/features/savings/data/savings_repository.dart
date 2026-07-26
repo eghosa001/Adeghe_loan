@@ -87,6 +87,7 @@ class SavingsRepository {
     if (amount <= 0) throw Exception('Amount must be greater than zero.');
     final db = await _database;
     return await db.transaction((txn) async {
+      final now = DateTime.now().toIso8601String();
       // Find or create account
       var accountRows = await txn.query(
         'savings_accounts',
@@ -103,7 +104,7 @@ class SavingsRepository {
           'id': accountId,
           'customer_id': customerId,
           'balance': 0,
-          'created_at': DateTime.now().toIso8601String(),
+          'created_at': now,
         });
       } else {
         accountId = accountRows.first['id'] as String;
@@ -134,7 +135,7 @@ class SavingsRepository {
         type: type,
         amount: amount,
         note: note,
-        createdAt: DateTime.now().toIso8601String(),
+        createdAt: now,
       );
       await txn.insert('savings_transactions', tx.toMap());
       return tx;
