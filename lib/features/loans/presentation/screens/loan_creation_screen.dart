@@ -75,6 +75,36 @@ class LoanCreationScreen extends ConsumerWidget {
             onChanged: (value) =>
                 formNotifier.updateField(duration: int.tryParse(value) ?? 0),
           ),
+          ExpansionTile(
+            title: const Text('Fees & charges'),
+            children: [
+              _buildTextField(
+                label: 'Insurance fee (%)',
+                onChanged: (value) => formNotifier.updateField(
+                    insuranceFeePercent: double.tryParse(value) ?? 0.0),
+              ),
+              _buildTextField(
+                label: 'Commission (%)',
+                onChanged: (value) => formNotifier.updateField(
+                    commissionPercent: double.tryParse(value) ?? 0.0),
+              ),
+              _buildTextField(
+                label: 'Processing fee',
+                onChanged: (value) => formNotifier.updateField(
+                    processingFee: double.tryParse(value) ?? 0.0),
+              ),
+              _buildTextField(
+                label: 'Administrative fee',
+                onChanged: (value) => formNotifier.updateField(
+                    administrativeFee: double.tryParse(value) ?? 0.0),
+              ),
+              _buildTextField(
+                label: 'Other charges',
+                onChanged: (value) => formNotifier.updateField(
+                    otherCharges: double.tryParse(value) ?? 0.0),
+              ),
+            ],
+          ),
 
           // Start Date
           ListTile(
