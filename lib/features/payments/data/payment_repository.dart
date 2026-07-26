@@ -11,8 +11,7 @@ class PaymentRepository {
 
   Future<Database> get _db async => _dbService.database;
 
-  Future<String> _generateReceiptNumber() async {
-    final db = await _db;
+  Future<String> _generateReceiptNumber(DatabaseExecutor db) async {
     final countResult =
         await db.rawQuery('SELECT COUNT(*) as count FROM payments');
     final count = Sqflite.firstIntValue(countResult) ?? 0;
@@ -21,7 +20,8 @@ class PaymentRepository {
         .split('T')
         .first
         .replaceAll('-', '');
-    return 'REC-$date-${(count + 1).toString().padLeft(5, '0')}';
+    final random = DateTime.now().millisecondsSinceEpoch % 100000;
+    return 'REC-$date-${(count + 1).toString().padLeft(5, '0')}-$random';
   }
 
   /// Applies [amount] to pending/partial repayment_schedule entries for [loanId]
@@ -218,7 +218,7 @@ class PaymentRepository {
       // Keep repayment_schedule in sync (only up to the outstanding amount).
       await _applyPaymentToSchedule(txn, loanId, split.appliedToLoan);
 
-      final receiptNumber = await _generateReceiptNumber();
+      final receiptNumber = await _generateReceiptNumber(txn);
       final payment = Payment(
         id: const Uuid().v4(),
         loanId: loanId,
@@ -303,10 +303,10 @@ class PaymentRepository {
           final accountId = accountRows.first['id'] as String;
           final currentBalance =
               (accountRows.first['balance'] as num?)?.toDouble() ?? 0.0;
-          // Clamp to 0 so savings never goes negative (defensive guard).
-          final amountToDeduct =
-              overpaymentSurplus.clamp(0.0, currentBalance);
-          final newBalance = currentBalance - amountToDeduct;
+          // Deduct the full overpayment surplus even if it makes the balance
+          // negative. Clamping would create money if the customer already
+          // withdrew the credit.
+          final newBalance = currentBalance - overpaymentSurplus;
 
           await txn.update(
             'savings_accounts',
@@ -319,7 +319,7 @@ class PaymentRepository {
             'id': const Uuid().v4(),
             'savings_account_id': accountId,
             'type': 'withdrawal',
-            'amount': amountToDeduct,
+            'amount': overpaymentSurplus,
             'reference_loan_payment_id': paymentId,
             'note': 'Overpayment reversal',
             'created_at': DateTime.now().toIso8601String(),

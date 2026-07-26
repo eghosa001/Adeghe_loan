@@ -92,12 +92,12 @@ class DashboardRepository {
       final dailyOutstandingBalance =
           (dailyOutstandingResult.first['total'] as num?)?.toDouble() ?? 0.0;
 
-      // Installments due in the last 7 days that have not been fully paid.
+      // All unpaid installments that are due today or in the past (weekly view).
       final weeklyOutstandingResult = await db.rawQuery('''
         SELECT COALESCE(SUM(rs.amount - rs.paid_amount), 0.0) AS total
         FROM repayment_schedule rs
         INNER JOIN loans l ON rs.loan_id = l.id
-        WHERE DATE(rs.due_date) BETWEEN DATE('now', '-6 days') AND DATE('now')
+        WHERE DATE(rs.due_date) <= DATE('now')
           AND l.status = 'active'
           AND rs.status != 'paid'
       ''');

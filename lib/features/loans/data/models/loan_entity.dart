@@ -99,14 +99,14 @@ class Loan {
       processingFee: (map['processing_fee'] as num?)?.toDouble() ?? 0.0,
       administrativeFee: (map['admin_fee'] as num?)?.toDouble() ?? 0.0,
       otherCharges: (map['other_charges'] as num?)?.toDouble() ?? 0.0,
-      duration: (map['duration_days'] ?? map['duration_weeks']) as int,
+      duration: ((map['duration_days'] ?? map['duration_weeks']) as num?)?.toInt() ?? 0,
       loanDate: AppDateUtils.tryParseStorage(map['loan_date'] as String)!,
       repaymentStartDate:
           AppDateUtils.tryParseStorage(map['start_date'] as String)!,
       totalRepayment: (map['total_repayment'] as num).toDouble(),
       outstandingBalance: (map['outstanding_balance'] as num).toDouble(),
       installmentAmount:
-          ((map['daily_payment'] ?? map['weekly_payment']) as num).toDouble(),
+          ((map['daily_payment'] ?? map['weekly_payment']) as num?)?.toDouble() ?? 0.0,
       expectedCompletionDate: AppDateUtils.tryParseStorage(
           map['expected_completion_date'] as String)!,
       collector: map['collector'] as String?,

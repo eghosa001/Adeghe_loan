@@ -80,6 +80,11 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
     LoanType? loanType,
     double? principal,
     double? interestRatePercent,
+    double? insuranceFeePercent,
+    double? commissionPercent,
+    double? processingFee,
+    double? administrativeFee,
+    double? otherCharges,
     int? duration,
     DateTime? repaymentStartDate,
   }) {
@@ -87,6 +92,11 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
       loanType: loanType,
       principal: principal,
       interestRatePercent: interestRatePercent,
+      insuranceFeePercent: insuranceFeePercent,
+      commissionPercent: commissionPercent,
+      processingFee: processingFee,
+      administrativeFee: administrativeFee,
+      otherCharges: otherCharges,
       duration: duration,
       repaymentStartDate: repaymentStartDate,
     );
