@@ -342,7 +342,7 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                       loading: () => const LinearProgressIndicator(),
                       error: (_, __) => const SizedBox.shrink(),
                       data: (groups) => DropdownButtonFormField<String?>(
-                        value: _selectedGroupId,
+                        initialValue: _selectedGroupId,
                         decoration:
                             const InputDecoration(labelText: 'Customer group'),
                         items: [
@@ -357,7 +357,7 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                     ),
                   ),
                   DropdownButtonFormField<CustomerStatus>(
-                      value: _status,
+                      initialValue: _status,
                       decoration: const InputDecoration(labelText: 'Status'),
                       items: CustomerStatus.values
                           .map((status) => DropdownMenuItem(
