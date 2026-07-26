@@ -128,8 +128,8 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
   }
 
   Future<void> _selectDateOfBirth() async {
-    final eighteenYearsAgo =
-        DateTime.now().subtract(const Duration(days: 365 * 18));
+    final now = DateTime.now();
+    final eighteenYearsAgo = DateTime(now.year - 18, now.month, now.day);
     final initial =
         DateTime.tryParse(_value('dateOfBirth')) ?? eighteenYearsAgo;
     final date = await showDatePicker(
@@ -189,8 +189,10 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
       if (mounted) context.pop();
     } on DuplicateCustomerException catch (error) {
       _showMessage(error.toString());
-    } catch (_) {
-      _showMessage('Unable to save this customer. Please try again.');
+    } catch (error, stackTrace) {
+      debugPrint('Customer save error: $error');
+      debugPrint(stackTrace.toString());
+      _showMessage('Unable to save customer: $error');
     } finally {
       if (mounted) setState(() => _saving = false);
     }

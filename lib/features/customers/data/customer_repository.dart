@@ -67,18 +67,29 @@ class CustomerRepository {
 
   Future<void> save(Customer customer) async {
     final db = await _database;
-    await _validateUnique(db, customer);
-
-    final isNew = await db
-        .query('customers', columns: ['id'], where: 'id = ?', whereArgs: [customer.id])
-        .then((rows) => rows.isEmpty);
 
     await db.transaction((txn) async {
-      await txn.insert(
+      await _validateUnique(txn, customer);
+
+      final existing = await txn.query(
         'customers',
-        customer.toMap(),
-        conflictAlgorithm: ConflictAlgorithm.replace,
+        columns: const ['id'],
+        where: 'id = ?',
+        whereArgs: [customer.id],
       );
+      final isNew = existing.isEmpty;
+
+      if (isNew) {
+        await txn.insert('customers', customer.toMap());
+      } else {
+        await txn.update(
+          'customers',
+          customer.toMap(),
+          where: 'id = ?',
+          whereArgs: [customer.id],
+        );
+      }
+
       // Auto-create a savings account for new customers
       if (isNew) {
         await txn.insert(
@@ -106,7 +117,7 @@ class CustomerRepository {
         where: 'id = ?', whereArgs: [id]);
   }
 
-  Future<void> _validateUnique(Database db, Customer customer) async {
+  Future<void> _validateUnique(DatabaseExecutor db, Customer customer) async {
     final checks = <String, String?>{
       'phone number': customer.phone,
       'BVN': customer.bvn,

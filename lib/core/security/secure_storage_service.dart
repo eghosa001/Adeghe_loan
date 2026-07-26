@@ -4,7 +4,12 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:uuid/uuid.dart';
 
 class SecureStorageService {
-  final _storage = const FlutterSecureStorage();
+  final _storage = const FlutterSecureStorage(
+    webOptions: WebOptions(
+      dbName: 'AdegheSecureStorage',
+      publicKey: 'AdegheSecureStoragePublicKey',
+    ),
+  );
 
   static const _pinKey = 'auth_pin_hash';
   static const _recoveryPassKey = 'recovery_pass_hash';

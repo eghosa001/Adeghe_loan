@@ -17,8 +17,55 @@ class DatabaseMigrations {
 
   // v8 — remove monthly loan columns since monthly loans are not supported
   static Future<void> _v8(Database db) async {
-    await db.execute('ALTER TABLE loans DROP COLUMN duration_months');
-    await db.execute('ALTER TABLE loans DROP COLUMN monthly_payment');
+    // Recreate the loans table without the monthly columns so this works on
+    // SQLite versions older than 3.35.0 that do not support DROP COLUMN.
+    await db.execute('''
+      CREATE TABLE loans_new (
+        id TEXT PRIMARY KEY,
+        customer_id TEXT NOT NULL,
+        loan_type TEXT NOT NULL,
+        amount REAL NOT NULL,
+        interest_rate REAL NOT NULL,
+        insurance_fee REAL DEFAULT 0.0,
+        commission REAL DEFAULT 0.0,
+        processing_fee REAL DEFAULT 0.0,
+        admin_fee REAL DEFAULT 0.0,
+        other_charges REAL DEFAULT 0.0,
+        loan_date TEXT NOT NULL,
+        start_date TEXT NOT NULL,
+        duration_days INTEGER,
+        repayment_frequency TEXT,
+        repayment_day INTEGER,
+        daily_payment REAL,
+        total_repayment REAL NOT NULL,
+        outstanding_balance REAL NOT NULL,
+        expected_completion_date TEXT NOT NULL,
+        collector TEXT,
+        notes TEXT,
+        status TEXT NOT NULL,
+        FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      INSERT INTO loans_new (
+        id, customer_id, loan_type, amount, interest_rate, insurance_fee,
+        commission, processing_fee, admin_fee, other_charges, loan_date,
+        start_date, duration_days, repayment_frequency, repayment_day,
+        daily_payment, total_repayment, outstanding_balance,
+        expected_completion_date, collector, notes, status
+      )
+      SELECT
+        id, customer_id, loan_type, amount, interest_rate, insurance_fee,
+        commission, processing_fee, admin_fee, other_charges, loan_date,
+        start_date, duration_days, repayment_frequency, repayment_day,
+        daily_payment, total_repayment, outstanding_balance,
+        expected_completion_date, collector, notes, status
+      FROM loans
+    ''');
+    await db.execute('DROP TABLE loans');
+    await db.execute('ALTER TABLE loans_new RENAME TO loans');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_loans_customer ON loans(customer_id)');
   }
 
   // v9 — add weekly loan support columns
