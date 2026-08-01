@@ -36,7 +36,13 @@ class FileEncryptionService {
   }
 
   Future<Uint8List> decryptFile(String encryptedPath) async {
-    final payload = await File(encryptedPath).readAsBytes();
+    Uint8List payload;
+    try {
+      payload = await File(encryptedPath).readAsBytes();
+    } catch (_) {
+      throw FileEncryptionException(
+          'Unable to read the document file. It may have been moved or deleted.');
+    }
     if (payload.length <= _header.length + _ivLength ||
         !_matchesHeader(payload)) {
       throw FileEncryptionException(

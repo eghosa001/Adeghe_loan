@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as path;
-import 'package:loantrack/core/widgets/app_drawer.dart';
+import 'package:loantrack/core/widgets/empty_state.dart';
 
 import '../../../../core/database/database_service.dart';
 import '../../../../core/di/providers.dart';
@@ -84,6 +84,8 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
     try {
       final dbService = await ref.read(databaseServiceProvider.future);
       await _backupService(dbService).restoreBackup(backupFile);
+      logAuditAction(ref, 'RESTORE',
+          'Backup restored from ${path.basename(backupFile.path)}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -104,7 +106,6 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Backup & Restore')),
-      drawer: const AppDrawer(currentRoute: '/settings/backup'),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -134,26 +135,37 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
                   }
                   final files = snapshot.data ?? [];
                   if (files.isEmpty) {
-                    return const Center(
-                        child: Text('No backups available yet.'));
+                    return const EmptyState(
+                      icon: Icons.cloud_upload_outlined,
+                      title: 'No backups available',
+                      subtitle: 'Create your first backup to keep your data safe.',
+                    );
                   }
-                  return ListView.separated(
-                    itemCount: files.length,
-                    separatorBuilder: (context, index) =>
-                        const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final file = files[index];
-                      return ListTile(
-                        title: Text(path.basename(file.path)),
-                        subtitle: Text(
-                            file.lastModifiedSync().toLocal().toString()),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.restore_outlined),
-                          onPressed: () => _restoreBackup(file),
-                          tooltip: 'Restore backup',
-                        ),
-                      );
-                    },
+                  return RefreshIndicator(
+                    onRefresh: _refreshBackups,
+                    child: ListView.separated(
+                      itemCount: files.length,
+                      separatorBuilder: (context, index) =>
+                          const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final file = files[index];
+                        return ListTile(
+                          title: Text(path.basename(file.path)),
+                          subtitle: Text(() {
+                            try {
+                              return file.lastModifiedSync().toLocal().toString();
+                            } catch (_) {
+                              return 'Unknown date';
+                            }
+                          }()),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.restore_outlined),
+                            onPressed: () => _restoreBackup(file),
+                            tooltip: 'Restore backup',
+                          ),
+                        );
+                      },
+                    ),
                   );
                 },
               ),

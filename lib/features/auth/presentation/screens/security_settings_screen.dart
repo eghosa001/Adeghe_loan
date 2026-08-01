@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:loantrack/core/widgets/app_drawer.dart';
 import '../../../../core/security/secure_storage_service.dart';
 import '../../../../core/security/biometric_service.dart';
 
@@ -38,6 +37,15 @@ class _SecuritySettingsScreenState
             content: Text('Biometric not available on this device')));
         return;
       }
+      // Require a successful biometric scan before enabling, so enabling
+      // requires an actual identity check rather than a blind toggle.
+      final verified = await _bio.authenticate();
+      if (!verified) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Biometric verification failed. Not enabled.')));
+        return;
+      }
     }
     await _storage.setBiometricEnabled(val);
     setState(() => _biometricEnabled = val);
@@ -47,7 +55,6 @@ class _SecuritySettingsScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Security Settings')),
-      drawer: const AppDrawer(currentRoute: '/settings/security'),
       body: ListView(padding: const EdgeInsets.all(8.0), children: [
         ListTile(
           leading: const Icon(Icons.fingerprint),

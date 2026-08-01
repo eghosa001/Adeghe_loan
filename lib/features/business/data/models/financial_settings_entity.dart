@@ -5,6 +5,8 @@ class FinancialSettings {
   final double defaultCommission;
   final double defaultProcessingFee;
   final String defaultPenaltyRules;
+  final int defaultLoanDurationDays;
+  final String defaultLoanType;
 
   FinancialSettings({
     this.currency = '₦',
@@ -13,5 +15,7 @@ class FinancialSettings {
     this.defaultCommission = 0.0,
     this.defaultProcessingFee = 0.0,
     this.defaultPenaltyRules = '',
+    this.defaultLoanDurationDays = 30,
+    this.defaultLoanType = 'daily',
   });
 }

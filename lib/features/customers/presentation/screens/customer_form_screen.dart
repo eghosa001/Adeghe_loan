@@ -1,3 +1,4 @@
+import 'dart:developer' as developer;
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,9 @@ import '../../data/customer_repository.dart';
 import '../../data/models/customer_entity.dart';
 import '../providers/customer_providers.dart';
 import '../../../groups/presentation/providers/group_providers.dart';
+import '../../../dashboard/presentation/providers/dashboard_provider.dart';
+import '../../../collection/presentation/providers/collection_provider.dart';
+import '../../../reports/presentation/providers/report_provider.dart';
 
 class CustomerFormScreen extends ConsumerStatefulWidget {
   const CustomerFormScreen({super.key, this.customer});
@@ -39,22 +43,17 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
     'residentialAddress',
     'businessAddress',
     'occupation',
-    'employer',
     'maritalStatus',
-    'nationality',
     'state',
     'lga',
     'nin',
     'bvn',
-    'idType',
-    'idNumber',
-    'nextOfKin',
-    'nextOfKinRelation',
-    'nextOfKinPhone',
     'guarantor1Name',
+    'guarantor1Phone',
+    'guarantor1Address',
     'guarantor2Name',
-    'guarantorPhone',
-    'guarantorAddress',
+    'guarantor2Phone',
+    'guarantor2Address',
     'notes',
   ];
 
@@ -75,22 +74,17 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
       'residentialAddress': customer?.residentialAddress,
       'businessAddress': customer?.businessAddress,
       'occupation': customer?.occupation,
-      'employer': customer?.employer,
       'maritalStatus': customer?.maritalStatus,
-      'nationality': customer?.nationality,
       'state': customer?.state,
       'lga': customer?.lga,
       'nin': customer?.nin,
       'bvn': customer?.bvn,
-      'idType': customer?.idType,
-      'idNumber': customer?.idNumber,
-      'nextOfKin': customer?.nextOfKin,
-      'nextOfKinRelation': customer?.nextOfKinRelation,
-      'nextOfKinPhone': customer?.nextOfKinPhone,
       'guarantor1Name': customer?.guarantor1Name,
+      'guarantor1Phone': customer?.guarantor1Phone,
+      'guarantor1Address': customer?.guarantor1Address,
       'guarantor2Name': customer?.guarantor2Name,
-      'guarantorPhone': customer?.guarantorPhone,
-      'guarantorAddress': customer?.guarantorAddress,
+      'guarantor2Phone': customer?.guarantor2Phone,
+      'guarantor2Address': customer?.guarantor2Address,
       'notes': customer?.notes,
     };
     _fields = {
@@ -159,22 +153,26 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
       residentialAddress: _optional('residentialAddress'),
       businessAddress: _optional('businessAddress'),
       occupation: _optional('occupation'),
-      employer: _optional('employer'),
+      employer: existing?.employer,
       maritalStatus: _optional('maritalStatus'),
-      nationality: _optional('nationality'),
+      nationality: existing?.nationality,
       state: _optional('state'),
       lga: _optional('lga'),
+      nextOfKin: existing?.nextOfKin,
+      nextOfKinRelation: existing?.nextOfKinRelation,
+      nextOfKinPhone: existing?.nextOfKinPhone,
+      guarantor1Name: _optional('guarantor1Name'),
+      guarantor1Phone: _optional('guarantor1Phone'),
+      guarantor1Address: _optional('guarantor1Address'),
+      guarantor2Name: _optional('guarantor2Name'),
+      guarantor2Phone: _optional('guarantor2Phone'),
+      guarantor2Address: _optional('guarantor2Address'),
+      guarantorPassportPath: existing?.guarantorPassportPath,
       nin: _optional('nin'),
       bvn: _optional('bvn'),
-      idType: _optional('idType'),
-      idNumber: _optional('idNumber'),
-      nextOfKin: _optional('nextOfKin'),
-      nextOfKinRelation: _optional('nextOfKinRelation'),
-      nextOfKinPhone: _optional('nextOfKinPhone'),
-      guarantor1Name: _optional('guarantor1Name'),
-      guarantor2Name: _optional('guarantor2Name'),
-      guarantorPhone: _optional('guarantorPhone'),
-      guarantorAddress: _optional('guarantorAddress'),
+      idType: existing?.idType,
+      idNumber: existing?.idNumber,
+      signaturePath: existing?.signaturePath,
       notes: _optional('notes'),
       dateRegistered:
           existing?.dateRegistered ?? DateTime.now().toIso8601String(),
@@ -183,15 +181,18 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
       groupId: _selectedGroupId,
     );
     try {
-      await ref.read(customerRepositoryProvider).save(customer);
+      final repo = await ref.read(customerRepositoryProvider.future);
+      await repo.save(customer);
       ref.invalidate(customerListProvider);
       ref.invalidate(customerProvider(customer.id));
+      ref.invalidate(dashboardDataProvider);
+      ref.invalidate(collectionListProvider);
+      ref.invalidate(reportSummaryProvider);
       if (mounted) context.pop();
     } on DuplicateCustomerException catch (error) {
       _showMessage(error.toString());
     } catch (error, stackTrace) {
-      debugPrint('Customer save error: $error');
-      debugPrint(stackTrace.toString());
+      developer.log('Customer save error', error: error, stackTrace: stackTrace);
       _showMessage('Unable to save customer: $error');
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -261,7 +262,7 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
           currentStep: _step,
           onStepTapped: (value) => setState(() => _step = value),
           onStepContinue: () {
-            if (_step < 3) {
+            if (_step < 2) {
               setState(() => _step++);
             } else {
               _save();
@@ -274,7 +275,7 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
             child: Row(children: [
               FilledButton(
                   onPressed: _saving ? null : details.onStepContinue,
-                  child: Text(_step == 3 ? 'Save customer' : 'Continue')),
+                  child: Text(_step == 2 ? 'Save customer' : 'Continue')),
               const SizedBox(width: 8),
               TextButton(
                   onPressed: _saving ? null : details.onStepCancel,
@@ -289,7 +290,19 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                   _imagePicker(),
                   const SizedBox(height: 16),
                   _field('fullName', 'Full name', required: true),
-                  _field('gender', 'Gender'),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _value('gender').isEmpty ? null : _value('gender'),
+                      decoration: const InputDecoration(labelText: 'Gender'),
+                      items: const [
+                        DropdownMenuItem(value: 'Male', child: Text('Male')),
+                        DropdownMenuItem(value: 'Female', child: Text('Female')),
+                      ],
+                      onChanged: (value) =>
+                          setState(() => _fields['gender']!.text = value ?? ''),
+                    ),
+                  ),
                   _field('dateOfBirth', 'Date of birth',
                       onTap: _selectDateOfBirth),
                   _field('phone', 'Phone number',
@@ -298,8 +311,20 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                       type: TextInputType.phone),
                   _field('email', 'Email address',
                       type: TextInputType.emailAddress),
-                  _field('maritalStatus', 'Marital status'),
-                  _field('nationality', 'Nationality'),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _value('maritalStatus').isEmpty ? null : _value('maritalStatus'),
+                      decoration: const InputDecoration(labelText: 'Marital status'),
+                      items: const [
+                        DropdownMenuItem(value: 'Single', child: Text('Single')),
+                        DropdownMenuItem(value: 'Married', child: Text('Married')),
+                        DropdownMenuItem(value: 'Divorced', child: Text('Divorced')),
+                      ],
+                      onChanged: (value) =>
+                          setState(() => _fields['maritalStatus']!.text = value ?? ''),
+                    ),
+                  ),
                 ])),
             Step(
                 title: const Text('Address & identity'),
@@ -309,33 +334,35 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                       maxLines: 2),
                   _field('businessAddress', 'Business address', maxLines: 2),
                   _field('occupation', 'Occupation'),
-                  _field('employer', 'Employer'),
                   _field('state', 'State'),
                   _field('lga', 'LGA'),
                   _field('nin', 'NIN', type: TextInputType.number),
                   _field('bvn', 'BVN', type: TextInputType.number),
-                  _field('idType', 'Means of identification'),
-                  _field('idNumber', 'ID number'),
                 ])),
             Step(
-                title: const Text('Next of kin & guarantors'),
+                title: const Text('Guarantors & review'),
                 isActive: _step >= 2,
                 content: Column(children: [
-                  _field('nextOfKin', 'Next of kin'),
-                  _field('nextOfKinRelation', 'Relationship'),
-                  _field('nextOfKinPhone', 'Next of kin phone',
+                  Text('Guarantor 1',
+                      style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 8),
+                  _field('guarantor1Name', 'Name'),
+                  _field('guarantor1Phone', 'Phone',
                       type: TextInputType.phone),
-                  _field('guarantor1Name', 'Guarantor 1'),
-                  _field('guarantor2Name', 'Guarantor 2'),
-                  _field('guarantorPhone', 'Guarantor phone',
+                  _field('guarantor1Address', 'Address', maxLines: 2),
+                  const SizedBox(height: 16),
+                  const Divider(),
+                  const SizedBox(height: 8),
+                  Text('Guarantor 2',
+                      style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 8),
+                  _field('guarantor2Name', 'Name'),
+                  _field('guarantor2Phone', 'Phone',
                       type: TextInputType.phone),
-                  _field('guarantorAddress', 'Guarantor address', maxLines: 2),
-                ])),
-            Step(
-                title: const Text('Review'),
-                isActive: _step >= 3,
-                content: Column(children: [
-                  // Group dropdown
+                  _field('guarantor2Address', 'Address', maxLines: 2),
+                  const SizedBox(height: 20),
+                  const Divider(),
+                  const SizedBox(height: 8),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: groupsAsync.when(

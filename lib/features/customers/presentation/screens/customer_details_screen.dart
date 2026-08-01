@@ -8,6 +8,16 @@ import '../../data/models/customer_entity.dart';
 import '../providers/customer_providers.dart';
 import '../../../savings/presentation/screens/savings_section.dart';
 import '../../../groups/presentation/providers/group_providers.dart';
+import '../../../loans/presentation/providers/loan_providers.dart';
+import '../../../loans/data/models/loan_entity.dart';
+import 'package:loantrack/core/utils/currency_utils.dart';
+import '../../../payments/data/models/payment_entity.dart';
+import '../../../payments/presentation/providers/payment_providers.dart';
+import '../../../savings/presentation/providers/savings_providers.dart';
+import '../../../collection/presentation/providers/collection_provider.dart';
+import '../../../dashboard/presentation/providers/dashboard_provider.dart';
+import '../../../../core/di/providers.dart';
+import '../../../reports/presentation/providers/report_provider.dart';
 
 class CustomerDetailScreen extends ConsumerWidget {
   const CustomerDetailScreen({super.key, required this.customerId});
@@ -53,35 +63,118 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
   }
 
   Future<void> _changeStatus(CustomerStatus status) async {
-    await ref
-        .read(customerRepositoryProvider)
-        .changeStatus(widget.customer.id, status);
-    ref.invalidate(customerProvider(widget.customer.id));
-    ref.invalidate(customerListProvider);
+    try {
+      final repo = await ref.read(customerRepositoryProvider.future);
+      await repo.changeStatus(widget.customer.id, status);
+      ref.invalidate(customerProvider(widget.customer.id));
+      ref.invalidate(customerListProvider);
+      ref.invalidate(dashboardDataProvider);
+      ref.invalidate(collectionListProvider);
+      ref.invalidate(reportSummaryProvider);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to update status: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _printStatement() async {
+    final statementService = await ref.read(statementServiceProvider.future);
+    await statementService.printCustomerStatement(widget.customer.id);
   }
 
   Future<void> _delete(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete customer?'),
+        title: const Text('Archive customer?'),
         content: const Text(
-            'This permanently deletes the customer and associated local records.'),
+            'This archives the customer. Their loans, payments and savings '
+            'history are preserved and can be restored later.'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
               child: const Text('Cancel')),
           FilledButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Delete'))
+              child: const Text('Archive'))
         ],
       ),
     );
     if (confirmed != true) return;
-    await ref.read(customerRepositoryProvider).delete(widget.customer.id);
-    ref.invalidate(customerListProvider);
-    if (!mounted) return;
-    if (context.mounted) context.go('/customers');
+    try {
+      final repo = await ref.read(customerRepositoryProvider.future);
+      final customer = widget.customer;
+      await repo.delete(customer.id);
+      logAuditAction(ref, 'DELETE',
+          'Customer ${customer.fullName} (${customer.id}) archived');
+      ref.invalidate(customerListProvider);
+      ref.invalidate(dashboardDataProvider);
+      ref.invalidate(collectionListProvider);
+      ref.invalidate(reportSummaryProvider);
+      ref.invalidate(savingsBalanceProvider(customer.id));
+      ref.invalidate(savingsTransactionsProvider(customer.id));
+      ref.invalidate(allSavingsAccountsProvider);
+      ref.invalidate(allAccountsWithNamesProvider);
+      if (!mounted) return;
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${customer.fullName} archived')),
+        );
+        context.go('/customers');
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to archive customer: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _changeGroup(CustomerGroup? group) async {
+    try {
+      final repo = await ref.read(customerRepositoryProvider.future);
+      await repo.changeGroup(widget.customer.id, group?.id);
+      ref.invalidate(customerProvider(widget.customer.id));
+      ref.invalidate(customerListProvider);
+      ref.invalidate(collectionListProvider);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to change group: $e')),
+        );
+      }
+    }
+  }
+
+  void _showGroupDialog() {
+    final groupsAsync = ref.read(groupListProvider);
+    final groups = groupsAsync.valueOrNull ?? [];
+    showDialog(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Switch group'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () {
+              Navigator.pop(context);
+              _changeGroup(null);
+            },
+            child: const Text('— No group —'),
+          ),
+          ...groups.map((g) => SimpleDialogOption(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _changeGroup(g);
+                },
+                child: Text(g.name),
+              )),
+        ],
+      ),
+    );
   }
 
   @override
@@ -107,28 +200,51 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
           ],
         ),
         actions: [
-          IconButton(
-              onPressed: () =>
-                  context.push('/customers/${customer.id}/edit', extra: customer),
-              icon: const Icon(Icons.edit),
-              tooltip: 'Edit customer'),
-          PopupMenuButton<CustomerStatus>(
-            onSelected: _changeStatus,
+          PopupMenuButton<MenuAction>(
+            onSelected: (action) {
+              switch (action) {
+                case MenuAction.edit:
+                  context.push('/customers/${customer.id}/edit',
+                      extra: customer);
+                case MenuAction.archive:
+                  _changeStatus(CustomerStatus.archived);
+                case MenuAction.blacklist:
+                  _changeStatus(CustomerStatus.blacklisted);
+                case MenuAction.activate:
+                  _changeStatus(CustomerStatus.active);
+                case MenuAction.switchGroup:
+                  _showGroupDialog();
+                case MenuAction.printStatement:
+                  _printStatement();
+                case MenuAction.delete:
+                  _delete(context);
+              }
+            },
             itemBuilder: (context) => [
               const PopupMenuItem(
-                  value: CustomerStatus.archived,
+                  value: MenuAction.edit, child: Text('Edit customer')),
+              const PopupMenuItem(
+                  value: MenuAction.switchGroup,
+                  child: Text('Switch group')),
+              const PopupMenuItem(
+                  value: MenuAction.printStatement,
+                  child: Text('Print statement')),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                  value: MenuAction.archive,
                   child: Text('Archive customer')),
               const PopupMenuItem(
-                  value: CustomerStatus.blacklisted,
+                  value: MenuAction.blacklist,
                   child: Text('Blacklist customer')),
               const PopupMenuItem(
-                  value: CustomerStatus.active, child: Text('Mark active')),
+                  value: MenuAction.activate, child: Text('Mark active')),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                  value: MenuAction.delete,
+                  child: Text('Archive customer',
+                      style: TextStyle(color: Colors.redAccent))),
             ],
           ),
-          IconButton(
-              onPressed: () => _delete(context),
-              icon: const Icon(Icons.delete_outline),
-              tooltip: 'Delete customer'),
         ],
       ),
       body: TabBarView(
@@ -149,6 +265,8 @@ class _ProfileTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final activeLoans = ref.watch(activeLoansForCustomerProvider(customer.id));
+
     return ListView(padding: const EdgeInsets.all(16), children: [
       Center(
           child: CircleAvatar(
@@ -176,6 +294,30 @@ class _ProfileTab extends ConsumerWidget {
         ),
       ],
       const SizedBox(height: 20),
+
+      // Active Loans section
+      activeLoans.when(
+        loading: () => const SizedBox.shrink(),
+        error: (_, __) => const SizedBox.shrink(),
+        data: (loans) {
+          if (loans.isEmpty) return const SizedBox.shrink();
+          return Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Active Loans',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  ...loans.map((loan) => _LoanTile(loan: loan)),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+
       _Section(title: 'Contact', entries: {
         'Phone': customer.phone,
         'Alternative phone': customer.altPhone,
@@ -187,22 +329,10 @@ class _ProfileTab extends ConsumerWidget {
         'Gender': customer.gender,
         'Date of birth': customer.dateOfBirth,
         'Occupation': customer.occupation,
-        'Employer': customer.employer,
         'NIN': customer.nin,
         'BVN': customer.bvn,
-        'ID': [customer.idType, customer.idNumber]
-            .whereType<String>()
-            .join(' • ')
       }),
-      _Section(title: 'Next of kin & guarantors', entries: {
-        'Next of kin': customer.nextOfKin,
-        'Relationship': customer.nextOfKinRelation,
-        'Next of kin phone': customer.nextOfKinPhone,
-        'Guarantor 1': customer.guarantor1Name,
-        'Guarantor 2': customer.guarantor2Name,
-        'Guarantor phone': customer.guarantorPhone,
-        'Guarantor address': customer.guarantorAddress
-      }),
+      _GuarantorSection(customer: customer),
       _Section(title: 'Account', entries: {
         'Status': customer.status.name,
         'Group': groupName,
@@ -229,6 +359,191 @@ class _ProfileTab extends ConsumerWidget {
         ),
       ),
     ]);
+  }
+}
+
+class _LoanTile extends ConsumerWidget {
+  const _LoanTile({required this.loan});
+  final Loan loan;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(
+        '${loan.loanType.name.toUpperCase()} loan — ${CurrencyUtils.format(loan.amount)}',
+      ),
+      subtitle: Text(
+        'Outstanding: ${CurrencyUtils.format(loan.outstandingBalance)}',
+      ),
+      trailing: FilledButton.tonal(
+        onPressed: () => _quickPay(context, ref),
+        child: const Text('Pay'),
+      ),
+    );
+  }
+
+  void _quickPay(BuildContext context, WidgetRef ref) {
+    final installment = loan.installmentAmount;
+    final outstanding = loan.outstandingBalance;
+    final amount = installment > 0 && installment <= outstanding
+        ? installment
+        : outstanding;
+
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.bolt),
+              title: const Text('Quick Pay'),
+              subtitle: Text('Pay ${CurrencyUtils.format(amount)}'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _recordPayment(context, ref, amount);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.savings_outlined),
+              title: const Text('Clear with Savings'),
+              subtitle: const Text('Deduct outstanding from savings'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _clearWithSavings(context, ref);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _recordPayment(
+      BuildContext context, WidgetRef ref, double amount) async {
+    try {
+      final repo = await ref.read(paymentRepositoryProvider.future);
+      await repo.createPayment(
+        loanId: loan.id,
+        customerId: loan.customerId,
+        amount: amount,
+        method: PaymentMethod.cash,
+        collector: '',
+      );
+      ref.invalidate(activeLoansForCustomerProvider(loan.customerId));
+      ref.invalidate(loanDetailsProvider(loan.id));
+      ref.invalidate(loanScheduleProvider(loan.id));
+      ref.invalidate(dashboardDataProvider);
+      ref.invalidate(collectionListProvider);
+      ref.invalidate(reportSummaryProvider);
+      ref.invalidate(savingsBalanceProvider(loan.customerId));
+      ref.invalidate(savingsTransactionsProvider(loan.customerId));
+      ref.invalidate(paymentsForLoanProvider(loan.id));
+      ref.invalidate(customerProvider(loan.customerId));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Paid ${CurrencyUtils.format(amount)}')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Payment failed: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _clearWithSavings(BuildContext context, WidgetRef ref) async {
+    final double savingsBalance;
+    try {
+      savingsBalance =
+          await ref.read(savingsBalanceProvider(loan.customerId).future);
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to load savings balance.')),
+        );
+      }
+      return;
+    }
+
+    if (!context.mounted) return;
+
+    if (savingsBalance < loan.outstandingBalance) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+          'Insufficient savings (${CurrencyUtils.format(savingsBalance)}) '
+          'to clear this loan (${CurrencyUtils.format(loan.outstandingBalance)})',
+        ),
+        backgroundColor: Colors.orange,
+      ));
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear loan with savings?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Outstanding: ${CurrencyUtils.format(loan.outstandingBalance)}'),
+            const SizedBox(height: 4),
+            Text('Savings: ${CurrencyUtils.format(savingsBalance)}'),
+            const SizedBox(height: 12),
+            const Text(
+              'This will deduct from savings and mark the loan as completed.',
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    try {
+      final repo = await ref.read(paymentRepositoryProvider.future);
+      await repo.clearLoanWithSavings(
+        loanId: loan.id,
+        customerId: loan.customerId,
+      );
+      ref.invalidate(activeLoansForCustomerProvider(loan.customerId));
+      ref.invalidate(loanDetailsProvider(loan.id));
+      ref.invalidate(loanScheduleProvider(loan.id));
+      ref.invalidate(savingsBalanceProvider(loan.customerId));
+      ref.invalidate(savingsTransactionsProvider(loan.customerId));
+      ref.invalidate(allSavingsAccountsProvider);
+      ref.invalidate(allAccountsWithNamesProvider);
+      ref.invalidate(dashboardDataProvider);
+      ref.invalidate(collectionListProvider);
+      ref.invalidate(reportSummaryProvider);
+      ref.invalidate(paymentsForLoanProvider(loan.id));
+      ref.invalidate(customerProvider(loan.customerId));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Loan cleared with savings.')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed: $e')),
+        );
+      }
+    }
   }
 }
 
@@ -268,4 +583,53 @@ class _Section extends StatelessWidget {
                   child: Text('${entry.key}: ${entry.value}')))
             ])));
   }
+}
+
+class _GuarantorSection extends StatelessWidget {
+  const _GuarantorSection({required this.customer});
+  final Customer customer;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasG1 = customer.guarantor1Name?.isNotEmpty == true;
+    final hasG2 = customer.guarantor2Name?.isNotEmpty == true;
+    if (!hasG1 && !hasG2) return const SizedBox.shrink();
+    return Card(
+        child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Guarantors',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  if (hasG1) ...[
+                    Text(customer.guarantor1Name!,
+                        style: Theme.of(context).textTheme.titleSmall),
+                    if (customer.guarantor1Phone?.isNotEmpty == true)
+                      Text('Phone: ${customer.guarantor1Phone}'),
+                    if (customer.guarantor1Address?.isNotEmpty == true)
+                      Text('Address: ${customer.guarantor1Address}'),
+                  ],
+                  if (hasG1 && hasG2) const SizedBox(height: 12),
+                  if (hasG2) ...[
+                    Text(customer.guarantor2Name!,
+                        style: Theme.of(context).textTheme.titleSmall),
+                    if (customer.guarantor2Phone?.isNotEmpty == true)
+                      Text('Phone: ${customer.guarantor2Phone}'),
+                    if (customer.guarantor2Address?.isNotEmpty == true)
+                      Text('Address: ${customer.guarantor2Address}'),
+                  ],
+                ])));
+  }
+}
+
+enum MenuAction {
+  edit,
+  switchGroup,
+  printStatement,
+  archive,
+  blacklist,
+  activate,
+  delete,
 }

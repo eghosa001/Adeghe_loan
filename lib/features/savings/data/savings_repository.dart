@@ -1,19 +1,16 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
-import '../../../core/di/providers.dart';
+import '../../../core/database/database_service.dart';
+import '../../../core/utils/currency_utils.dart';
 import 'models/savings_account_entity.dart';
 import 'models/savings_transaction_entity.dart';
 
 class SavingsRepository {
-  SavingsRepository(this._ref);
-  final Ref _ref;
+  SavingsRepository(this._dbService);
+  final DatabaseService _dbService;
 
-  Future<Database> get _database async {
-    final service = await _ref.read(databaseServiceProvider.future);
-    return service.database;
-  }
+  Future<Database> get _database async => _dbService.database;
 
   /// Returns the savings account for a customer, or null if none exists.
   Future<SavingsAccount?> getAccount(String customerId) async {
@@ -118,9 +115,11 @@ class SavingsRepository {
             'Insufficient savings balance. Available: ${currentBalance.toStringAsFixed(2)}');
       }
 
-      final newBalance = type == SavingsTransactionType.withdrawal
-          ? currentBalance - amount
-          : currentBalance + amount;
+      final newBalance = CurrencyUtils.roundToCents(
+        type == SavingsTransactionType.withdrawal
+            ? currentBalance - amount
+            : currentBalance + amount,
+      );
 
       await txn.update(
         'savings_accounts',
@@ -140,6 +139,30 @@ class SavingsRepository {
       await txn.insert('savings_transactions', tx.toMap());
       return tx;
     });
+  }
+
+  /// Returns all savings accounts, newest first.
+  Future<List<SavingsAccount>> getAllAccounts() async {
+    final db = await _database;
+    final rows = await db.query('savings_accounts', orderBy: 'created_at DESC');
+    return rows.map(SavingsAccount.fromMap).toList(growable: false);
+  }
+
+  /// Returns all savings accounts joined with customer names, newest first.
+  Future<List<Map<String, dynamic>>> getAllAccountsWithCustomerNames() async {
+    final db = await _database;
+    return await db.rawQuery('''
+      SELECT
+        sa.id AS id,
+        sa.customer_id AS customerId,
+        sa.balance AS balance,
+        sa.created_at AS createdAt,
+        c.full_name AS customerName,
+        c.phone AS phone
+      FROM savings_accounts sa
+      INNER JOIN customers c ON sa.customer_id = c.id
+      ORDER BY sa.created_at DESC
+    ''');
   }
 
   /// Returns the total savings balance across all customers.

@@ -45,7 +45,8 @@ class Holiday {
     return Holiday(
       id: map['id'] as String,
       name: map['name'] as String,
-      date: AppDateUtils.tryParseStorage(map['date'] as String) ?? DateTime.now(),
+      date: AppDateUtils.tryParseStorage(map['date'] as String) ??
+          DateTime.fromMillisecondsSinceEpoch(0),
       isRecurring: map['is_recurring'] == 1,
       isEnabled: map['is_enabled'] == 1,
     );

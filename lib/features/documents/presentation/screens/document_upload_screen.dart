@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
@@ -58,12 +58,12 @@ class _DocumentUploadScreenState extends ConsumerState<DocumentUploadScreen> {
       );
       if (image != null) setState(() => _selectedFile = File(image.path));
     } else {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: const ['pdf', 'png', 'jpg', 'jpeg'],
+      final image = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 90,
+        maxWidth: 1600,
       );
-      final path = result?.files.single.path;
-      if (path != null) setState(() => _selectedFile = File(path));
+      if (image != null) setState(() => _selectedFile = File(image.path));
     }
   }
 

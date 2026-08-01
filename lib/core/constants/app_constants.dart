@@ -7,13 +7,11 @@ class AppConstants {
 
   // Database
   static const String databaseName = 'adeghe_loans.db';
-  static const int databaseVersion = 6;
 
   static const String tableCustomers = 'customers';
   static const String tableLoans = 'loans';
   static const String tableRepaymentSchedule = 'repayment_schedule';
   static const String tablePayments = 'payments';
-  static const String tableCollections = 'collections';
   static const String tableBusinessProfile = 'business_profile';
   static const String tableDocuments = 'documents';
   static const String tableHolidays = 'holidays';
@@ -40,7 +38,7 @@ class AppConstants {
 
   // Auth / security
   static const int pinLength = 4;
-  static const int maxPinLength = 8;
+  static const int maxPinLength = pinLength;
   static const int maxPinAttempts = 5;
   static const Duration lockoutDuration = Duration(minutes: 5);
   static const Duration defaultInactivityTimeout = Duration(minutes: 5);

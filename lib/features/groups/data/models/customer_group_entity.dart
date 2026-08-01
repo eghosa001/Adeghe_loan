@@ -25,10 +25,10 @@ class CustomerGroup {
         createdAt: map['created_at']! as String,
       );
 
-  CustomerGroup copyWith({String? name, String? description}) => CustomerGroup(
+  CustomerGroup copyWith({String? name, String? description, bool clearDescription = false}) => CustomerGroup(
         id: id,
         name: name ?? this.name,
-        description: description ?? this.description,
+        description: clearDescription ? null : (description ?? this.description),
         createdAt: createdAt,
       );
 }

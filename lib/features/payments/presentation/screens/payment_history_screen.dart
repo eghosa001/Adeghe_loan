@@ -1,9 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:loantrack/core/widgets/empty_state.dart';
+import 'package:loantrack/core/utils/currency_utils.dart';
 
 import '../../data/models/payment_entity.dart';
 import '../providers/payment_providers.dart';
+import '../../../business/presentation/providers/business_providers.dart';
+import '../../../collection/presentation/providers/collection_provider.dart';
+import '../../../customers/presentation/providers/customer_providers.dart';
+import '../../../dashboard/presentation/providers/dashboard_provider.dart';
+import '../../../loans/presentation/providers/loan_providers.dart';
+import '../../../reports/presentation/providers/report_provider.dart';
+import '../../../savings/presentation/providers/savings_providers.dart';
 
 
 class PaymentHistoryScreen extends ConsumerWidget {
@@ -32,7 +42,12 @@ class PaymentHistoryScreen extends ConsumerWidget {
             itemCount: payments.length,
             separatorBuilder: (_, __) => const SizedBox(height: 8),
             itemBuilder: (context, index) =>
-                _PaymentCard(payment: payments[index], ref: ref),
+                _PaymentCard(
+                  payment: payments[index],
+                  ref: ref,
+                  loanId: loanId,
+                  customerId: customerId,
+                ),
           );
         },
       ),
@@ -45,30 +60,29 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.receipt_long, size: 64, color: Colors.grey.shade400),
-          const SizedBox(height: 16),
-          Text(
-            'No payments recorded yet',
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(color: Colors.grey),
-          ),
-        ],
-      ),
+    return const EmptyState(
+      icon: Icons.receipt_long,
+      title: 'No payments recorded yet',
     );
   }
 }
 
 class _PaymentCard extends StatelessWidget {
-  const _PaymentCard({required this.payment, required this.ref});
+  const _PaymentCard({
+    required this.payment,
+    required this.ref,
+    required this.loanId,
+    required this.customerId,
+  });
 
   final Payment payment;
   final WidgetRef ref;
+  final String loanId;
+  final String customerId;
+
+  String get _currency =>
+      ref.read(currencySymbolProvider).valueOrNull ??
+      CurrencyUtils.defaultSymbol;
 
   String _formatDate(DateTime d) => DateFormat('dd MMM yyyy, hh:mm a').format(d);
 
@@ -84,6 +98,8 @@ class _PaymentCard extends StatelessWidget {
         return 'Cheque';
       case PaymentMethod.mobileMoney:
         return 'Mobile Money';
+      case PaymentMethod.savings:
+        return 'Savings';
     }
   }
 
@@ -96,7 +112,7 @@ class _PaymentCard extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       builder: (_) => DraggableScrollableSheet(
-        initialChildSize: 0.5,
+        initialChildSize: 0.55,
         minChildSize: 0.3,
         maxChildSize: 0.85,
         expand: false,
@@ -119,17 +135,123 @@ class _PaymentCard extends StatelessWidget {
                 style: Theme.of(ctx).textTheme.titleLarge),
             const Divider(height: 32),
             _detailRow('Receipt No.', payment.receiptNumber),
-            _detailRow('Amount', '\u20A6${payment.amount.toStringAsFixed(2)}'),
+            _detailRow('Amount', '$_currency${payment.amount.toStringAsFixed(2)}'),
             _detailRow('Date', _formatDate(payment.paymentDate)),
             _detailRow('Method', _methodLabel(payment.method)),
             _detailRow('Collector', payment.collector),
             if (payment.referenceNumber != null)
               _detailRow('Reference', payment.referenceNumber!),
             _detailRow('Status', payment.status.name.toUpperCase()),
+            if (payment.remarks != null && payment.remarks!.isNotEmpty) ...[
+              const Divider(height: 24),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Notes',
+                    style: Theme.of(ctx).textTheme.titleSmall),
+              ),
+              const SizedBox(height: 8),
+              Text(payment.remarks!,
+                  style: Theme.of(ctx).textTheme.bodyMedium),
+            ],
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _shareReceipt(ctx),
+                    icon: const Icon(Icons.share, size: 18),
+                    label: const Text('Share Receipt'),
+                  ),
+                ),
+                if (payment.status != PaymentStatus.reversed) ...[
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _editNotes(ctx),
+                      icon: const Icon(Icons.edit_note, size: 18),
+                      label: const Text('Edit Notes'),
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ],
         ),
       ),
     );
+  }
+
+  void _shareReceipt(BuildContext context) {
+    final buffer = StringBuffer()
+      ..writeln('ADEGHE PROFESSIONAL SERVICES')
+      ..writeln('OFFICIAL PAYMENT RECEIPT')
+      ..writeln()
+      ..writeln('Receipt No: ${payment.receiptNumber}')
+      ..writeln('Date: ${_formatDate(payment.paymentDate)}')
+      ..writeln('Amount: $_currency${payment.amount.toStringAsFixed(2)}')
+      ..writeln('Method: ${_methodLabel(payment.method)}')
+      ..writeln('Collector: ${payment.collector}')
+      ..writeln('Status: ${payment.status.name.toUpperCase()}');
+    if (payment.referenceNumber != null) {
+      buffer.writeln('Reference: ${payment.referenceNumber}');
+    }
+    if (payment.remarks != null && payment.remarks!.isNotEmpty) {
+      buffer.writeln('Notes: ${payment.remarks}');
+    }
+    buffer.writeln();
+    buffer.writeln('Thank you for your patronage.');
+    SharePlus.instance.share(ShareParams(
+      text: buffer.toString(),
+      subject: 'Payment Receipt - ${payment.receiptNumber}',
+    ));
+  }
+
+  Future<void> _editNotes(BuildContext context) async {
+    final ctrl = TextEditingController(text: payment.remarks ?? '');
+    final updated = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Payment Notes'),
+        content: TextField(
+          controller: ctrl,
+          decoration: const InputDecoration(
+            hintText: 'Add remarks...',
+            border: OutlineInputBorder(),
+          ),
+          maxLines: 3,
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (updated == null || !context.mounted) return;
+    try {
+      final repo = await ref.read(paymentRepositoryProvider.future);
+      await repo.updatePaymentNotes(
+          payment.id,
+          updated.isEmpty ? null : updated);
+      ref.invalidate(paymentsForLoanProvider(payment.loanId));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Notes updated')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to update notes: $e')),
+        );
+      }
+    }
   }
 
   Widget _detailRow(String label, String value) {
@@ -155,7 +277,7 @@ class _PaymentCard extends StatelessWidget {
         title: const Text('Reverse Payment'),
         content: Text(
           'Are you sure you want to reverse payment ${payment.receiptNumber} '
-          'of \u20A6${payment.amount.toStringAsFixed(2)}? This will restore '
+          'of $_currency${payment.amount.toStringAsFixed(2)}? This will restore '
           'the amount to the outstanding balance.',
         ),
         actions: [
@@ -177,6 +299,18 @@ class _PaymentCard extends StatelessWidget {
       final repo = await ref.read(paymentRepositoryProvider.future);
       await repo.reversePayment(payment.id);
       ref.invalidate(paymentsForLoanProvider(payment.loanId));
+      ref.invalidate(dashboardDataProvider);
+      ref.invalidate(collectionListProvider);
+      ref.invalidate(reportSummaryProvider);
+      ref.invalidate(loanDetailsProvider(payment.loanId));
+      ref.invalidate(loanScheduleProvider(payment.loanId));
+      ref.invalidate(activeLoansForCustomerProvider(customerId));
+      ref.invalidate(savingsBalanceProvider(customerId));
+      ref.invalidate(savingsTransactionsProvider(customerId));
+      ref.invalidate(allSavingsAccountsProvider);
+      ref.invalidate(allAccountsWithNamesProvider);
+      ref.invalidate(customerProvider(customerId));
+      ref.invalidate(customerListProvider);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Payment reversed successfully')),
@@ -224,7 +358,7 @@ class _PaymentCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '\u20A6${payment.amount.toStringAsFixed(2)}',
+                      '$_currency${payment.amount.toStringAsFixed(2)}',
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,

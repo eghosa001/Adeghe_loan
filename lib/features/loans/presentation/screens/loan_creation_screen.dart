@@ -3,30 +3,79 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:loantrack/core/utils/currency_utils.dart';
 import 'package:loantrack/core/utils/date_utils.dart';
 import 'package:loantrack/features/loans/data/models/loan_entity.dart';
-import 'package:loantrack/features/loans/domain/loan_calculator.dart';
 import 'package:loantrack/features/loans/presentation/providers/loan_providers.dart';
 
-class LoanCreationScreen extends ConsumerWidget {
+class LoanCreationScreen extends ConsumerStatefulWidget {
   final String customerId;
-  const LoanCreationScreen({super.key, required this.customerId});
+  final Loan? existingLoan;
+  const LoanCreationScreen({super.key, required this.customerId, this.existingLoan});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<LoanCreationScreen> createState() => _LoanCreationScreenState();
+}
+
+class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
+  bool _hasLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.existingLoan != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _loadLoanForEdit());
+    }
+  }
+
+  Future<void> _loadLoanForEdit() async {
+    final loan = widget.existingLoan!;
+    final notifier = ref.read(loanFormProvider.notifier);
+    notifier.updateField(
+      loanType: loan.loanType,
+      principal: loan.amount,
+      interestRatePercent: loan.interestRate,
+      insuranceFeePercent: loan.insuranceFee,
+      commissionPercent: loan.commission,
+      processingFee: loan.processingFee,
+      administrativeFee: loan.administrativeFee,
+      otherCharges: loan.otherCharges,
+      duration: loan.duration,
+      repaymentStartDate: loan.repaymentStartDate,
+      notes: loan.notes ?? '',
+    );
+    if (loan.customCollectionAmount != null && loan.customCollectionAmount! > 0) {
+      notifier.updateField(customInstallmentAmount: loan.customCollectionAmount);
+    }
+    setState(() => _hasLoaded = true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final formState = ref.watch(loanFormProvider);
     final formNotifier = ref.read(loanFormProvider.notifier);
+    final isEdit = widget.existingLoan != null;
+
+    if (isEdit && !_hasLoaded) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Edit Loan')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Create New Loan'),
+        title: Text(isEdit ? 'Edit Loan' : 'Create New Loan'),
         actions: [
           IconButton(
             icon: const Icon(Icons.save),
             onPressed: () async {
               try {
-                await formNotifier.saveLoan(customerId);
+                if (isEdit) {
+                  await formNotifier.updateLoan(widget.existingLoan!, widget.customerId);
+                } else {
+                  await formNotifier.saveLoan(widget.customerId);
+                }
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Loan created successfully!')),
+                    SnackBar(content: Text(isEdit ? 'Loan updated!' : 'Loan created successfully!')),
                   );
                   Navigator.pop(context);
                 }
@@ -61,7 +110,8 @@ class LoanCreationScreen extends ConsumerWidget {
           _buildTextField(
             label: 'Loan Amount (Principal)',
             onChanged: (value) => formNotifier.updateField(
-                principal: double.tryParse(value) ?? 0.0),
+                principal: double.tryParse(value) ?? 0.0,
+                clearCustomInstallment: true),
           ),
           _buildTextField(
             label: 'Interest Rate (%)',
@@ -73,7 +123,10 @@ class LoanCreationScreen extends ConsumerWidget {
                 ? 'Duration (Days)'
                 : 'Duration (Weeks)',
             onChanged: (value) =>
-                formNotifier.updateField(duration: int.tryParse(value) ?? 0),
+                formNotifier.updateField(
+                  duration: int.tryParse(value) ?? 0,
+                  clearCustomInstallment: true,
+                ),
           ),
           ExpansionTile(
             title: const Text('Fees & charges'),
@@ -106,6 +159,33 @@ class LoanCreationScreen extends ConsumerWidget {
             ],
           ),
 
+          // Custom collection amount
+          _buildTextField(
+            label: 'Collection amount per period (optional)',
+            hint: 'Amount to collect per period (default: ${CurrencyUtils.format(formState.calculationResult?.installmentAmount ?? 0)})',
+            onChanged: (value) {
+              final parsed = double.tryParse(value);
+              formNotifier.updateField(
+                customInstallmentAmount: (parsed != null && parsed > 0) ? parsed : null,
+              );
+            },
+          ),
+
+          // Notes
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12.0),
+            child: TextFormField(
+              initialValue: formState.notes,
+              decoration: const InputDecoration(
+                labelText: 'Notes (optional)',
+                hintText: 'Additional notes about this loan',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 3,
+              onChanged: (value) => formNotifier.updateField(notes: value),
+            ),
+          ),
+
           // Start Date
           ListTile(
             contentPadding: EdgeInsets.zero,
@@ -128,25 +208,27 @@ class LoanCreationScreen extends ConsumerWidget {
 
           // Calculation Summary
           if (formState.calculationResult != null)
-            _buildSummary(formState.calculationResult!),
+            _buildSummary(formState),
         ],
       ),
     );
   }
 
   Widget _buildTextField(
-      {required String label, required ValueChanged<String> onChanged}) {
+      {required String label, required ValueChanged<String> onChanged, String? hint}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),
       child: TextFormField(
-        decoration: InputDecoration(labelText: label),
+        decoration: InputDecoration(labelText: label, hintText: hint),
         keyboardType: TextInputType.number,
         onChanged: onChanged,
       ),
     );
   }
 
-  Widget _buildSummary(LoanCalculationResult result) {
+  Widget _buildSummary(LoanFormData formState) {
+    final result = formState.calculationResult!;
+    final calculatedInstallment = result.installmentAmount;
     return Card(
       elevation: 2,
       child: Padding(
@@ -164,8 +246,12 @@ class LoanCreationScreen extends ConsumerWidget {
                 CurrencyUtils.format(result.totalRepayment),
                 isBold: true),
             _summaryRow(
-                'Installment:', CurrencyUtils.format(result.installmentAmount),
+                'Installment:', CurrencyUtils.format(calculatedInstallment),
                 isBold: true),
+            if (formState.customInstallmentAmount != null &&
+                formState.customInstallmentAmount! > 0)
+              _summaryRow(
+                  'Collection amount:', CurrencyUtils.format(formState.customInstallmentAmount!)),
           ],
         ),
       ),

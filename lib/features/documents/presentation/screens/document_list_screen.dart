@@ -1,11 +1,13 @@
 import 'dart:io';
 
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:loantrack/core/security/file_encryption_service.dart';
+import 'package:loantrack/core/widgets/empty_state.dart';
 
 import '../../data/document_repository.dart';
 import '../../data/models/document_entity.dart';
@@ -73,10 +75,11 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
       return image == null ? null : File(image.path);
     }
     final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: const ['pdf', 'png', 'jpg', 'jpeg']);
-    final selectedPath = result?.files.single.path;
-    return selectedPath == null ? null : File(selectedPath);
+      type: FileType.custom,
+      allowedExtensions: ['pdf', 'png', 'jpg', 'jpeg'],
+    );
+    if (result == null || result.files.isEmpty) return null;
+    return File(result.files.single.path!);
   }
 
   Future<void> _withProgress(Future<Object?> Function() action) async {
@@ -139,8 +142,11 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
         error: (error, _) =>
             Center(child: Text('Unable to load documents: $error')),
         data: (items) => items.isEmpty
-            ? const Center(
-                child: Text('No documents yet. Upload an image or PDF.'))
+            ? const EmptyState(
+                icon: Icons.folder_open_outlined,
+                title: 'No documents yet',
+                subtitle: 'Upload an image or PDF to keep records safe.',
+              )
             : ListView.separated(
                 padding: const EdgeInsets.all(12),
                 itemCount: items.length,

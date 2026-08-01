@@ -34,9 +34,11 @@ class Customer {
     this.nextOfKinRelation,
     this.nextOfKinPhone,
     this.guarantor1Name,
+    this.guarantor1Phone,
+    this.guarantor1Address,
     this.guarantor2Name,
-    this.guarantorPhone,
-    this.guarantorAddress,
+    this.guarantor2Phone,
+    this.guarantor2Address,
     this.guarantorPassportPath,
     this.nin,
     this.bvn,
@@ -47,7 +49,6 @@ class Customer {
     this.status = CustomerStatus.active,
     this.creditScore = 0,
     this.groupId,
-    this.totalOwed,
   });
 
   final String id;
@@ -70,9 +71,11 @@ class Customer {
   final String? nextOfKinRelation;
   final String? nextOfKinPhone;
   final String? guarantor1Name;
+  final String? guarantor1Phone;
+  final String? guarantor1Address;
   final String? guarantor2Name;
-  final String? guarantorPhone;
-  final String? guarantorAddress;
+  final String? guarantor2Phone;
+  final String? guarantor2Address;
   final String? guarantorPassportPath;
   final String? nin;
   final String? bvn;
@@ -84,7 +87,6 @@ class Customer {
   final CustomerStatus status;
   final double creditScore;
   final String? groupId;
-  final double? totalOwed;
 
   Customer copyWith({
     String? passportPath,
@@ -93,7 +95,6 @@ class Customer {
     CustomerStatus? status,
     String? groupId,
     bool clearGroupId = false,
-    double? totalOwed,
   }) =>
       Customer(
         id: id,
@@ -116,9 +117,11 @@ class Customer {
         nextOfKinRelation: nextOfKinRelation,
         nextOfKinPhone: nextOfKinPhone,
         guarantor1Name: guarantor1Name,
+        guarantor1Phone: guarantor1Phone,
+        guarantor1Address: guarantor1Address,
         guarantor2Name: guarantor2Name,
-        guarantorPhone: guarantorPhone,
-        guarantorAddress: guarantorAddress,
+        guarantor2Phone: guarantor2Phone,
+        guarantor2Address: guarantor2Address,
         guarantorPassportPath: guarantorPassportPath,
         nin: nin,
         bvn: bvn,
@@ -130,7 +133,6 @@ class Customer {
         status: status ?? this.status,
         creditScore: creditScore,
         groupId: clearGroupId ? null : (groupId ?? this.groupId),
-        totalOwed: totalOwed ?? this.totalOwed,
       );
 
   Map<String, Object?> toMap() => {
@@ -154,9 +156,11 @@ class Customer {
         'next_of_kin_relation': nextOfKinRelation,
         'next_of_kin_phone': nextOfKinPhone,
         'guarantor_1_name': guarantor1Name,
+        'guarantor_1_phone': guarantor1Phone,
+        'guarantor_1_address': guarantor1Address,
         'guarantor_2_name': guarantor2Name,
-        'guarantor_phone': guarantorPhone,
-        'guarantor_address': guarantorAddress,
+        'guarantor_2_phone': guarantor2Phone,
+        'guarantor_2_address': guarantor2Address,
         'guarantor_passport_path': guarantorPassportPath,
         'nin': nin,
         'bvn': bvn,
@@ -168,7 +172,6 @@ class Customer {
         'status': status.value,
         'credit_score': creditScore,
         'group_id': groupId,
-        // totalOwed is computed, not persisted
       };
 
   factory Customer.fromMap(Map<String, Object?> map) => Customer(
@@ -192,9 +195,11 @@ class Customer {
         nextOfKinRelation: map['next_of_kin_relation'] as String?,
         nextOfKinPhone: map['next_of_kin_phone'] as String?,
         guarantor1Name: map['guarantor_1_name'] as String?,
+        guarantor1Phone: map['guarantor_1_phone'] as String?,
+        guarantor1Address: map['guarantor_1_address'] as String?,
         guarantor2Name: map['guarantor_2_name'] as String?,
-        guarantorPhone: map['guarantor_phone'] as String?,
-        guarantorAddress: map['guarantor_address'] as String?,
+        guarantor2Phone: map['guarantor_2_phone'] as String?,
+        guarantor2Address: map['guarantor_2_address'] as String?,
         guarantorPassportPath: map['guarantor_passport_path'] as String?,
         nin: map['nin'] as String?,
         bvn: map['bvn'] as String?,
@@ -206,6 +211,5 @@ class Customer {
         status: CustomerStatusValue.fromValue(map['status'] as String?),
         creditScore: (map['credit_score'] as num?)?.toDouble() ?? 0,
         groupId: map['group_id'] as String?,
-        totalOwed: (map['total_owed'] as num?)?.toDouble(),
       );
 }

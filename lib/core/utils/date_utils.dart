@@ -146,27 +146,4 @@ class AppDateUtils {
   /// sites.
   static DateTime addWeeks(DateTime date, int weeks) =>
       date.add(Duration(days: weeks * 7));
-
-  /// Next date matching [weekday] (`DateTime.monday`..`DateTime.sunday`),
-  /// starting the search the day *after* [from] so it never returns
-  /// [from] itself.
-  static DateTime nextWeekday(DateTime from, int weekday) {
-    var next = stripTime(from).add(const Duration(days: 1));
-    while (next.weekday != weekday) {
-      next = next.add(const Duration(days: 1));
-    }
-    return next;
-  }
-
-  /// Rolls [date] forward to the next non-weekend day. Public-holiday
-  /// awareness lives in the loans domain layer (`schedule_generator.dart`,
-  /// Part 8) since it needs the holidays repository — this helper only
-  /// knows about Saturdays/Sundays.
-  static DateTime skipWeekend(DateTime date) {
-    var result = date;
-    while (isWeekend(result)) {
-      result = result.add(const Duration(days: 1));
-    }
-    return result;
-  }
 }

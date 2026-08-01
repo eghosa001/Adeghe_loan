@@ -53,6 +53,122 @@ void main() {
       expect(result.overpaymentSurplus, closeTo(1, 0.001));
       expect(result.appliedToLoan, 10000);
     });
+
+    // ── Payment beyond the next installment (H1 regression guard) ───────────
+    test('payment larger than one installment applies fully to the loan', () {
+      // outstanding=10000, payment=7000, NO installment context supplied —
+      // a settlement/"quick pay" payment caps at the outstanding balance and
+      // must reduce the loan by the full amount, not dump the rest to savings.
+      final result = computePaymentSplit(
+        paymentAmount: 7000,
+        outstandingBalance: 10000,
+      );
+      expect(result.appliedToLoan, 7000);
+      expect(result.overpaymentSurplus, 0);
+      expect(result.newLoanBalance, 3000);
+    });
+
+    test('payment equals outstanding: clears the loan, no surplus', () {
+      final result = computePaymentSplit(
+        paymentAmount: 5000,
+        outstandingBalance: 5000,
+      );
+      expect(result.appliedToLoan, 5000);
+      expect(result.overpaymentSurplus, 0);
+      expect(result.newLoanBalance, 0);
+    });
+
+    test('payment less than outstanding: partial, no surplus', () {
+      final result = computePaymentSplit(
+        paymentAmount: 3000,
+        outstandingBalance: 10000,
+      );
+      expect(result.appliedToLoan, 3000);
+      expect(result.overpaymentSurplus, 0);
+      expect(result.newLoanBalance, 7000);
+    });
+
+    test('payment beyond outstanding: capped at outstanding, surplus to savings', () {
+      // outstanding=2000, payment=10000 — only the excess beyond the balance
+      // is credited to savings.
+      final result = computePaymentSplit(
+        paymentAmount: 10000,
+        outstandingBalance: 2000,
+      );
+      expect(result.appliedToLoan, 2000);
+      expect(result.overpaymentSurplus, 8000);
+      expect(result.newLoanBalance, 0);
+    });
+
+    test('zero outstanding: entire payment goes to savings', () {
+      final result = computePaymentSplit(
+        paymentAmount: 5000,
+        outstandingBalance: 0,
+      );
+      expect(result.appliedToLoan, 0);
+      expect(result.overpaymentSurplus, 5000);
+      expect(result.newLoanBalance, 0);
+    });
+
+    // ── Excess over the installment goes to savings (2026-08-01 rule) ────────
+    test('excess over installment: applied = installment, surplus to savings', () {
+      // outstanding=10000, installment=1000, payment=1500 — the 500 above the
+      // installment is credited to savings, NOT applied to the loan.
+      final result = computePaymentSplit(
+        paymentAmount: 1500,
+        outstandingBalance: 10000,
+        installmentDue: 1000,
+      );
+      expect(result.appliedToLoan, 1000);
+      expect(result.overpaymentSurplus, 500);
+      expect(result.newLoanBalance, 9000);
+    });
+
+    test('payment at or below installment applies fully to the loan', () {
+      final result = computePaymentSplit(
+        paymentAmount: 800,
+        outstandingBalance: 10000,
+        installmentDue: 1000,
+      );
+      expect(result.appliedToLoan, 800);
+      expect(result.overpaymentSurplus, 0);
+      expect(result.newLoanBalance, 9200);
+    });
+
+    test('exact installment: no surplus', () {
+      final result = computePaymentSplit(
+        paymentAmount: 1000,
+        outstandingBalance: 10000,
+        installmentDue: 1000,
+      );
+      expect(result.appliedToLoan, 1000);
+      expect(result.overpaymentSurplus, 0);
+      expect(result.newLoanBalance, 9000);
+    });
+
+    test('zero/omitted installment falls back to the outstanding balance', () {
+      final result = computePaymentSplit(
+        paymentAmount: 7000,
+        outstandingBalance: 10000,
+        installmentDue: 0,
+      );
+      expect(result.appliedToLoan, 7000);
+      expect(result.overpaymentSurplus, 0);
+      expect(result.newLoanBalance, 3000);
+    });
+
+    test('large overpayment with installment context caps loan at installment', () {
+      // outstanding=10000, installment=1000, payment=12000 — 1000 to the loan,
+      // 11000 to savings.
+      final result = computePaymentSplit(
+        paymentAmount: 12000,
+        outstandingBalance: 10000,
+        installmentDue: 1000,
+      );
+      expect(result.appliedToLoan, 1000);
+      expect(result.overpaymentSurplus, 11000);
+      expect(result.newLoanBalance, 9000);
+    });
   });
 
   group('computeReversalLoanDelta', () {
@@ -175,13 +291,6 @@ void main() {
         (amount: 8000, overpaymentSurplus: p2.overpaymentSurplus),
       ]);
 
-      // scheduleTotal (7000) must equal the loan's outstanding balance after reversal.
-      // Reversing P1: new loan balance = P2.newLoanBalance + P1.appliedToLoan
-      //             = 0 + 3000 = 3000.  Wait — that doesn't equal 7000.
-      // Actually after reversal, loan balance = original_after_P2 + appliedToLoan(P1)
-      //                                      = 0 + 3000 = 3000 ← loan outstanding
-      // Schedule total from P2 only = 7000 ← schedule applied amount
-      // The invariant: loan.outstanding (3000) + scheduleTotal (7000) = original outstanding (10000).
       expect(p2.appliedToLoan, closeTo(7000, 0.001));
       expect(scheduleTotal, closeTo(7000, 0.001)); // schedule correctly reflects 7000 applied
       expect(p2.overpaymentSurplus, closeTo(1000, 0.001));

@@ -40,64 +40,15 @@ class DatabaseFailure extends Failure {
   const DatabaseFailure(super.message, {super.code, super.cause});
 }
 
-/// A schema migration failed to apply.
-class MigrationFailure extends Failure {
-  const MigrationFailure(super.message, {super.code, super.cause});
-}
-
 /// User-entered data failed validation (e.g. loan amount out of range,
 /// invalid phone number, duplicate customer ID).
 class ValidationFailure extends Failure {
   const ValidationFailure(super.message, {super.code, super.cause});
 }
 
-/// PIN or biometric authentication problem.
-class AuthFailure extends Failure {
-  const AuthFailure(super.message, {super.code, super.cause});
-}
-
-/// Account temporarily locked after too many failed PIN attempts.
-class LockoutFailure extends Failure {
-  final Duration remaining;
-  const LockoutFailure(super.message, this.remaining,
-      {super.code, super.cause});
-}
-
-/// File or field encryption/decryption problem.
-class EncryptionFailure extends Failure {
-  const EncryptionFailure(super.message, {super.code, super.cause});
-}
-
 /// The requested record does not exist.
 class NotFoundFailure extends Failure {
   const NotFoundFailure(super.message, {super.code, super.cause});
-}
-
-/// On-device file storage problem (documents, backups, exports).
-class StorageFailure extends Failure {
-  const StorageFailure(super.message, {super.code, super.cause});
-}
-
-/// Connectivity or cloud-sync problem.
-class NetworkFailure extends Failure {
-  const NetworkFailure(super.message, {super.code, super.cause});
-}
-
-/// A backup or restore operation failed.
-class BackupFailure extends Failure {
-  const BackupFailure(super.message, {super.code, super.cause});
-}
-
-/// A required device permission (camera, storage, biometrics,
-/// notifications) is missing or was denied.
-class PermissionFailure extends Failure {
-  const PermissionFailure(super.message, {super.code, super.cause});
-}
-
-/// Catch-all for anything that doesn't fit the categories above. Prefer
-/// adding a specific [Failure] subtype over reaching for this.
-class UnknownFailure extends Failure {
-  const UnknownFailure(super.message, {super.code, super.cause});
 }
 
 // ===========================================================================

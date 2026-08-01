@@ -1,4 +1,5 @@
 import 'package:sqflite_sqlcipher/sqflite.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../core/database/database_service.dart';
 import '../../../core/error/failure.dart';
@@ -16,7 +17,7 @@ class AuditLogRepository {
     try {
       final db = await _database;
       final entry = AuditLog(
-        id: DateTime.now().microsecondsSinceEpoch.toString(),
+        id: const Uuid().v4(),
         user: user,
         action: action,
         timestamp: DateTime.now(),

@@ -4,6 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/utils/currency_utils.dart';
 import '../../data/models/savings_transaction_entity.dart';
 import '../providers/savings_providers.dart';
+import '../../../business/presentation/providers/business_providers.dart';
+import '../../../dashboard/presentation/providers/dashboard_provider.dart';
+import '../../../collection/presentation/providers/collection_provider.dart';
+import '../../../reports/presentation/providers/report_provider.dart';
 
 class SavingsSection extends ConsumerWidget {
   const SavingsSection({super.key, required this.customerId});
@@ -111,6 +115,8 @@ class SavingsSection extends ConsumerWidget {
     final amountCtrl = TextEditingController();
     final noteCtrl = TextEditingController();
     final formKey = GlobalKey<FormState>();
+    final currency =
+        ref.read(currencySymbolProvider).valueOrNull ?? CurrencyUtils.defaultSymbol;
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -123,8 +129,8 @@ class SavingsSection extends ConsumerWidget {
             children: [
               TextFormField(
                 controller: amountCtrl,
-                decoration: const InputDecoration(
-                    labelText: 'Amount', prefixText: '\u20A6'),
+                decoration: InputDecoration(
+                    labelText: 'Amount', prefixText: currency),
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
                 autofocus: true,
@@ -164,7 +170,8 @@ class SavingsSection extends ConsumerWidget {
     final note = noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim();
 
     try {
-      await ref.read(savingsRepositoryProvider).recordTransaction(
+      final repo = await ref.read(savingsRepositoryProvider.future);
+      await repo.recordTransaction(
             customerId: customerId,
             type: isDeposit
                 ? SavingsTransactionType.deposit
@@ -174,6 +181,11 @@ class SavingsSection extends ConsumerWidget {
           );
       ref.invalidate(savingsBalanceProvider(customerId));
       ref.invalidate(savingsTransactionsProvider(customerId));
+      ref.invalidate(allSavingsAccountsProvider);
+      ref.invalidate(allAccountsWithNamesProvider);
+      ref.invalidate(dashboardDataProvider);
+      ref.invalidate(collectionListProvider);
+      ref.invalidate(reportSummaryProvider);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -203,7 +215,7 @@ class _TransactionTile extends StatelessWidget {
     final label = switch (tx.type) {
       SavingsTransactionType.deposit => 'Deposit',
       SavingsTransactionType.withdrawal => 'Withdrawal',
-      SavingsTransactionType.overpayment => 'Overpayment credit',
+      SavingsTransactionType.overpayment => 'Automatic Savings Deposit',
     };
 
     return ListTile(

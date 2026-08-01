@@ -2,11 +2,12 @@ import 'package:loantrack/core/utils/date_utils.dart';
 
 enum LoanType { daily, weekly }
 
-enum LoanStatus { active, completed, defaulted, pending }
+enum LoanStatus { active, completed, defaulted, pending, cancelled }
 
 class Loan {
   final String id;
   final String customerId;
+  final String? customerName;
   final LoanType loanType;
   final LoanStatus status;
 
@@ -29,12 +30,13 @@ class Loan {
   final DateTime expectedCompletionDate;
 
   // Optional fields
-  final String? collector;
   final String? notes;
+  final double? customCollectionAmount;
 
   Loan({
     required this.id,
     required this.customerId,
+    this.customerName,
     required this.loanType,
     this.status = LoanStatus.active,
     required this.amount,
@@ -51,8 +53,8 @@ class Loan {
     required this.outstandingBalance,
     required this.installmentAmount,
     required this.expectedCompletionDate,
-    this.collector,
     this.notes,
+    this.customCollectionAmount,
   });
 
   Map<String, dynamic> toMap() {
@@ -79,19 +81,69 @@ class Loan {
       'outstanding_balance': outstandingBalance,
       'expected_completion_date':
           AppDateUtils.formatForStorage(expectedCompletionDate),
-      'collector': collector,
       'notes': notes,
+      'custom_collection_amount': customCollectionAmount,
     };
+  }
+
+  Loan copyWith({
+    String? id,
+    String? customerId,
+    String? customerName,
+    LoanType? loanType,
+    LoanStatus? status,
+    double? amount,
+    double? interestRate,
+    double? insuranceFee,
+    double? commission,
+    double? processingFee,
+    double? administrativeFee,
+    double? otherCharges,
+    int? duration,
+    DateTime? loanDate,
+    DateTime? repaymentStartDate,
+    double? totalRepayment,
+    double? outstandingBalance,
+    double? installmentAmount,
+    DateTime? expectedCompletionDate,
+    String? notes,
+    bool clearNotes = false,
+    double? customCollectionAmount,
+  }) {
+    return Loan(
+      id: id ?? this.id,
+      customerId: customerId ?? this.customerId,
+      customerName: customerName ?? this.customerName,
+      loanType: loanType ?? this.loanType,
+      status: status ?? this.status,
+      amount: amount ?? this.amount,
+      interestRate: interestRate ?? this.interestRate,
+      insuranceFee: insuranceFee ?? this.insuranceFee,
+      commission: commission ?? this.commission,
+      processingFee: processingFee ?? this.processingFee,
+      administrativeFee: administrativeFee ?? this.administrativeFee,
+      otherCharges: otherCharges ?? this.otherCharges,
+      duration: duration ?? this.duration,
+      loanDate: loanDate ?? this.loanDate,
+      repaymentStartDate: repaymentStartDate ?? this.repaymentStartDate,
+      totalRepayment: totalRepayment ?? this.totalRepayment,
+      outstandingBalance: outstandingBalance ?? this.outstandingBalance,
+      installmentAmount: installmentAmount ?? this.installmentAmount,
+      expectedCompletionDate: expectedCompletionDate ?? this.expectedCompletionDate,
+      notes: clearNotes ? null : (notes ?? this.notes),
+      customCollectionAmount: customCollectionAmount ?? this.customCollectionAmount,
+    );
   }
 
   factory Loan.fromMap(Map<String, dynamic> map) {
     return Loan(
       id: map['id'] as String,
       customerId: map['customer_id'] as String,
+      customerName: map['customer_name'] as String?,
       loanType: LoanType.values
           .firstWhere((e) => e.name == map['loan_type'], orElse: () => LoanType.daily),
       status: LoanStatus.values
-          .firstWhere((e) => e.name == map['status'], orElse: () => LoanStatus.pending),
+          .firstWhere((e) => e.name == map['status'], orElse: () => LoanStatus.active),
       amount: (map['amount'] as num).toDouble(),
       interestRate: (map['interest_rate'] as num).toDouble(),
       insuranceFee: (map['insurance_fee'] as num?)?.toDouble() ?? 0.0,
@@ -99,18 +151,18 @@ class Loan {
       processingFee: (map['processing_fee'] as num?)?.toDouble() ?? 0.0,
       administrativeFee: (map['admin_fee'] as num?)?.toDouble() ?? 0.0,
       otherCharges: (map['other_charges'] as num?)?.toDouble() ?? 0.0,
-      duration: ((map['duration_days'] ?? map['duration_weeks']) as num?)?.toInt() ?? 0,
-      loanDate: AppDateUtils.tryParseStorage(map['loan_date'] as String)!,
+      duration: (((map['duration_days'] ?? map['duration_weeks']) as num?)?.toInt() ?? 1).clamp(1, 9999),
+      loanDate: AppDateUtils.tryParseStorage(map['loan_date'] as String?) ?? DateTime.now(),
       repaymentStartDate:
-          AppDateUtils.tryParseStorage(map['start_date'] as String)!,
+          AppDateUtils.tryParseStorage(map['start_date'] as String?) ?? DateTime.now(),
       totalRepayment: (map['total_repayment'] as num).toDouble(),
       outstandingBalance: (map['outstanding_balance'] as num).toDouble(),
       installmentAmount:
           ((map['daily_payment'] ?? map['weekly_payment']) as num?)?.toDouble() ?? 0.0,
       expectedCompletionDate: AppDateUtils.tryParseStorage(
-          map['expected_completion_date'] as String)!,
-      collector: map['collector'] as String?,
+          map['expected_completion_date'] as String?) ?? DateTime.now(),
       notes: map['notes'] as String?,
+      customCollectionAmount: (map['custom_collection_amount'] as num?)?.toDouble(),
     );
   }
 }

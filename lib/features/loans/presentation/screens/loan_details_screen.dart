@@ -1,11 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:loantrack/core/di/providers.dart';
 import 'package:loantrack/core/utils/currency_utils.dart';
 import 'package:loantrack/core/utils/date_utils.dart';
+import 'package:loantrack/features/loans/data/loan_repository.dart';
 import 'package:loantrack/features/loans/data/models/loan_entity.dart';
 import 'package:loantrack/features/loans/data/models/repayment_installment_entity.dart';
 import 'package:loantrack/features/loans/presentation/providers/loan_providers.dart';
+import 'package:loantrack/features/savings/presentation/providers/savings_providers.dart';
+import 'package:loantrack/features/payments/presentation/providers/payment_providers.dart';
+import 'package:loantrack/features/collection/presentation/providers/collection_provider.dart';
+import 'package:loantrack/features/customers/presentation/providers/customer_providers.dart';
+import 'package:loantrack/features/dashboard/presentation/providers/dashboard_provider.dart';
+import 'package:loantrack/features/reports/presentation/providers/report_provider.dart';
 
 class LoanDetailsScreen extends ConsumerWidget {
   final String loanId;
@@ -32,6 +40,12 @@ class LoanDetailsScreen extends ConsumerWidget {
                   actions: [
                     if (loan.status == LoanStatus.active)
                       IconButton(
+                        icon: const Icon(Icons.savings_outlined),
+                        tooltip: 'Clear with Savings',
+                        onPressed: () => _clearWithSavings(context, ref, loan),
+                      ),
+                    if (loan.status == LoanStatus.active)
+                      IconButton(
                         icon: const Icon(Icons.payment),
                         tooltip: 'Record Payment',
                         onPressed: () {
@@ -47,11 +61,32 @@ class LoanDetailsScreen extends ConsumerWidget {
                           );
                         },
                       ),
+                    if (loan.status == LoanStatus.active)
+                      IconButton(
+                        icon: const Icon(Icons.edit_outlined),
+                        tooltip: 'Edit Loan',
+                        onPressed: () =>
+                            context.push('/loans/${loan.id}/edit', extra: loan),
+                      ),
+                    if (loan.status == LoanStatus.active)
+                      IconButton(
+                        icon: const Icon(Icons.cancel_outlined, color: Colors.redAccent),
+                        tooltip: 'Cancel Loan',
+                        onPressed: () => _cancelLoan(context, ref, loan),
+                      ),
                     IconButton(
                       icon: const Icon(Icons.calendar_month_outlined),
                       tooltip: 'Repayment Calendar',
                       onPressed: () => context
                           .push('/loans/$loanId/repayment-calendar', extra: loan),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.receipt_long_outlined),
+                      tooltip: 'Payment History',
+                      onPressed: () => context.push(
+                        '/loans/$loanId/payments',
+                        extra: {'customerId': loan.customerId},
+                      ),
                     ),
                   ],
                   flexibleSpace: FlexibleSpaceBar(
@@ -79,6 +114,11 @@ class LoanDetailsScreen extends ConsumerWidget {
                           Text(
                               'Completion Date: ${AppDateUtils.formatDate(loan.expectedCompletionDate)}'),
                           Text('Status: ${loan.status.name.toUpperCase()}'),
+                          if (loan.notes != null && loan.notes!.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text('Notes: ${loan.notes}',
+                                style: Theme.of(context).textTheme.bodySmall),
+                          ],
                         ],
                       ),
                     ),
@@ -165,5 +205,145 @@ class LoanDetailsScreen extends ConsumerWidget {
       RepaymentStatus.partial => Colors.orange.shade100,
       RepaymentStatus.pending => Colors.grey.shade200,
     };
+  }
+
+  Future<void> _cancelLoan(BuildContext context, WidgetRef ref, Loan loan) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancel this loan?'),
+        content: Text(
+          'This will mark the loan as cancelled. '
+          'Outstanding balance (${CurrencyUtils.format(loan.outstandingBalance)}) will be set to zero.\n\n'
+          'This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('No')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Yes, cancel loan')),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    try {
+      final repo = await ref.read(loanRepositoryProvider.future);
+      final result = await repo.cancelLoan(loan.id);
+      result.when(
+        success: (_) {
+          ref.invalidate(loanDetailsProvider(loan.id));
+          ref.invalidate(loanScheduleProvider(loan.id));
+          ref.invalidate(dashboardDataProvider);
+          ref.invalidate(collectionListProvider);
+          ref.invalidate(reportSummaryProvider);
+          ref.invalidate(allLoansProvider);
+          logAuditAction(ref, 'CANCEL', 'Loan ${loan.id} cancelled');
+        },
+        failure: (f) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Failed: $f')),
+            );
+          }
+        },
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _clearWithSavings(
+      BuildContext context, WidgetRef ref, Loan loan) async {
+    final double savingsBalance;
+    try {
+      savingsBalance =
+          await ref.read(savingsBalanceProvider(loan.customerId).future);
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to load savings balance.')),
+        );
+      }
+      return;
+    }
+
+    if (!context.mounted) return;
+
+    if (savingsBalance < loan.outstandingBalance) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+          'Insufficient savings (${CurrencyUtils.format(savingsBalance)}) '
+          'to clear this loan (${CurrencyUtils.format(loan.outstandingBalance)})',
+        ),
+        backgroundColor: Colors.orange,
+      ));
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear loan with savings?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+                'Outstanding: ${CurrencyUtils.format(loan.outstandingBalance)}'),
+            const SizedBox(height: 4),
+            Text('Savings balance: ${CurrencyUtils.format(savingsBalance)}'),
+            const SizedBox(height: 12),
+            const Text(
+              'This will deduct the outstanding amount from the customer\'s savings and mark the loan as completed.',
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    try {
+      final repo = await ref.read(paymentRepositoryProvider.future);
+      await repo.clearLoanWithSavings(
+        loanId: loan.id,
+        customerId: loan.customerId,
+      );
+      ref.invalidate(loanDetailsProvider(loan.id));
+      ref.invalidate(loanScheduleProvider(loan.id));
+      ref.invalidate(savingsBalanceProvider(loan.customerId));
+      ref.invalidate(savingsTransactionsProvider(loan.customerId));
+      ref.invalidate(allSavingsAccountsProvider);
+      ref.invalidate(allAccountsWithNamesProvider);
+      ref.invalidate(activeLoansForCustomerProvider(loan.customerId));
+      ref.invalidate(dashboardDataProvider);
+      ref.invalidate(collectionListProvider);
+      ref.invalidate(reportSummaryProvider);
+      ref.invalidate(customerProvider(loan.customerId));
+      ref.invalidate(paymentsForLoanProvider(loan.id));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Loan cleared with savings.')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed: $e')),
+        );
+      }
+    }
   }
 }

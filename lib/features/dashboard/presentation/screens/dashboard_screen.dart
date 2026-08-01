@@ -6,6 +6,7 @@ import 'package:loantrack/core/widgets/app_drawer.dart';
 import '../../../../core/utils/currency_utils.dart';
 import '../../data/models/dashboard_data.dart';
 import '../providers/dashboard_provider.dart';
+import '../../../notifications/presentation/providers/notification_provider.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -17,6 +18,30 @@ class DashboardScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Dashboard'),
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
+        ),
+        actions: [
+          Consumer(
+            builder: (context, ref, _) {
+              final notificationCount =
+                  ref.watch(notificationProvider).valueOrNull?.length ?? 0;
+              return IconButton(
+                tooltip: 'Notifications',
+                icon: Badge(
+                  isLabelVisible: notificationCount > 0,
+                  label: Text('$notificationCount',
+                      style: const TextStyle(fontSize: 10)),
+                  child: const Icon(Icons.notifications_outlined),
+                ),
+                onPressed: () => context.push('/notifications'),
+              );
+            },
+          ),
+        ],
       ),
       drawer: const AppDrawer(currentRoute: '/dashboard'),
       body: dashboardAsync.when(
@@ -29,7 +54,7 @@ class DashboardScreen extends ConsumerWidget {
           child: ListView(
             padding: const EdgeInsets.all(16.0),
             children: [
-              _StatCardsRow(data: data),
+              _MinimalStatCards(data: data),
               const SizedBox(height: 24),
               Text(
                 'Quick Actions',
@@ -62,7 +87,8 @@ class DashboardScreen extends ConsumerWidget {
                       ),
                     )),
               ],
-              const SizedBox(height: 24),
+              if (data.recentLoans.isNotEmpty && data.recentPayments.isNotEmpty)
+                const SizedBox(height: 24),
               if (data.recentPayments.isNotEmpty) ...[
                 Text(
                   'Recent Payments',
@@ -90,6 +116,44 @@ class DashboardScreen extends ConsumerWidget {
                       ),
                     )),
               ],
+              if (data.recentSavingsTransactions.isNotEmpty) ...[
+                const SizedBox(height: 24),
+                Text(
+                  'Recent Savings',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                ...data.recentSavingsTransactions.take(5).map((txn) => Card(
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: txn.isCredit
+                              ? Colors.green.withValues(alpha: 0.1)
+                              : Colors.red.withValues(alpha: 0.1),
+                          child: Icon(
+                            txn.isCredit
+                                ? Icons.arrow_downward
+                                : Icons.arrow_upward,
+                            color: txn.isCredit ? Colors.green : Colors.red,
+                            size: 18,
+                          ),
+                        ),
+                        title: Text(txn.customerName),
+                        subtitle: Text(
+                          '${txn.isCredit ? 'Deposit' : 'Withdrawal'} — ${txn.createdAt.split('T').first}',
+                        ),
+                        trailing: Text(
+                          CurrencyUtils.format(txn.amount),
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: txn.isCredit ? Colors.green : Colors.red,
+                          ),
+                        ),
+                        onTap: () => context.push('/customers/${txn.customerId}'),
+                      ),
+                    )),
+              ],
             ],
           ),
         ),
@@ -98,8 +162,8 @@ class DashboardScreen extends ConsumerWidget {
   }
 }
 
-class _StatCardsRow extends StatelessWidget {
-  const _StatCardsRow({required this.data});
+class _MinimalStatCards extends StatelessWidget {
+  const _MinimalStatCards({required this.data});
   final DashboardData data;
 
   @override
@@ -110,141 +174,83 @@ class _StatCardsRow extends StatelessWidget {
           children: [
             Expanded(
               child: _StatCard(
+                label: 'Active Loans',
+                value: data.activeLoans.toString(),
+                icon: Icons.credit_card,
+                color: Colors.green,
+                onTap: () => context.go('/reports'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _StatCard(
+                label: 'Outstanding',
+                value: CurrencyUtils.format(data.outstandingBalance),
+                icon: Icons.account_balance,
+                color: Colors.red,
+                onTap: () => context.go('/reports'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: _StatCard(
+                label: 'Collected',
+                value: CurrencyUtils.format(data.totalCollected),
+                icon: Icons.savings,
+                color: Colors.teal,
+                onTap: () => context.go('/reports'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _StatCard(
+                label: 'Disbursed',
+                value: CurrencyUtils.format(data.totalDisbursed),
+                icon: Icons.trending_up,
+                color: Colors.orange,
+                onTap: () => context.go('/reports'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: _StatCard(
+                label: 'Savings',
+                value: CurrencyUtils.format(data.totalSavingsBalance),
+                icon: Icons.account_balance_wallet,
+                color: Colors.indigo,
+                onTap: () => context.go('/savings'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _StatCard(
                 label: 'Customers',
                 value: data.totalCustomers.toString(),
-                icon: Icons.people_outline,
+                icon: Icons.people,
                 color: Colors.blue,
                 onTap: () => context.push('/customers'),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 10),
             Expanded(
               child: _StatCard(
-                label: 'Active Loans',
-                value: data.activeLoans.toString(),
-                icon: Icons.account_balance_wallet_outlined,
-                color: Colors.green,
-                onTap: () => context.push('/reports'),
+                label: 'Groups',
+                value: data.totalGroups.toString(),
+                icon: Icons.group,
+                color: Colors.purple,
+                onTap: () => context.push('/groups'),
               ),
             ),
           ],
         ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _StatCard(
-                label: 'Daily Active',
-                value: data.dailyActiveLoans.toString(),
-                icon: Icons.today,
-                color: Colors.lightGreen,
-                onTap: () => context.push('/reports'),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _StatCard(
-                label: 'Weekly Active',
-                value: data.weeklyActiveLoans.toString(),
-                icon: Icons.date_range,
-                color: Colors.green.shade700,
-                onTap: () => context.push('/reports'),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _StatCard(
-                label: 'Total Disbursed',
-                value: CurrencyUtils.format(data.totalDisbursed),
-                icon: Icons.trending_up,
-                color: Colors.orange,
-                onTap: () => context.push('/reports'),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _StatCard(
-                label: 'Total Collected',
-                value: CurrencyUtils.format(data.totalCollected),
-                icon: Icons.savings_outlined,
-                color: Colors.teal,
-                onTap: () => context.push('/collections'),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _StatCard(
-                label: 'Collected Today',
-                value: CurrencyUtils.format(data.dailyCollected),
-                icon: Icons.today,
-                color: Colors.teal.shade300,
-                onTap: () => context.push('/collections'),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _StatCard(
-                label: 'Collected (7d)',
-                value: CurrencyUtils.format(data.weeklyCollected),
-                icon: Icons.date_range,
-                color: Colors.teal.shade700,
-                onTap: () => context.push('/collections'),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _StatCard(
-                label: 'Due Today',
-                value: CurrencyUtils.format(data.dailyOutstandingBalance),
-                icon: Icons.calendar_today,
-                color: Colors.redAccent,
-                onTap: () => context.push('/collections'),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _StatCard(
-                label: 'Due (7d)',
-                value: CurrencyUtils.format(data.weeklyOutstandingBalance),
-                icon: Icons.view_week,
-                color: Colors.red.shade700,
-                onTap: () => context.push('/collections'),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        _StatCard(
-          label: 'Total Outstanding Balance',
-          value: CurrencyUtils.format(data.outstandingBalance),
-          icon: Icons.receipt_long_outlined,
-          color: Colors.red,
-          fullWidth: true,
-          onTap: () => context.push('/collections'),
-        ),
-        if (data.totalSavingsBalance > 0) ...[
-          const SizedBox(height: 12),
-          _StatCard(
-            label: 'Total Savings Held',
-            value: CurrencyUtils.format(data.totalSavingsBalance),
-            icon: Icons.account_balance_outlined,
-            color: Colors.indigo,
-            fullWidth: true,
-            onTap: () => context.push('/customers'),
-          ),
-        ],
       ],
     );
   }
@@ -256,7 +262,6 @@ class _StatCard extends StatelessWidget {
     required this.value,
     required this.icon,
     required this.color,
-    this.fullWidth = false,
     this.onTap,
   });
 
@@ -264,40 +269,33 @@ class _StatCard extends StatelessWidget {
   final String value;
   final IconData icon;
   final Color color;
-  final bool fullWidth;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final card = Card(
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Row(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
           children: [
             CircleAvatar(
+              radius: 18,
               backgroundColor: color.withValues(alpha: 0.1),
-              child: Icon(icon, color: color, size: 20),
+              child: Icon(icon, color: color, size: 18),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label,
-                      style: Theme.of(context).textTheme.bodySmall),
-                  const SizedBox(height: 4),
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(value,
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(fontWeight: FontWeight.bold)),
-                  ),
-                ],
-              ),
+            const SizedBox(height: 8),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(value,
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold)),
             ),
+            const SizedBox(height: 2),
+            Text(label,
+                style: Theme.of(context).textTheme.bodySmall,
+                textAlign: TextAlign.center),
           ],
         ),
       ),
@@ -338,28 +336,40 @@ class _StatusChip extends StatelessWidget {
 class _QuickActionsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceAround,
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      alignment: WrapAlignment.spaceAround,
       children: [
         _QuickAction(
           icon: Icons.person_add_outlined,
-          label: 'New\nCustomer',
+          label: 'Add\nCustomer',
           onTap: () => context.push('/customers/new'),
         ),
         _QuickAction(
           icon: Icons.request_quote_outlined,
-          label: 'New\nLoan',
+          label: 'Create\nLoan',
           onTap: () => context.push('/customers'),
         ),
         _QuickAction(
           icon: Icons.payment,
           label: 'Record\nPayment',
-          onTap: () => context.push('/collections'),
+          onTap: () => context.go('/collections'),
         ),
         _QuickAction(
-          icon: Icons.receipt_long_outlined,
+          icon: Icons.savings_outlined,
+          label: 'Savings\nDeposit',
+          onTap: () => context.push('/savings'),
+        ),
+        _QuickAction(
+          icon: Icons.logout,
+          label: 'Savings\nWithdrawal',
+          onTap: () => context.push('/savings'),
+        ),
+        _QuickAction(
+          icon: Icons.account_balance_wallet_outlined,
           label: 'Collection\nList',
-          onTap: () => context.push('/collections'),
+          onTap: () => context.go('/collections'),
         ),
       ],
     );
@@ -383,21 +393,22 @@ class _QuickAction extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.all(12.0),
+        padding: const EdgeInsets.all(8.0),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             CircleAvatar(
-              radius: 24,
+              radius: 22,
               backgroundColor:
                   Theme.of(context).colorScheme.primaryContainer,
               child: Icon(icon,
-                  color: Theme.of(context).colorScheme.primary),
+                  size: 20, color: Theme.of(context).colorScheme.primary),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
               label,
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11),
             ),
           ],
         ),

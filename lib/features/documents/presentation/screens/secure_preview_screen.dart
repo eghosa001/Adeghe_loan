@@ -1,9 +1,9 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
 
 import '../../data/models/document_entity.dart';
@@ -91,17 +91,12 @@ class SecurePreviewScreen extends ConsumerWidget {
 
   Future<void> _export(BuildContext context, Uint8List data) async {
     try {
-      final path = await FilePicker.platform.saveFile(
-        dialogTitle: 'Save decrypted document',
-        fileName: document.originalName,
-      );
-      if (path != null) {
-        final file = File(path);
-        await file.writeAsBytes(data, flush: true);
-      }
-      if (context.mounted && path != null) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Document saved.')));
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/${document.originalName}');
+      await file.writeAsBytes(data, flush: true);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Document saved to ${file.path}')));
       }
     } catch (_) {
       if (context.mounted) {

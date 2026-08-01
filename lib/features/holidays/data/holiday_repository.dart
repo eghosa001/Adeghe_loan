@@ -1,5 +1,6 @@
 import 'package:loantrack/core/database/database_service.dart';
 import 'package:loantrack/core/error/failure.dart';
+import 'package:loantrack/core/utils/date_utils.dart';
 import 'package:loantrack/features/holidays/data/models/holiday_entity.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
 
@@ -41,6 +42,18 @@ class HolidayRepositoryImpl implements HolidayRepository {
   Future<Result<void>> saveHoliday(Holiday holiday) async {
     try {
       final db = await _dbService.database;
+      final dateStr = AppDateUtils.formatForStorage(holiday.date);
+      final existing = await db.query(
+        'holidays',
+        where: 'date = ? AND is_recurring = ?',
+        whereArgs: [dateStr, holiday.isRecurring ? 1 : 0],
+      );
+      for (final row in existing) {
+        if (row['id'] as String != holiday.id) {
+          return Result.failure(ValidationFailure(
+              'A holiday already exists on ${AppDateUtils.formatDate(holiday.date)}.'));
+        }
+      }
       await db.insert(
         'holidays',
         holiday.toMap(),

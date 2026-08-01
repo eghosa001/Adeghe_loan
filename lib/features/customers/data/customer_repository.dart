@@ -1,9 +1,32 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
-import '../../../core/di/providers.dart';
+import '../../../core/constants/app_constants.dart';
+import '../../../core/database/database_service.dart';
 import 'models/customer_entity.dart';
+
+/// Sort options for the customer list.
+enum CustomerSortOption { name, group, amountOwed }
+
+/// Sentinel value for the customer-list group filter meaning "customers that
+/// are not assigned to any group". Group IDs are UUIDs so this cannot collide.
+const String ungroupedGroupFilter = '__ungrouped__';
+
+/// Appends a group membership condition (group or "no group") to [conditions]
+/// and [args]. Null [groupId] adds nothing (all customers).
+void _applyGroupFilter(
+  String? groupId,
+  List<String> conditions,
+  List<Object?> args,
+) {
+  if (groupId == null || groupId.isEmpty) return;
+  if (groupId == ungroupedGroupFilter) {
+    conditions.add("(COALESCE(c.group_id, '') = '')");
+  } else {
+    conditions.add('c.group_id = ?');
+    args.add(groupId);
+  }
+}
 
 class DuplicateCustomerException implements Exception {
   const DuplicateCustomerException(this.field);
@@ -14,13 +37,10 @@ class DuplicateCustomerException implements Exception {
 }
 
 class CustomerRepository {
-  CustomerRepository(this._ref);
-  final Ref _ref;
+  CustomerRepository(this._dbService);
+  final DatabaseService _dbService;
 
-  Future<Database> get _database async {
-    final service = await _ref.read(databaseServiceProvider.future);
-    return service.database;
-  }
+  Future<Database> get _database async => _dbService.database;
 
   Future<List<Customer>> search(String query, {String? groupId}) async {
     final db = await _database;
@@ -37,10 +57,7 @@ class CustomerRepository {
       args.addAll(List.filled(6, '%$term%'));
     }
 
-    if (groupId != null && groupId.isNotEmpty) {
-      conditions.add('c.group_id = ?');
-      args.add(groupId);
-    }
+    _applyGroupFilter(groupId, conditions, args);
 
     final where = conditions.isEmpty ? '1=1' : conditions.join(' AND ');
 
@@ -56,6 +73,78 @@ class CustomerRepository {
       WHERE $where
       ORDER BY c.full_name COLLATE NOCASE ASC
     ''', args);
+    return rows.map(Customer.fromMap).toList(growable: false);
+  }
+
+  /// Returns the total count of customers matching [query] and [groupId].
+  Future<int> count(String query, {String? groupId}) async {
+    final db = await _database;
+    final term = query.trim();
+    final conditions = <String>[];
+    final args = <Object?>[];
+    if (term.isNotEmpty) {
+      conditions.add(
+          '''(c.id LIKE ? OR c.full_name LIKE ? OR c.phone LIKE ? OR
+             COALESCE(c.bvn, '') LIKE ? OR COALESCE(c.nin, '') LIKE ? OR
+             COALESCE(c.residential_address, '') LIKE ?)''');
+      args.addAll(List.filled(6, '%$term%'));
+    }
+    _applyGroupFilter(groupId, conditions, args);
+    final where = conditions.isEmpty ? '1=1' : conditions.join(' AND ');
+    final rows = await db.rawQuery(
+      'SELECT COUNT(*) AS count FROM customers c WHERE $where',
+      args,
+    );
+    return (rows.first['count'] as int?) ?? 0;
+  }
+
+  /// Paginated search. Returns up to [limit] results starting at [offset].
+  Future<List<Customer>> searchPaginated(
+    String query, {
+    String? groupId,
+    int limit = AppConstants.defaultPageSize,
+    int offset = 0,
+    CustomerSortOption sortBy = CustomerSortOption.name,
+  }) async {
+    final db = await _database;
+    final term = query.trim();
+
+    final conditions = <String>[];
+    final args = <Object?>[];
+
+    if (term.isNotEmpty) {
+      conditions.add(
+          '''(c.id LIKE ? OR c.full_name LIKE ? OR c.phone LIKE ? OR
+             COALESCE(c.bvn, '') LIKE ? OR COALESCE(c.nin, '') LIKE ? OR
+             COALESCE(c.residential_address, '') LIKE ?)''');
+      args.addAll(List.filled(6, '%$term%'));
+    }
+
+    _applyGroupFilter(groupId, conditions, args);
+
+    final where = conditions.isEmpty ? '1=1' : conditions.join(' AND ');
+
+    final orderBy = switch (sortBy) {
+      CustomerSortOption.name => 'c.full_name COLLATE NOCASE ASC',
+      CustomerSortOption.group =>
+        "COALESCE(c.group_id, '') COLLATE NOCASE ASC, c.full_name COLLATE NOCASE ASC",
+      CustomerSortOption.amountOwed =>
+        'total_owed DESC, c.full_name COLLATE NOCASE ASC',
+    };
+
+    final rows = await db.rawQuery('''
+      SELECT c.*,
+        COALESCE(
+          (SELECT SUM(l.outstanding_balance)
+           FROM loans l
+           WHERE l.customer_id = c.id AND l.status = 'active'),
+          0.0
+        ) AS total_owed
+      FROM customers c
+      WHERE $where
+      ORDER BY $orderBy
+      LIMIT ? OFFSET ?
+    ''', [...args, limit, offset]);
     return rows.map(Customer.fromMap).toList(growable: false);
   }
 
@@ -106,14 +195,24 @@ class CustomerRepository {
     });
   }
 
+  /// Soft-deletes a customer by archiving them. No rows or files are removed —
+  /// loans, payments, documents and savings history are all preserved (an
+  /// archive operation must never wipe financial history via CASCADE).
   Future<void> delete(String id) async {
     final db = await _database;
-    await db.delete('customers', where: 'id = ?', whereArgs: [id]);
+    await db.update('customers', {'status': CustomerStatus.archived.value},
+        where: 'id = ?', whereArgs: [id]);
   }
 
   Future<void> changeStatus(String id, CustomerStatus status) async {
     final db = await _database;
     await db.update('customers', {'status': status.value},
+        where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> changeGroup(String id, String? groupId) async {
+    final db = await _database;
+    await db.update('customers', {'group_id': groupId},
         where: 'id = ?', whereArgs: [id]);
   }
 

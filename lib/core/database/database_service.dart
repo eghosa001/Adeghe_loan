@@ -6,7 +6,7 @@ import '../security/secure_storage_service.dart';
 import 'migrations.dart';
 
 class DatabaseService {
-  static const int _databaseVersion = 9;
+  static const int _databaseVersion = 16;
   final SecureStorageService _secureStorage;
 
   DatabaseService(this._secureStorage);
@@ -34,6 +34,22 @@ class DatabaseService {
     }
   }
 
+  /// Opens [path] read-only with the app's encryption key and verifies it is a
+  /// valid, decryptable SQLite database (e.g. a candidate backup file).
+  Future<bool> verifyDatabaseFile(String path) async {
+    final encryptionKey = await _secureStorage.getDatabaseKey();
+    Database? db;
+    try {
+      db = await openDatabase(path, password: encryptionKey, readOnly: true);
+      final version = await db.getVersion();
+      return version >= 1;
+    } catch (_) {
+      return false;
+    } finally {
+      await db?.close();
+    }
+  }
+
   Future<Database> _initDatabase() async {
     final documentsDirectory = await getApplicationDocumentsDirectory();
     final path = join(documentsDirectory.path, AppConstants.databaseName);
@@ -46,10 +62,25 @@ class DatabaseService {
       onCreate: _onCreate,
       onConfigure: _onConfigure,
       onUpgrade: _onUpgrade,
+      onOpen: _onOpen,
     );
   }
 
+  /// Foreign keys are turned OFF here (outside the migration transaction) and
+  /// back ON in [_onOpen]. sqflite runs `onUpgrade` inside a transaction, where
+  /// `PRAGMA foreign_keys` is a no-op — so toggling it there would not work.
+  ///
+  /// The table-recreate migrations (`_v8`, `_v16`) `DROP TABLE loans`; with
+  /// foreign keys ON, SQLite fires the implicit `DELETE FROM loans` which
+  /// cascades into `payments`, `repayment_schedule`, and `documents`, wiping
+  /// them during an upgrade. FK must be OFF while that DROP executes.
   Future<void> _onConfigure(Database db) async {
+    await db.execute('PRAGMA foreign_keys = OFF');
+  }
+
+  /// Re-enable foreign key enforcement once the DB is fully open (fresh create
+  /// and migrations both complete before this runs).
+  Future<void> _onOpen(Database db) async {
     await db.execute('PRAGMA foreign_keys = ON');
   }
 
@@ -98,9 +129,11 @@ class DatabaseService {
         next_of_kin_relation TEXT,
         next_of_kin_phone TEXT,
         guarantor_1_name TEXT,
+        guarantor_1_phone TEXT,
+        guarantor_1_address TEXT,
         guarantor_2_name TEXT,
-        guarantor_phone TEXT,
-        guarantor_address TEXT,
+        guarantor_2_phone TEXT,
+        guarantor_2_address TEXT,
         guarantor_passport_path TEXT,
         nin TEXT UNIQUE,
         bvn TEXT UNIQUE,
@@ -132,12 +165,12 @@ class DatabaseService {
         duration_days INTEGER,
         duration_weeks INTEGER,
         repayment_frequency TEXT,
-        repayment_day INTEGER,
         daily_payment REAL,
         weekly_payment REAL,
         total_repayment REAL NOT NULL,
         outstanding_balance REAL NOT NULL,
         expected_completion_date TEXT NOT NULL,
+        custom_collection_amount REAL,
         collector TEXT,
         notes TEXT,
         status TEXT NOT NULL,
@@ -157,7 +190,9 @@ class DatabaseService {
         receipt_no TEXT UNIQUE NOT NULL,
         collector TEXT NOT NULL,
         remarks TEXT,
+        type TEXT DEFAULT 'partial',
         status TEXT NOT NULL DEFAULT 'completed',
+        prior_loan_status TEXT,
         FOREIGN KEY (loan_id) REFERENCES loans (id) ON DELETE CASCADE,
         FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE
       )
@@ -266,10 +301,23 @@ class DatabaseService {
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_documents_customer ON documents(customer_id)');
     await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_repayment_schedule_loan ON repayment_schedule(loan_id)');
+    await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_customer_groups_name ON customer_groups(name)');
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_savings_accounts_customer ON savings_accounts(customer_id)');
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_savings_transactions_account ON savings_transactions(savings_account_id)');
+    // Composite indexes for common query patterns
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_payments_loan_date ON payments(loan_id, payment_date)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_repayment_schedule_loan_date ON repayment_schedule(loan_id, due_date)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_loans_type_status ON loans(loan_type, status)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_loans_type_date ON loans(loan_type, loan_date)');
   }
 }

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../../core/constants/app_constants.dart';
 
 class InactivityWrapper extends StatefulWidget {
@@ -27,24 +28,34 @@ class _InactivityWrapperState extends State<InactivityWrapper> {
     });
   }
 
+  bool _onKeyEvent(KeyEvent event) {
+    if (event is KeyDownEvent) _resetTimer();
+    return false;
+  }
+
   @override
   void initState() {
     super.initState();
     _resetTimer();
+    HardwareKeyboard.instance.addHandler(_onKeyEvent);
   }
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKeyEvent);
     _timer?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    // Listener (rather than GestureDetector) also catches mouse-wheel scrolls
+    // and pointer moves; the global keyboard handler catches typing.
+    return Listener(
       behavior: HitTestBehavior.translucent,
-      onTap: _resetTimer,
-      onPanDown: (_) => _resetTimer(),
+      onPointerDown: (_) => _resetTimer(),
+      onPointerMove: (_) => _resetTimer(),
+      onPointerSignal: (_) => _resetTimer(),
       child: widget.child,
     );
   }

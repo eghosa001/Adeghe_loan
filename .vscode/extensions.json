@@ -1,5 +1,6 @@
 {
     "recommendations": [
-        "sst-dev.opencode"
+        "sst-dev.opencode",
+        "google.geminicodeassist"
     ]
 }

@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../di/providers.dart';
+import '../widgets/scaffold_with_nav_bar.dart';
+import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../features/auth/presentation/screens/pin_setup_screen.dart';
 import '../../features/auth/presentation/screens/pin_login_screen.dart';
 import '../../features/auth/presentation/screens/forgot_pin_screen.dart';
 import '../../features/auth/presentation/screens/change_pin_screen.dart';
 import '../../features/auth/presentation/screens/security_settings_screen.dart';
-import '../../features/business/presentation/screens/business_settings_screen.dart';
 import '../../features/business/presentation/screens/business_details_tab.dart';
 import '../../features/business/presentation/screens/financial_settings_tab.dart';
 import '../../features/backup/presentation/screens/backup_screen.dart';
@@ -21,20 +22,47 @@ import '../../features/documents/presentation/screens/document_upload_screen.dar
 import '../../features/documents/presentation/screens/secure_preview_screen.dart';
 import '../../features/loans/presentation/screens/loan_creation_screen.dart';
 import '../../features/loans/presentation/screens/loan_details_screen.dart';
+import '../../features/loans/presentation/screens/loan_list_screen.dart';
 import '../../features/loans/presentation/screens/repayment_calendar_view.dart';
 import '../../features/payments/presentation/screens/record_payment_screen.dart';
 import '../../features/payments/presentation/screens/payment_history_screen.dart';
 import '../../features/holidays/presentation/screens/holiday_management_screen.dart';
 import '../../features/dashboard/presentation/screens/dashboard_screen.dart';
 import '../../features/collection/presentation/screens/collection_screen.dart';
+import '../../features/collection/presentation/screens/future_schedule_screen.dart';
 import '../../features/reports/presentation/screens/report_screen.dart';
+import '../../features/reports/presentation/screens/overdue_report_screen.dart';
 import '../../features/audit_log/presentation/screens/audit_log_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
 import '../../features/groups/presentation/screens/group_management_screen.dart';
+import '../../features/groups/presentation/screens/group_detail_screen.dart';
+import '../../features/savings/presentation/screens/savings_overview_screen.dart';
+import '../../features/customers/presentation/screens/loan_statement_screen.dart';
+import '../../features/customers/presentation/screens/savings_statement_screen.dart';
+import '../../features/customers/presentation/screens/collection_statement_screen.dart';
+import '../../features/search/presentation/screens/global_search_screen.dart';
+import '../../features/notifications/presentation/screens/notification_screen.dart';
 
-final appRouter = GoRouter(
-  initialLocation: '/splash',
-  routes: [
+/// Pure redirect decision for the auth guard. Returns a redirect target when
+/// the current location is not allowed for the given auth state.
+String? authRedirect(AuthState auth, String location) {
+  if (auth == AuthState.unlocked) return null;
+  final isPublic = location == '/splash' ||
+      location == '/onboarding' ||
+      location == '/auth/pin' ||
+      location == '/auth/setup_pin' ||
+      location == '/auth/forgot_pin';
+  if (isPublic) return null;
+  return auth == AuthState.initialSetup ? '/auth/setup_pin' : '/auth/pin';
+}
+
+final appRouterProvider = Provider<GoRouter>((ref) {
+  return GoRouter(
+    initialLocation: '/splash',
+    refreshListenable: _AuthRefreshListenable(ref),
+    redirect: (context, state) =>
+        authRedirect(ref.read(authProvider), state.location),
+    routes: [
     GoRoute(
       path: '/splash',
       builder: (context, state) => const SplashScreen(),
@@ -59,13 +87,46 @@ final appRouter = GoRouter(
       path: '/auth/change_pin',
       builder: (context, state) => const ChangePinScreen(),
     ),
-    GoRoute(
-      path: '/dashboard',
-      builder: (context, state) => const DashboardScreen(),
+
+    // Main shell with bottom navigation
+    ShellRoute(
+      builder: (context, state, child) {
+        return ScaffoldWithNavBar(
+          currentPath: state.location,
+          child: child,
+        );
+      },
+      routes: [
+        GoRoute(
+          path: '/dashboard',
+          builder: (context, state) => const DashboardScreen(),
+        ),
+        GoRoute(
+          path: '/collections',
+          builder: (context, state) => const CollectionScreen(),
+        ),
+        GoRoute(
+          path: '/reports',
+          builder: (context, state) => const ReportScreen(),
+        ),
+        GoRoute(
+          path: '/savings',
+          builder: (context, state) => const SavingsOverviewScreen(),
+        ),
+      ],
     ),
+
+    // Standalone routes (pushed on top of the shell)
     GoRoute(
       path: '/groups',
       builder: (context, state) => const GroupManagementScreen(),
+      routes: [
+        GoRoute(
+          path: ':id',
+          builder: (context, state) =>
+              GroupDetailScreen(groupId: state.params['id']!),
+        ),
+      ],
     ),
     GoRoute(
       path: '/customers',
@@ -103,13 +164,6 @@ final appRouter = GoRouter(
                 customerId: state.params['id']!,
               ),
             ),
-            GoRoute(
-              path: 'payments',
-              builder: (context, state) => PaymentHistoryScreen(
-                loanId: state.extra as String? ?? '',
-                customerId: state.params['id']!,
-              ),
-            ),
           ],
         ),
       ],
@@ -121,9 +175,26 @@ final appRouter = GoRouter(
       ),
       routes: [
         GoRoute(
+          path: 'edit',
+          builder: (context, state) {
+            final loan = state.extra as dynamic;
+            return LoanCreationScreen(
+              customerId: loan?.customerId ?? '',
+              existingLoan: loan,
+            );
+          },
+        ),
+        GoRoute(
           path: 'repayment-calendar',
           builder: (context, state) => RepaymentCalendarView(
             loanId: state.params['id']!,
+          ),
+        ),
+        GoRoute(
+          path: 'payments',
+          builder: (context, state) => PaymentHistoryScreen(
+            loanId: state.params['id']!,
+            customerId: (state.extra as Map<String, dynamic>?)?['customerId'] as String? ?? '',
           ),
         ),
         GoRoute(
@@ -137,28 +208,33 @@ final appRouter = GoRouter(
                   (extra['currentBalance'] as num?)?.toDouble() ?? 0.0,
               installmentDue:
                   (extra['installmentDue'] as num?)?.toDouble(),
+              initialAmount:
+                  (extra['initialAmount'] as num?)?.toDouble(),
             );
           },
         ),
       ],
     ),
     GoRoute(
-      path: '/collections',
-      builder: (context, state) => const CollectionScreen(),
-    ),
-    GoRoute(
       path: '/documents/preview',
-      builder: (context, state) => SecurePreviewScreen(
-        document: state.extra as CustomerDocument,
-      ),
-    ),
-    GoRoute(
-      path: '/reports',
-      builder: (context, state) => const ReportScreen(),
+      builder: (context, state) {
+        final extra = state.extra;
+        if (extra is! CustomerDocument) {
+          // Never navigate to the preview without a document object.
+          return const Scaffold(
+            body: Center(child: Text('No document to preview')),
+          );
+        }
+        return SecurePreviewScreen(document: extra);
+      },
     ),
     GoRoute(
       path: '/holidays',
       builder: (context, state) => const HolidayManagementScreen(),
+    ),
+    GoRoute(
+      path: '/overdue-report',
+      builder: (context, state) => const OverdueReportScreen(),
     ),
     GoRoute(
       path: '/audit-log',
@@ -174,10 +250,6 @@ final appRouter = GoRouter(
     ),
     GoRoute(
       path: '/settings/business',
-      builder: (context, state) => const BusinessSettingsScreen(),
-    ),
-    GoRoute(
-      path: '/settings/business/details',
       builder: (context, state) => const BusinessDetailsTab(),
     ),
     GoRoute(
@@ -188,11 +260,62 @@ final appRouter = GoRouter(
       path: '/settings/backup',
       builder: (context, state) => const BackupScreen(),
     ),
+    GoRoute(
+      path: '/loans',
+      builder: (context, state) => const LoanListScreen(),
+    ),
+    GoRoute(
+      path: '/statements/loan',
+      builder: (context, state) => const LoanStatementScreen(),
+    ),
+    GoRoute(
+      path: '/statements/savings',
+      builder: (context, state) => const SavingsStatementScreen(),
+    ),
+    GoRoute(
+      path: '/statements/collection',
+      builder: (context, state) => const CollectionStatementScreen(),
+    ),
+    GoRoute(
+      path: '/collections/future-schedule',
+      builder: (context, state) => const FutureScheduleScreen(),
+    ),
+    GoRoute(
+      path: '/search',
+      builder: (context, state) => const GlobalSearchScreen(),
+    ),
+    GoRoute(
+      path: '/notifications',
+      builder: (context, state) => const NotificationScreen(),
+    ),
   ],
   errorBuilder: (context, state) => Scaffold(
     body: Center(child: Text('Route error: ${state.error}')),
   ),
-);
+  );
+});
+
+/// Fires GoRouter's redirect re-evaluation whenever the auth state changes,
+/// so locking/unlocking immediately moves the user to the correct screen.
+class _AuthRefreshListenable extends Listenable {
+  _AuthRefreshListenable(Ref ref) {
+    ref.listen(authProvider, (_, __) => _notify());
+  }
+
+  final Set<VoidCallback> _listeners = {};
+
+  @override
+  void addListener(VoidCallback listener) => _listeners.add(listener);
+
+  @override
+  void removeListener(VoidCallback listener) => _listeners.remove(listener);
+
+  void _notify() {
+    for (final listener in List.of(_listeners)) {
+      listener();
+    }
+  }
+}
 
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
@@ -200,16 +323,28 @@ class SplashScreen extends ConsumerStatefulWidget {
   ConsumerState<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends ConsumerState<SplashScreen> {
+class _SplashScreenState extends ConsumerState<SplashScreen>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _fadeAnimation;
+
   @override
   void initState() {
     super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    _fadeAnimation = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+    _controller.forward();
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final secure = ref.read(secureStorageProvider);
-      // Migrate old PINs: clears any stored PIN that lacks the 4-digit
-      // version marker so the user is prompted to re-set a 4-digit PIN.
       await secure.migrateToFourDigitPin();
       final hasPin = await secure.hasPin();
+      await Future.delayed(const Duration(milliseconds: 1500));
       if (!mounted) return;
       if (!hasPin) {
         GoRouter.of(context).go('/auth/setup_pin');
@@ -220,20 +355,100 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
   }
 
   @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Image.asset(
-              'attached_assets/full_horizontal_logo_1784971585520.png',
-              width: 240,
-              fit: BoxFit.contain,
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF0A1628), Color(0xFF0D2B3E)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: FadeTransition(
+          opacity: _fadeAnimation,
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 100,
+                  height: 100,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFFD4A847), Color(0xFFF5D77A)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFD4A847).withValues(alpha: 0.3),
+                        blurRadius: 32,
+                        offset: const Offset(0, 12),
+                      ),
+                    ],
+                  ),
+                  child: const Center(
+                    child: Text(
+                      'A',
+                      style: TextStyle(
+                        fontSize: 48,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF0A1628),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                  'Adeghe Professional Services',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Created by AIGHEWI EGHOSA',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFFD4A847),
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Professional Services Management',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.white.withValues(alpha: 0.5),
+                  ),
+                ),
+                const SizedBox(height: 48),
+                SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: const Color(0xFFD4A847).withValues(alpha: 0.8),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 32),
-            const CircularProgressIndicator(),
-          ],
+          ),
         ),
       ),
     );

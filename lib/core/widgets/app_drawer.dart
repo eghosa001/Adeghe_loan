@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
+import '../constants/app_constants.dart';
+import '../theme/app_theme.dart';
 
 class AppDrawer extends StatelessWidget {
   final String currentRoute;
@@ -8,93 +11,182 @@ class AppDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
     return Drawer(
+      backgroundColor: Colors.white,
       child: SafeArea(
         child: Column(
           children: [
             Container(
-              padding: const EdgeInsets.all(20),
-              color: colorScheme.primary,
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
               width: double.infinity,
+              decoration: const BoxDecoration(
+                gradient: AppTheme.primaryGradient,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Image.asset(
-                    'attached_assets/full_horizontal_logo_1784971585520.png',
-                    width: 180,
-                    fit: BoxFit.contain,
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: AppTheme.accentGradient,
+                    ),
+                    child: Center(
+                      child: Text(
+                        'A',
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.primaryColor,
+                        ),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'Loan Management',
-                    style: TextStyle(
-                      color: colorScheme.onPrimary.withValues(alpha: 0.9),
-                      fontSize: 14,
+                    'Adeghe Professional Services',
+                    style: GoogleFonts.plusJakartaSans(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Professional Services Management',
+                    style: GoogleFonts.plusJakartaSans(
+                      color: Colors.white.withValues(alpha: 0.7),
+                      fontSize: 13,
                     ),
                   ),
                 ],
               ),
             ),
+            const SizedBox(height: 8),
             Expanded(
               child: ListView(
-                padding: EdgeInsets.zero,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
                 children: [
                   _MenuItem(
-                    icon: Icons.dashboard_outlined,
+                    icon: Icons.dashboard_rounded,
                     label: 'Dashboard',
                     route: '/dashboard',
                     currentRoute: currentRoute,
                   ),
                   _MenuItem(
-                    icon: Icons.people_outline,
+                    icon: Icons.people_rounded,
                     label: 'Customers',
                     route: '/customers',
                     currentRoute: currentRoute,
                   ),
                   _MenuItem(
-                    icon: Icons.group_outlined,
+                    icon: Icons.monetization_on_rounded,
+                    label: 'Loans',
+                    route: '/loans',
+                    currentRoute: currentRoute,
+                  ),
+                  _MenuItem(
+                    icon: Icons.group_rounded,
                     label: 'Customer Groups',
                     route: '/groups',
                     currentRoute: currentRoute,
                   ),
                   _MenuItem(
-                    icon: Icons.account_balance_wallet_outlined,
+                    icon: Icons.account_balance_wallet_rounded,
                     label: 'Collections',
                     route: '/collections',
                     currentRoute: currentRoute,
                   ),
                   _MenuItem(
-                    icon: Icons.insert_chart_outlined,
+                    icon: Icons.savings_rounded,
+                    label: 'Savings',
+                    route: '/savings',
+                    currentRoute: currentRoute,
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Divider(),
+                  ),
+                  _MenuItem(
+                    icon: Icons.search_rounded,
+                    label: 'Global Search',
+                    route: '/search',
+                    currentRoute: currentRoute,
+                  ),
+                  _MenuItem(
+                    icon: Icons.notifications_rounded,
+                    label: 'Notifications',
+                    route: '/notifications',
+                    currentRoute: currentRoute,
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Divider(),
+                  ),
+                  _MenuItem(
+                    icon: Icons.insert_chart_rounded,
                     label: 'Reports',
                     route: '/reports',
                     currentRoute: currentRoute,
                   ),
                   _MenuItem(
-                    icon: Icons.calendar_today_outlined,
+                    icon: Icons.warning_amber_rounded,
+                    label: 'Overdue Report',
+                    route: '/overdue-report',
+                    currentRoute: currentRoute,
+                  ),
+                  _MenuItem(
+                    icon: Icons.calendar_month_rounded,
                     label: 'Holidays',
                     route: '/holidays',
                     currentRoute: currentRoute,
                   ),
                   _MenuItem(
-                    icon: Icons.history_outlined,
+                    icon: Icons.history_rounded,
                     label: 'Audit Log',
                     route: '/audit-log',
                     currentRoute: currentRoute,
                   ),
-                  const Divider(height: 1),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Divider(),
+                  ),
                   _MenuItem(
-                    icon: Icons.settings_outlined,
+                    icon: Icons.settings_rounded,
                     label: 'Settings',
                     route: '/settings',
                     currentRoute: currentRoute,
                   ),
                   _MenuItem(
-                    icon: Icons.backup_outlined,
+                    icon: Icons.cloud_upload_rounded,
                     label: 'Backup & Restore',
                     route: '/settings/backup',
                     currentRoute: currentRoute,
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Created by AIGHEWI EGHOSA',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.primaryColor,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'v${AppConstants.appVersion} (Build ${AppConstants.appBuildNumber})',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 12,
+                      color: Colors.grey.shade400,
+                    ),
                   ),
                 ],
               ),
@@ -124,25 +216,62 @@ class _MenuItem extends StatelessWidget {
     final isSelected = currentRoute == route ||
         (route != '/dashboard' && currentRoute.startsWith(route));
 
-    return ListTile(
-      leading: Icon(
-        icon,
-        color: isSelected ? Theme.of(context).colorScheme.primary : null,
-      ),
-      title: Text(
-        label,
-        style: TextStyle(
-          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-          color: isSelected ? Theme.of(context).colorScheme.primary : null,
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Material(
+        color: isSelected
+            ? AppTheme.primaryColor.withValues(alpha: 0.06)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () {
+            Navigator.of(context).pop();
+            if (currentRoute != route) {
+              const shellRoutes = ['/dashboard', '/collections', '/reports', '/savings'];
+              if (shellRoutes.contains(route)) {
+                GoRouter.of(context).go(route);
+              } else {
+                GoRouter.of(context).push(route);
+              }
+            }
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                Icon(
+                  icon,
+                  size: 22,
+                  color: isSelected ? AppTheme.primaryColor : Colors.grey.shade600,
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 15,
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                      color: isSelected
+                          ? AppTheme.primaryColor
+                          : Colors.grey.shade800,
+                    ),
+                  ),
+                ),
+                if (isSelected)
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: AppTheme.accentColor,
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ),
       ),
-      selected: isSelected,
-      onTap: () {
-        Navigator.of(context).pop();
-        if (currentRoute != route) {
-          GoRouter.of(context).go(route);
-        }
-      },
     );
   }
 }

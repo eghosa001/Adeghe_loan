@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <!-- Background gradient: deep navy to dark teal -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0A1628"/>
+      <stop offset="100%" stop-color="#0D2B3E"/>
+    </linearGradient>
+
+    <!-- Gold/amber gradient for the letter A -->
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#F5D77A"/>
+      <stop offset="50%" stop-color="#D4A847"/>
+      <stop offset="100%" stop-color="#B8922E"/>
+    </linearGradient>
+
+    <!-- Subtle inner glow for depth -->
+    <radialGradient id="innerGlow" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#1A3A52" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#0A1628" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Geometric line gradient -->
+    <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#D4A847" stop-opacity="0.15"/>
+      <stop offset="50%" stop-color="#D4A847" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#D4A847" stop-opacity="0.0"/>
+    </linearGradient>
+
+    <!-- Subtle dollar sign gradient -->
+    <linearGradient id="dollarGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#D4A847" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#D4A847" stop-opacity="0.04"/>
+    </linearGradient>
+
+    <!-- Clip for rounded square -->
+    <clipPath id="roundedSquare">
+      <rect x="0" y="0" width="512" height="512" rx="108" ry="108"/>
+    </clipPath>
+
+    <!-- Drop shadow filter -->
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+
+    <!-- Subtle inner shadow for the A -->
+    <filter id="textGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="6" result="blur"/>
+      <feFlood flood-color="#D4A847" flood-opacity="0.3"/>
+      <feComposite in2="blur" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Rounded square background -->
+  <g clip-path="url(#roundedSquare)" filter="url(#shadow)">
+    <!-- Base gradient fill -->
+    <rect width="512" height="512" fill="url(#bgGrad)"/>
+
+    <!-- Inner radial glow for depth -->
+    <rect width="512" height="512" fill="url(#innerGlow)"/>
+
+    <!-- Subtle geometric accent lines (top-left to center) -->
+    <line x1="0" y1="80" x2="256" y2="256" stroke="url(#lineGrad)" stroke-width="1.5"/>
+    <line x1="40" y1="0" x2="256" y2="256" stroke="url(#lineGrad)" stroke-width="1"/>
+    <line x1="0" y1="160" x2="256" y2="256" stroke="url(#lineGrad)" stroke-width="0.8"/>
+
+    <!-- Subtle geometric accent lines (bottom-right) -->
+    <line x1="512" y1="432" x2="256" y2="256" stroke="url(#lineGrad)" stroke-width="1.5"/>
+    <line x1="472" y1="512" x2="256" y2="256" stroke="url(#lineGrad)" stroke-width="1"/>
+    <line x1="512" y1="352" x2="256" y2="256" stroke="url(#lineGrad)" stroke-width="0.8"/>
+
+    <!-- Thin horizontal accent lines -->
+    <line x1="120" y1="180" x2="392" y2="180" stroke="#D4A847" stroke-opacity="0.06" stroke-width="0.5"/>
+    <line x1="120" y1="332" x2="392" y2="332" stroke="#D4A847" stroke-opacity="0.06" stroke-width="0.5"/>
+
+    <!-- Subtle dollar sign, bottom-right corner -->
+    <text x="380" y="420" font-family="Georgia, serif" font-size="48" fill="url(#dollarGrad)" font-style="italic">$</text>
+
+    <!-- Decorative corner dots -->
+    <circle cx="80" cy="80" r="3" fill="#D4A847" fill-opacity="0.1"/>
+    <circle cx="432" cy="80" r="3" fill="#D4A847" fill-opacity="0.1"/>
+    <circle cx="80" cy="432" r="3" fill="#D4A847" fill-opacity="0.1"/>
+    <circle cx="432" cy="432" r="3" fill="#D4A847" fill-opacity="0.1"/>
+
+    <!-- Thin border inset -->
+    <rect x="12" y="12" width="488" height="488" rx="90" ry="90"
+          fill="none" stroke="#D4A847" stroke-opacity="0.08" stroke-width="1"/>
+
+    <!-- The letter A - bold, modern, centered -->
+    <text x="256" y="310" text-anchor="middle"
+          font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+          font-weight="900" font-size="280" letter-spacing="-8"
+          fill="url(#goldGrad)" filter="url(#textGlow)">A</text>
+
+    <!-- Subtle highlight line across the A crossbar area -->
+    <line x1="175" y1="278" x2="337" y2="278" stroke="#F5D77A" stroke-opacity="0.15" stroke-width="1.5"/>
+
+    <!-- Tiny diamond accent above the A -->
+    <polygon points="256,72 264,88 256,104 248,88" fill="#D4A847" fill-opacity="0.2"/>
+  </g>
+</svg>

@@ -18,6 +18,8 @@ class _FinancialSettingsTabState extends ConsumerState<FinancialSettingsTab> {
   final _commissionCtrl = TextEditingController();
   final _processingCtrl = TextEditingController();
   final _penaltyCtrl = TextEditingController();
+  final _durationCtrl = TextEditingController();
+  String _loanType = 'daily';
   bool _hasPrefilled = false;
   bool _isEditing = false;
 
@@ -29,6 +31,7 @@ class _FinancialSettingsTabState extends ConsumerState<FinancialSettingsTab> {
     _commissionCtrl.dispose();
     _processingCtrl.dispose();
     _penaltyCtrl.dispose();
+    _durationCtrl.dispose();
     super.dispose();
   }
 
@@ -40,6 +43,8 @@ class _FinancialSettingsTabState extends ConsumerState<FinancialSettingsTab> {
     _commissionCtrl.text = s.defaultCommission.toString();
     _processingCtrl.text = s.defaultProcessingFee.toString();
     _penaltyCtrl.text = s.defaultPenaltyRules;
+    _durationCtrl.text = s.defaultLoanDurationDays.toString();
+    _loanType = s.defaultLoanType;
     _hasPrefilled = true;
   }
 
@@ -52,10 +57,13 @@ class _FinancialSettingsTabState extends ConsumerState<FinancialSettingsTab> {
         double.tryParse(_commissionCtrl.text.trim()) ?? double.nan;
     final processing =
         double.tryParse(_processingCtrl.text.trim()) ?? double.nan;
+    final duration =
+        int.tryParse(_durationCtrl.text.trim()) ?? -1;
     if (interest.isNaN ||
         insurance.isNaN ||
         commission.isNaN ||
-        processing.isNaN) {
+        processing.isNaN ||
+        duration < 1) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Enter valid numeric values')));
@@ -70,8 +78,11 @@ class _FinancialSettingsTabState extends ConsumerState<FinancialSettingsTab> {
       'default_commission': commission.toString(),
       'default_processing': processing.toString(),
       'default_penalty_rules': _penaltyCtrl.text.trim(),
+      'default_loan_duration_days': duration.toString(),
+      'default_loan_type': _loanType,
     };
-    await ref.read(businessRepoProvider).saveSettings(map);
+    final repo = await ref.read(businessRepoProvider.future);
+    await repo.saveSettings(map);
     ref.invalidate(financialSettingsProvider);
     setState(() {
       _isEditing = false;
@@ -133,6 +144,12 @@ class _FinancialSettingsTabState extends ConsumerState<FinancialSettingsTab> {
             'Processing Fee', settings.defaultProcessingFee.toString()),
         const Divider(),
         _buildDetailRow('Penalty Rules', settings.defaultPenaltyRules),
+        const Divider(),
+        _buildDetailRow('Loan Duration (days)',
+            settings.defaultLoanDurationDays.toString()),
+        const Divider(),
+        _buildDetailRow('Loan Type',
+            settings.defaultLoanType.toUpperCase()),
       ],
     );
   }
@@ -184,6 +201,28 @@ class _FinancialSettingsTabState extends ConsumerState<FinancialSettingsTab> {
                 decoration: const InputDecoration(
                     labelText: 'Penalty Rules (JSON/text)'),
                 maxLines: 3),
+            const SizedBox(height: 16),
+            const Divider(),
+            const Text('Loan Defaults',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+            const SizedBox(height: 12),
+            TextFormField(
+                controller: _durationCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Default Loan Duration (days)'),
+                keyboardType: TextInputType.number),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _loanType,
+              decoration: const InputDecoration(labelText: 'Default Loan Type'),
+              items: const [
+                DropdownMenuItem(value: 'daily', child: Text('Daily')),
+                DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
+              ],
+              onChanged: (v) {
+                if (v != null) setState(() => _loanType = v);
+              },
+            ),
             const SizedBox(height: 20),
             ElevatedButton(
                 onPressed: _save, child: const Text('Save Defaults')),

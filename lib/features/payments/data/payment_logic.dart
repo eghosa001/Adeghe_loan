@@ -1,3 +1,5 @@
+import 'dart:math';
+
 // Pure financial calculation functions for payment processing.
 // These functions are isolated from the database layer so they can be
 // unit-tested without SQLite infrastructure.
@@ -13,7 +15,7 @@ class PaymentAmounts {
   /// The portion of the payment actually applied to reduce the loan balance.
   final double appliedToLoan;
 
-  /// The amount in excess of the outstanding balance, credited to savings.
+  /// The amount in excess of the installment, credited to savings.
   /// Zero for normal (non-overpayment) payments.
   final double overpaymentSurplus;
 
@@ -21,24 +23,36 @@ class PaymentAmounts {
   final double newLoanBalance;
 }
 
-/// Compute how a [paymentAmount] splits between a loan with [outstandingBalance].
+/// Compute how a [paymentAmount] splits between loan repayment and savings.
 ///
-/// - [appliedToLoan] = min(paymentAmount, outstandingBalance)
-/// - [overpaymentSurplus] = max(0, paymentAmount − outstandingBalance)
-/// - [newLoanBalance] = outstandingBalance − appliedToLoan  (always ≥ 0)
+/// The loan receives the full payment up to the current [installmentDue]
+/// (the unpaid portion of the installment the customer is collecting on);
+/// any excess over that amount is credited to savings as an overpayment.
+/// When [installmentDue] is omitted/zero the payment caps at the full
+/// [outstandingBalance] so "pay in full" and loan-settlement payments apply
+/// entirely to the loan.
+///
+/// - [loanPaid] = min(paymentAmount, cap) where cap = installmentDue > 0
+///   ? installmentDue : outstandingBalance
+/// - [savingsDeposit] = paymentAmount - loanPaid
+/// - [newBalance] = outstandingBalance - loanPaid (always >= 0)
 PaymentAmounts computePaymentSplit({
   required double paymentAmount,
   required double outstandingBalance,
+  double? installmentDue,
 }) {
   assert(paymentAmount > 0, 'paymentAmount must be positive');
   assert(outstandingBalance >= 0, 'outstandingBalance must be non-negative');
 
-  final surplus = (paymentAmount - outstandingBalance).clamp(0.0, double.infinity);
-  final applied = paymentAmount - surplus;
-  final newBalance = (outstandingBalance - applied).clamp(0.0, double.infinity);
+  final cap = (installmentDue != null && installmentDue > 0)
+      ? installmentDue
+      : outstandingBalance;
+  final loanPaid = min(paymentAmount, cap);
+  final surplus = paymentAmount - loanPaid;
+  final newBalance = max(0.0, outstandingBalance - loanPaid);
 
   return PaymentAmounts(
-    appliedToLoan: applied,
+    appliedToLoan: loanPaid,
     overpaymentSurplus: surplus,
     newLoanBalance: newBalance,
   );
@@ -61,8 +75,6 @@ double computeReversalLoanDelta({
 
 /// Compute the savings balance after unwinding an overpayment credit.
 ///
-/// Guards against negative: if the customer's current savings [balance] is less
-/// than the [overpaymentSurplus] to deduct, only deducts what is available.
 /// Returns the (newBalance, amountDeducted) pair.
 (double newBalance, double amountDeducted) computeSavingsReversal({
   required double balance,
@@ -71,6 +83,6 @@ double computeReversalLoanDelta({
   assert(balance >= 0, 'balance must be non-negative');
   assert(overpaymentSurplus > 0, 'overpaymentSurplus must be positive');
 
-  final toDeduct = overpaymentSurplus.clamp(0.0, balance);
+  final toDeduct = min(overpaymentSurplus, balance);
   return (balance - toDeduct, toDeduct);
 }

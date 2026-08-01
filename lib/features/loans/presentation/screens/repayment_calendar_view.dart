@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:loantrack/core/utils/currency_utils.dart';
 import 'package:loantrack/core/utils/date_utils.dart';
+import 'package:loantrack/core/widgets/empty_state.dart';
 import 'package:loantrack/features/loans/data/models/repayment_installment_entity.dart';
 import 'package:loantrack/features/loans/presentation/providers/loan_providers.dart';
 
@@ -22,8 +23,10 @@ class RepaymentCalendarView extends ConsumerWidget {
         error: (err, _) => Center(child: Text('Error: $err')),
         data: (schedule) {
           if (schedule.isEmpty) {
-            return const Center(
-              child: Text('No repayment schedule found.'),
+            return const EmptyState(
+              icon: Icons.calendar_today,
+              title: 'No repayment schedule found',
+              subtitle: 'Schedule will appear once a loan is active.',
             );
           }
 

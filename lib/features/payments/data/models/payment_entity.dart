@@ -1,6 +1,6 @@
 import 'package:loantrack/core/utils/date_utils.dart';
 
-enum PaymentMethod { cash, transfer, pos, cheque, mobileMoney }
+enum PaymentMethod { cash, transfer, pos, cheque, mobileMoney, savings }
 
 enum PaymentType { partial, full, advance, overpayment }
 
@@ -18,6 +18,12 @@ class Payment {
   final String collector;
   final PaymentType type;
   final PaymentStatus status;
+  final String? remarks;
+
+  /// The loan status before this payment was applied. Used by reversal to
+  /// restore the loan's exact prior state (e.g. a 'defaulted' loan must not
+  /// come back as 'active').
+  final String? priorLoanStatus;
 
   Payment({
     required this.id,
@@ -31,7 +37,30 @@ class Payment {
     required this.collector,
     this.type = PaymentType.partial,
     this.status = PaymentStatus.completed,
+    this.remarks,
+    this.priorLoanStatus,
   });
+
+  Payment copyWith({
+    String? remarks,
+    bool clearRemarks = false,
+  }) {
+    return Payment(
+      id: id,
+      loanId: loanId,
+      customerId: customerId,
+      amount: amount,
+      method: method,
+      referenceNumber: referenceNumber,
+      receiptNumber: receiptNumber,
+      paymentDate: paymentDate,
+      collector: collector,
+      type: type,
+      status: status,
+      remarks: clearRemarks ? null : (remarks ?? this.remarks),
+      priorLoanStatus: priorLoanStatus,
+    );
+  }
 
   Map<String, dynamic> toMap() => {
         'id': id,
@@ -43,8 +72,10 @@ class Payment {
         'reference_no': referenceNumber,
         'receipt_no': receiptNumber,
         'collector': collector,
-        'remarks': null,
+        'type': type.name,
+        'remarks': remarks,
         'status': status.name,
+        'prior_loan_status': priorLoanStatus,
       };
 
   factory Payment.fromMap(Map<String, Object?> map) => Payment(
@@ -52,16 +83,22 @@ class Payment {
         loanId: map['loan_id'] as String,
         customerId: map['customer_id'] as String,
         amount: (map['amount'] as num).toDouble(),
-        paymentDate: AppDateUtils.tryParseStorage(map['payment_date'] as String)!,
+        paymentDate:
+            AppDateUtils.tryParseStorage(map['payment_date'] as String?) ??
+                DateTime.now(),
         method: PaymentMethod.values.firstWhere(
             (method) => method.name == map['payment_method'],
             orElse: () => PaymentMethod.cash),
         referenceNumber: map['reference_no'] as String?,
         receiptNumber: map['receipt_no'] as String,
         collector: map['collector'] as String,
-        type: PaymentType.partial,
+        type: PaymentType.values.firstWhere(
+            (t) => t.name == map['type'],
+            orElse: () => PaymentType.partial),
         status: PaymentStatus.values.firstWhere(
             (status) => status.name == map['status'],
             orElse: () => PaymentStatus.completed),
+        remarks: map['remarks'] as String?,
+        priorLoanStatus: map['prior_loan_status'] as String?,
       );
 }

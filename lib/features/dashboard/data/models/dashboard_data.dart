@@ -8,6 +8,8 @@ class DashboardData {
     required this.dailyActiveLoans,
     required this.weeklyActiveLoans,
     required this.totalDisbursed,
+    required this.dailyDisbursed,
+    required this.weeklyDisbursed,
     required this.totalCollected,
     required this.dailyCollected,
     required this.weeklyCollected,
@@ -17,6 +19,8 @@ class DashboardData {
     required this.recentLoans,
     required this.recentPayments,
     this.totalSavingsBalance = 0.0,
+    this.totalGroups = 0,
+    this.recentSavingsTransactions = const [],
   });
 
   final int totalCustomers;
@@ -24,18 +28,49 @@ class DashboardData {
   final int dailyActiveLoans;
   final int weeklyActiveLoans;
   final double totalDisbursed;
+  final double dailyDisbursed;
+  final double weeklyDisbursed;
   final double totalCollected;
-  /// Payments received today (completed status).
   final double dailyCollected;
-  /// Payments received in the last 7 days (completed status).
   final double weeklyCollected;
   final double outstandingBalance;
-  /// Installments due today that have not been fully paid (from repayment_schedule).
   final double dailyOutstandingBalance;
-  /// Installments due in the last 7 days that have not been fully paid.
   final double weeklyOutstandingBalance;
-  /// Total savings balance held across all customer savings accounts.
   final double totalSavingsBalance;
+  final int totalGroups;
   final List<Loan> recentLoans;
   final List<Payment> recentPayments;
+  final List<DashboardSavingsTransaction> recentSavingsTransactions;
+}
+
+class DashboardSavingsTransaction {
+  DashboardSavingsTransaction({
+    required this.id,
+    required this.customerId,
+    required this.customerName,
+    required this.type,
+    required this.amount,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String customerId;
+  final String customerName;
+  final String type;
+  final double amount;
+  final String createdAt;
+
+  bool get isCredit => type == 'deposit';
+  bool get isDebit => type == 'withdrawal';
+
+  factory DashboardSavingsTransaction.fromMap(Map<String, dynamic> row) {
+    return DashboardSavingsTransaction(
+      id: row['id'] as String? ?? '',
+      customerId: row['customerId'] as String? ?? '',
+      customerName: row['customerName'] as String? ?? '',
+      type: row['type'] as String? ?? '',
+      amount: (row['amount'] as num?)?.toDouble() ?? 0.0,
+      createdAt: row['createdAt'] as String? ?? '',
+    );
+  }
 }

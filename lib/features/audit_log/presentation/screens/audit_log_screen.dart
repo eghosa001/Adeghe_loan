@@ -1,20 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:loantrack/core/widgets/app_drawer.dart';
+import 'package:loantrack/core/widgets/empty_state.dart';
 
 import '../../../../core/di/providers.dart';
 import '../../../../core/utils/date_utils.dart';
-import '../../data/audit_log_repository.dart';
 import '../../data/models/audit_log_entity.dart';
 
-final _auditLogRepositoryProvider = FutureProvider<AuditLogRepository>(
-    (ref) async {
-  final dbService = await ref.watch(databaseServiceProvider.future);
-  return AuditLogRepository(dbService);
-});
-
 final _auditLogsProvider = FutureProvider<List<AuditLog>>((ref) async {
-  final repo = await ref.watch(_auditLogRepositoryProvider.future);
+  final repo = await ref.watch(auditLogRepositoryProvider.future);
   final result = await repo.getAll();
   return result.when(
     success: (logs) => logs,
@@ -113,7 +107,11 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
                       .toList();
                 }
                 if (filtered.isEmpty) {
-                  return const Center(child: Text('No audit log entries found.'));
+                  return const EmptyState(
+                    icon: Icons.history,
+                    title: 'No audit log entries found',
+                    subtitle: 'Actions will appear here as you use the app.',
+                  );
                 }
                 return _buildGroupedList(filtered);
               },

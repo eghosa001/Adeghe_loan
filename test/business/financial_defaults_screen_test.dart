@@ -16,10 +16,10 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    expect(find.text('Currency Symbol'), findsOneWidget);
-    expect(find.text('Default Interest Rate (%)'), findsOneWidget);
-    expect(find.text('Default Insurance Fee'), findsOneWidget);
-    expect(find.text('Default Commission'), findsOneWidget);
-    expect(find.text('Default Processing Fee'), findsOneWidget);
+    expect(find.text('Currency'), findsOneWidget);
+    expect(find.text('Interest Rate'), findsOneWidget);
+    expect(find.text('Insurance Fee'), findsOneWidget);
+    expect(find.text('Commission'), findsOneWidget);
+    expect(find.text('Processing Fee'), findsOneWidget);
   });
 }
