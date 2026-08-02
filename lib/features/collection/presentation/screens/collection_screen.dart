@@ -152,7 +152,7 @@ class CollectionScreen extends ConsumerWidget {
           ),
           groupsAsync.when(
             loading: () => const SizedBox.shrink(),
-            error: (_, __) => const SizedBox.shrink(),
+            error: (_, _) => const SizedBox.shrink(),
             data: (groups) {
               if (groups.isEmpty) return const SizedBox.shrink();
               return SizedBox(
@@ -287,7 +287,7 @@ class CollectionScreen extends ConsumerWidget {
         Expanded(
           child: ListView.separated(
             itemCount: rows.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
+            separatorBuilder: (_, _) => const Divider(height: 1),
             itemBuilder: (context, index) {
               final row = rows[index];
               final installmentDue = row.installmentAmount - row.amountPaid;

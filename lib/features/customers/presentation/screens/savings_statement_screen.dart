@@ -102,7 +102,7 @@ class _SavingsStatementBody extends ConsumerWidget {
         // Balance card
         balanceAsync.when(
           loading: () => const SizedBox.shrink(),
-          error: (_, __) => const SizedBox.shrink(),
+          error: (_, _) => const SizedBox.shrink(),
           data: (balance) => Container(
             width: double.infinity,
             margin: const EdgeInsets.all(16),
@@ -152,7 +152,7 @@ class _SavingsStatementBody extends ConsumerWidget {
               }
               return ListView.separated(
                 itemCount: transactions.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
+                separatorBuilder: (_, _) => const Divider(height: 1),
                 itemBuilder: (context, index) {
                   final tx = transactions[index];
                   final type = tx.type.value;

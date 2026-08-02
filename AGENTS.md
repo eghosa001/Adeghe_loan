@@ -167,8 +167,33 @@ Phase 2 (second full-app debug pass, 2026-08-01):
 
 Full audit details + fix plan: `AUDIT_PLAN.md`.
 
+## Cloud sync (Supabase)
+
+Optional offline-first replication (2026-08-01). The encrypted local SQLite DB stays the source of truth; Supabase mirrors it when the owner signs in (email/password). App unlock remains local-PIN-only.
+
+- **Services:** `lib/core/cloud/` — `supabase_config.dart` (real URL + anon key committed; `isConfigured` is true — never commit the service-role key), `cloud_auth_service.dart`, `cloud_sync_service.dart`, `sync_timestamps.dart`.
+- **Config:** `Supabase.initialize` in `main()` (skipped when placeholders present). Auto-sync runs after unlock in `main.dart` (next to `maybeAutoBackup`); manual trigger on the Cloud Sync screen (`/settings/cloud_sync`).
+- **Change tracking (v17 migration, `migrations.dart`):** every replicated table gets `updated_at TEXT`; triggers `trg_<table>_{ins,upd,del}` stamp it on normal writes and record deletes in `sync_tombstones`. Bookkeeping tables `sync_flags`, `sync_meta`, `sync_tombstones` are NOT replicated.
+- **TIMESTAMP FORMAT (NON-NEGOTIABLE):** all `updated_at` / watermark values MUST use `syncTimestamp()` (`sync_timestamps.dart`) — fixed-width `yyyy-MM-ddTHH:mm:ss.SSSZ` UTC with 3-digit millis. Sync does lexicographic string LWW, so `toIso8601String()` (6-digit micros) or any other format breaks ordering. Same format is produced on the SQLite side by `strftime('%Y-%m-%dT%H:%M:%fZ','now')`.
+- **Pull flag:** the sync service sets `sync_flags.pull_in_progress = '1'` while writing pulled rows so the triggers don't re-stamp them or create tombstones. Never write sync tables from app features.
+- **LWW merge:** push snapshots changed rows then sets `last_pushed_at` (watermark captured AFTER the snapshot so concurrent writes are re-picked next cycle). Pull deletes parents-first (local FK cascades clean children), then upserts rows where remote `updated_at` > local (or local missing and no newer local tombstone).
+- **Documents:** metadata rows replicate like any table (cloud `file_path` is `''`); the encrypted file bytes live in the `documents` storage bucket at `<customer_id>/<document_id>.enc` and are downloaded into `secure_documents/` on pull.
+- **Remote schema:** `supabase_schema.sql` must mirror the local schema (column types + FKs). Any local schema change (new table/column) must be added there AND to `_syncTables`/`_tablePrimaryKeys` in `cloud_sync_service.dart` AND the v17/`createSyncSchema` trigger list if it needs change tracking.
+- **Tests:** `test/database/migration_v17_sync_test.dart` (real SQLite via `sqflite_common_ffi` — dev dependency) validates the migration, stamping, tombstones, and pull-flag suppression. `supabase_flutter` is a direct dependency; INTERNET permission added to `AndroidManifest.xml`.
+
+## Windows desktop build (packaged with Inno Setup)
+
+First-class desktop port added 2026-08-02. Same encrypted SQLite + PIN/biometric auth as mobile; the DB file lives in the user's Documents folder (`getApplicationDocumentsDirectory()`), key in Windows DPAPI via `flutter_secure_storage`.
+
+- **Encryption on Windows:** `sqflite_sqlcipher` has NO Windows plugin, so `DatabaseService._initDatabase` branches on `Platform.isWindows` and opens via `sqflite_common_ffi` (`databaseFactoryFfi.openDatabase`) using the SQLCipher build of `package:sqlite3`. The key is applied as `PRAGMA key = '<escaped>'` in `onConfigure` (sqflite runs it before the `user_version` check). `verifyDatabaseFile` has the same branch (`_openWindowsDatabaseRaw`). SQLCipher 4 file format — DBs are portable with mobile.
+- **Native lib:** the SQLCipher native build is requested in `pubspec.yaml` via `hooks.user_defines.sqlite3.source: sqlcipher` (the `native_toolchain_c` hook system of sqlite3 3.x). `sqlcipher_flutter_libs` (^0.7.0+eol) is a DEAD stub and was REMOVED — do not re-add it. First `flutter build windows` downloads/builds the native lib (needs VS toolchain).
+- **Windows runner:** scaffolded by `flutter create --platforms=windows .`; window title + version resources set to "Adeghe Professional Services" in `windows/runner/main.cpp` / `Runner.rc`; launcher icon generated from `attached_assets/app_icon_mark_1024_white_bg.png` into `windows/runner/resources/app_icon.ico` (keep `flutter_launcher_icons.windows` as a Map — `windows: true` is invalid in 0.14.x).
+- **Installer:** `windows/installer/setup.iss` (Inno Setup 6). Output `build/installer/AdegheProfessionalServices-Setup-<ver>.exe`, per-user install (`PrivilegesRequired=lowest`), sources from `build/windows/x64/runner/Release`.
+- **Prereqs (host, not committed):** Visual Studio 2022 with the "Desktop development with C++" workload, Windows Developer Mode ON (needed for plugin symlinks), and Inno Setup 6 (`ISCC.exe`). Without them `flutter build windows` and the .iss compile both fail.
+- **Build steps:** `flutter build windows --release` → open `windows/installer/setup.iss` in Inno Setup Studio and Build (or `ISCC.exe windows\installer\setup.iss` from repo root).
+- **No iOS directory:** Only `android/` + `windows/` platform files exist.
+
 ## Other notes
-- **No iOS directory:** Only `android/` platform files exist.
 - **Backup format:** `.ltbackup` files are ZIP containers (`loantrack.db` + `secure_documents/…`); legacy raw-SQLite files are still accepted on restore (`backup_service.dart`). `archive: ^3.6.1` is a direct dependency.
 - **DI inconsistency:** Some repositories take `Ref`, others take `DatabaseService` directly. No uniform pattern.
 - **Excel export:** `Excel.rename()` crashes with archive 3.6.1 (unmodifiable list) — never call it; first group reuses `getDefaultSheet()`, later groups use `Sheet_n`. Regression test: `test/excel_encode_test.dart`.

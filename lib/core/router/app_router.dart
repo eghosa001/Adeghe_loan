@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../di/providers.dart';
+import '../cloud/supabase_config.dart';
 import '../widgets/scaffold_with_nav_bar.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../features/auth/presentation/screens/pin_setup_screen.dart';
@@ -34,6 +35,8 @@ import '../../features/reports/presentation/screens/report_screen.dart';
 import '../../features/reports/presentation/screens/overdue_report_screen.dart';
 import '../../features/audit_log/presentation/screens/audit_log_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
+import '../../features/settings/presentation/screens/cloud_gate_screen.dart';
+import '../../features/settings/presentation/screens/cloud_sync_screen.dart';
 import '../../features/groups/presentation/screens/group_management_screen.dart';
 import '../../features/groups/presentation/screens/group_detail_screen.dart';
 import '../../features/savings/presentation/screens/savings_overview_screen.dart';
@@ -60,8 +63,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: '/splash',
     refreshListenable: _AuthRefreshListenable(ref),
-    redirect: (context, state) =>
-        authRedirect(ref.read(authProvider), state.location),
+    redirect: (context, state) {
+      final auth = ref.read(authProvider);
+      final base = authRedirect(auth, state.uri.toString());
+      if (base != null) return base;
+      // Pre-entry cloud gate: after PIN unlock, ask for cloud credentials
+      // before the app opens so sync can start immediately.
+      if (auth == AuthState.unlocked &&
+          SupabaseConfig.isConfigured &&
+          !ref.read(cloudAuthServiceProvider).isSignedIn &&
+          !ref.read(cloudGateDismissedProvider)) {
+        final location = state.uri.toString();
+        if (location != '/cloud-gate') return '/cloud-gate';
+      }
+      return null;
+    },
     routes: [
     GoRoute(
       path: '/splash',
@@ -92,7 +108,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     ShellRoute(
       builder: (context, state, child) {
         return ScaffoldWithNavBar(
-          currentPath: state.location,
+          currentPath: state.uri.toString(),
           child: child,
         );
       },
@@ -124,7 +140,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         GoRoute(
           path: ':id',
           builder: (context, state) =>
-              GroupDetailScreen(groupId: state.params['id']!),
+              GroupDetailScreen(groupId: state.pathParameters['id']!),
         ),
       ],
     ),
@@ -139,7 +155,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         GoRoute(
           path: ':id',
           builder: (context, state) =>
-              CustomerDetailScreen(customerId: state.params['id']!),
+              CustomerDetailScreen(customerId: state.pathParameters['id']!),
           routes: [
             GoRoute(
               path: 'edit',
@@ -149,19 +165,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             GoRoute(
               path: 'documents',
               builder: (context, state) => DocumentListScreen(
-                customerId: state.params['id']!,
+                customerId: state.pathParameters['id']!,
               ),
             ),
             GoRoute(
               path: 'documents/upload',
               builder: (context, state) => DocumentUploadScreen(
-                customerId: state.params['id']!,
+                customerId: state.pathParameters['id']!,
               ),
             ),
             GoRoute(
               path: 'loans/new',
               builder: (context, state) => LoanCreationScreen(
-                customerId: state.params['id']!,
+                customerId: state.pathParameters['id']!,
               ),
             ),
           ],
@@ -171,7 +187,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     GoRoute(
       path: '/loans/:id',
       builder: (context, state) => LoanDetailsScreen(
-        loanId: state.params['id']!,
+        loanId: state.pathParameters['id']!,
       ),
       routes: [
         GoRoute(
@@ -187,13 +203,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         GoRoute(
           path: 'repayment-calendar',
           builder: (context, state) => RepaymentCalendarView(
-            loanId: state.params['id']!,
+            loanId: state.pathParameters['id']!,
           ),
         ),
         GoRoute(
           path: 'payments',
           builder: (context, state) => PaymentHistoryScreen(
-            loanId: state.params['id']!,
+            loanId: state.pathParameters['id']!,
             customerId: (state.extra as Map<String, dynamic>?)?['customerId'] as String? ?? '',
           ),
         ),
@@ -202,7 +218,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           builder: (context, state) {
             final extra = state.extra as Map<String, dynamic>? ?? {};
             return RecordPaymentScreen(
-              loanId: state.params['id']!,
+              loanId: state.pathParameters['id']!,
               customerId: extra['customerId'] as String? ?? '',
               currentBalance:
                   (extra['currentBalance'] as num?)?.toDouble() ?? 0.0,
@@ -261,6 +277,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       builder: (context, state) => const BackupScreen(),
     ),
     GoRoute(
+      path: '/settings/cloud_sync',
+      builder: (context, state) => const CloudSyncScreen(),
+    ),
+    GoRoute(
+      path: '/cloud-gate',
+      builder: (context, state) => const CloudGateScreen(),
+    ),
+    GoRoute(
       path: '/loans',
       builder: (context, state) => const LoanListScreen(),
     ),
@@ -299,7 +323,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 /// so locking/unlocking immediately moves the user to the correct screen.
 class _AuthRefreshListenable extends Listenable {
   _AuthRefreshListenable(Ref ref) {
-    ref.listen(authProvider, (_, __) => _notify());
+    ref.listen(authProvider, (_, _) => _notify());
   }
 
   final Set<VoidCallback> _listeners = {};

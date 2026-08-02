@@ -71,7 +71,7 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 12),
               itemCount: _actionTypes.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
               itemBuilder: (context, index) {
                 final type = _actionTypes[index];
                 final selected = _selectedAction == type;

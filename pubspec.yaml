@@ -9,35 +9,45 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  cupertino_icons: ^1.0.8
-  intl: ">=0.19.0 <1.0.0"
-  flutter_riverpod: ^2.4.9
-  go_router: ^6.5.0
-  sqflite_sqlcipher: ^3.0.3
-  path: ^1.8.3
-  path_provider: ^2.1.1
-  encrypt: ^5.0.1
-  flutter_secure_storage: ^9.0.0
-  local_auth: ^2.1.7
-  uuid: ^4.2.1
-  excel: ^2.0.10
-  google_fonts: ^8.0.0
-  image_picker: ^1.0.4
+  cupertino_icons: ^1.0.9
+  intl: ^0.20.3
+  flutter_riverpod: ^2.6.1
+  go_router: ^17.3.0
+  sqflite_sqlcipher: ^3.4.0
+  path: ^1.9.1
+  path_provider: ^2.1.6
+  encrypt: ^5.0.3
+  flutter_secure_storage: ^9.2.4
+  local_auth: ^3.0.2
+  uuid: ^4.6.0
+  excel: ^2.1.0
+  google_fonts: ^8.2.1
+  image_picker: ^1.2.3
   file_picker: ^10.3.10
-  pdf: ^3.10.4
-  printing: ^5.13.1
+  pdf: ^3.12.0
+  printing: ^5.14.3
   share_plus: ^12.0.2
-  crypto: ^3.0.3
-  fl_chart: ^0.69.0
+  crypto: ^3.0.7
+  fl_chart: ^0.69.2
   archive: ^3.6.1
+  supabase_flutter: ^2.16.0
+  sqflite_common_ffi: ^2.4.2
+
+# Windows desktop needs the encrypted SQLite (SQLCipher) build of
+# package:sqlite3 (used by sqflite_common_ffi at runtime on Windows).
+# Mobile keeps sqflite_sqlcipher's own native lib — this hook only affects
+# the package:sqlite3 native library.
+hooks:
+  user_defines:
+    sqlite3:
+      source: sqlcipher
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ">=4.0.0 <6.0.0"
-  mocktail: ^1.0.1
-  flutter_launcher_icons: ^0.13.1
-
+  flutter_lints: ^6.0.0
+  mocktail: ^1.0.5
+  flutter_launcher_icons: ^0.14.4
 flutter:
   uses-material-design: true
   assets:
@@ -47,6 +57,10 @@ flutter:
 flutter_launcher_icons:
   android: true
   ios: false
+  windows:
+    generate: true
+    image_path: attached_assets/app_icon_mark_1024_white_bg.png
+    icon_size: 256
   image_path: attached_assets/app_icon_mark_1024_white_bg.png
   adaptive_icon_background: "#FFFFFF"
   adaptive_icon_foreground: attached_assets/app_icon_mark_1024_white_bg.png

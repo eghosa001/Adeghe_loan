@@ -43,11 +43,10 @@ class LoanListScreen extends ConsumerWidget {
                 return;
               }
               try {
-                final headers = ['Loan ID', 'Customer ID', 'Amount',
+                final headers = ['Customer Name', 'Amount',
                     'Outstanding', 'Rate', 'Status', 'Type', 'Date', 'Notes'];
                 final rows = loans.map((l) => [
-                  l.id,
-                  l.customerId,
+                  l.customerName ?? l.id,
                   CurrencyUtils.format(l.amount),
                   CurrencyUtils.format(l.outstandingBalance),
                   '${l.interestRate}%',
@@ -131,7 +130,7 @@ class LoanListScreen extends ConsumerWidget {
                   onRefresh: () async => ref.invalidate(allLoansProvider),
                   child: ListView.separated(
                     itemCount: loans.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final loan = loans[index];
                       return ListTile(

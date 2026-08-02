@@ -1,14 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 import 'core/constants/app_constants.dart';
 import 'core/theme/app_theme.dart';
 import 'core/router/app_router.dart';
+import 'core/cloud/supabase_config.dart';
 import 'core/di/providers.dart';
 import 'features/auth/presentation/providers/auth_provider.dart';
 import 'features/auth/presentation/widgets/inactivity_wrapper.dart';
 import 'features/business/presentation/providers/business_providers.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (SupabaseConfig.isConfigured) {
+    try {
+      await Supabase.initialize(
+        url: SupabaseConfig.supabaseUrl,
+        publishableKey: SupabaseConfig.anonKey,
+      );
+    } catch (_) {
+      // Offline-first: the app runs normally even if the cloud is unreachable
+      // or misconfigured. Sync simply does not happen.
+    }
+  }
   runApp(const ProviderScope(child: MyApp()));
 }
 
@@ -48,6 +62,10 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
       if (next == AuthState.unlocked && previous != AuthState.unlocked) {
         ref.read(backupServiceProvider.future).then((service) {
           service.maybeAutoBackup();
+        }).catchError((_) {});
+        // Cloud sync runs in the background whenever the owner is signed in.
+        ref.read(cloudSyncServiceProvider.future).then((service) {
+          service.syncIfSignedIn();
         }).catchError((_) {});
       }
     });

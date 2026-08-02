@@ -367,7 +367,7 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                     padding: const EdgeInsets.only(bottom: 12),
                     child: groupsAsync.when(
                       loading: () => const LinearProgressIndicator(),
-                      error: (_, __) => const SizedBox.shrink(),
+                      error: (_, _) => const SizedBox.shrink(),
                       data: (groups) => DropdownButtonFormField<String?>(
                         initialValue: _selectedGroupId,
                         decoration:

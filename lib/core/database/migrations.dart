@@ -1,6 +1,8 @@
 import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
+import '../cloud/sync_timestamps.dart';
+
 class DatabaseMigrations {
   DatabaseMigrations._();
 
@@ -20,6 +22,155 @@ class DatabaseMigrations {
     if (oldVersion < 14) await _v14(db);
     if (oldVersion < 15) await _v15(db);
     if (oldVersion < 16) await _v16(db);
+    if (oldVersion < 17) await _v17(db);
+  }
+
+  /// Tables that are replicated to Supabase for cloud sync, in parent-before-
+  /// child dependency order (so FK constraints hold when rows are written back
+  /// during a pull). The `settings` table has a `key` primary key; every other
+  /// sync table uses `id`.
+  static const List<String> _syncTables = [
+    'business_profile',
+    'customer_groups',
+    'customers',
+    'loans',
+    'repayment_schedule',
+    'payments',
+    'savings_accounts',
+    'savings_transactions',
+    'documents',
+    'holidays',
+    'audit_logs',
+    'settings',
+  ];
+
+  static const Map<String, String> _syncTablePrimaryKeys = {
+    'business_profile': 'id',
+    'customer_groups': 'id',
+    'customers': 'id',
+    'loans': 'id',
+    'repayment_schedule': 'id',
+    'payments': 'id',
+    'savings_accounts': 'id',
+    'savings_transactions': 'id',
+    'documents': 'id',
+    'holidays': 'id',
+    'audit_logs': 'id',
+    'settings': 'key',
+  };
+
+  /// v17 — add cloud-sync change tracking.
+  ///
+  /// Adds an `updated_at` column (local ISO-8601 UTC timestamp, stamped by
+  /// triggers on every non-sync write) to every replicated table, plus the
+  /// `sync_flags` / `sync_meta` / `sync_tombstones` bookkeeping tables and the
+  /// stamp/tombstone triggers. Rows created before this migration get their
+  /// `updated_at` back-filled so the first push uploads the whole database.
+  static Future<void> _v17(Database db) async {
+    await db.execute('ALTER TABLE business_profile ADD COLUMN updated_at TEXT');
+    await db.execute('ALTER TABLE customer_groups ADD COLUMN updated_at TEXT');
+    await db.execute('ALTER TABLE customers ADD COLUMN updated_at TEXT');
+    await db.execute('ALTER TABLE loans ADD COLUMN updated_at TEXT');
+    await db.execute('ALTER TABLE repayment_schedule ADD COLUMN updated_at TEXT');
+    await db.execute('ALTER TABLE payments ADD COLUMN updated_at TEXT');
+    await db.execute('ALTER TABLE savings_accounts ADD COLUMN updated_at TEXT');
+    await db.execute('ALTER TABLE savings_transactions ADD COLUMN updated_at TEXT');
+    await db.execute('ALTER TABLE documents ADD COLUMN updated_at TEXT');
+    await db.execute('ALTER TABLE holidays ADD COLUMN updated_at TEXT');
+    await db.execute('ALTER TABLE audit_logs ADD COLUMN updated_at TEXT');
+    await db.execute('ALTER TABLE settings ADD COLUMN updated_at TEXT');
+
+    final now = syncTimestamp();
+    await db.execute(
+        'UPDATE business_profile SET updated_at = ? WHERE updated_at IS NULL',
+        [now]);
+    await db.execute(
+        'UPDATE customer_groups SET updated_at = ? WHERE updated_at IS NULL',
+        [now]);
+    await db.execute(
+        'UPDATE customers SET updated_at = ? WHERE updated_at IS NULL', [now]);
+    await db.execute(
+        'UPDATE loans SET updated_at = ? WHERE updated_at IS NULL', [now]);
+    await db.execute(
+        'UPDATE repayment_schedule SET updated_at = ? WHERE updated_at IS NULL',
+        [now]);
+    await db.execute(
+        'UPDATE payments SET updated_at = ? WHERE updated_at IS NULL', [now]);
+    await db.execute(
+        'UPDATE savings_accounts SET updated_at = ? WHERE updated_at IS NULL',
+        [now]);
+    await db.execute(
+        'UPDATE savings_transactions SET updated_at = ? WHERE updated_at IS NULL',
+        [now]);
+    await db.execute(
+        'UPDATE documents SET updated_at = ? WHERE updated_at IS NULL', [now]);
+    await db.execute(
+        'UPDATE holidays SET updated_at = ? WHERE updated_at IS NULL', [now]);
+    await db.execute(
+        'UPDATE audit_logs SET updated_at = ? WHERE updated_at IS NULL', [now]);
+    await db.execute(
+        'UPDATE settings SET updated_at = ? WHERE updated_at IS NULL', [now]);
+
+    await createSyncSchema(db);
+  }
+
+  /// Creates the cloud-sync bookkeeping tables and triggers. Safe to run on a
+  /// fresh install (from [_onCreate]) and on upgrade (from [_v17]).
+  static Future<void> createSyncSchema(Database db) async {
+    await db.execute('''
+      CREATE TABLE sync_flags (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE sync_meta (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        last_pushed_at TEXT,
+        last_pulled_at TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE sync_tombstones (
+        deleted_table TEXT NOT NULL,
+        deleted_row_id TEXT NOT NULL,
+        deleted_at TEXT NOT NULL,
+        PRIMARY KEY (deleted_table, deleted_row_id)
+      )
+    ''');
+    await db.insert('sync_meta', {'id': 1},
+        conflictAlgorithm: ConflictAlgorithm.ignore);
+
+    const guard =
+        "COALESCE((SELECT value FROM sync_flags WHERE key = 'pull_in_progress'), '0') = '0'";
+    final stamp =
+        "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
+    for (final table in _syncTables) {
+      final pk = _syncTablePrimaryKeys[table]!;
+      final names = ['ins', 'upd', 'del'];
+      for (final name in names) {
+        await db.execute('DROP TRIGGER IF EXISTS trg_${table}_$name');
+      }
+      // Stamp on INSERT / UPDATE unless a pull is in progress (the sync
+      // service sets sync_flags.pull_in_progress = '1' while it writes rows
+      // fetched from the cloud, so pulled rows keep the remote timestamp).
+      final ins = 'CREATE TRIGGER trg_${table}_ins AFTER INSERT ON $table '
+          'WHEN $guard '
+          'BEGIN UPDATE $table SET updated_at = $stamp WHERE $pk = NEW.$pk; END';
+      final upd = 'CREATE TRIGGER trg_${table}_upd AFTER UPDATE ON $table '
+          'WHEN $guard '
+          'BEGIN UPDATE $table SET updated_at = $stamp WHERE $pk = NEW.$pk; END';
+      // Record a tombstone so the cloud delete can be replicated to other
+      // devices (cascaded deletes are captured too, since SQLite fires the
+      // DELETE trigger for each row a CASCADE removes).
+      final del = 'CREATE TRIGGER trg_${table}_del AFTER DELETE ON $table '
+          'WHEN $guard '
+          "BEGIN INSERT INTO sync_tombstones (deleted_table, deleted_row_id, deleted_at) "
+          "VALUES ('$table', OLD.$pk, $stamp); END";
+      await db.execute(ins);
+      await db.execute(upd);
+      await db.execute(del);
+    }
   }
 
   // v8 — remove monthly loan columns since monthly loans are not supported

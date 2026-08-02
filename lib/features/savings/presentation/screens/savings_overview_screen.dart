@@ -37,11 +37,10 @@ class SavingsOverviewScreen extends ConsumerWidget {
                 return;
               }
               try {
-                final headers = ['Customer', 'Phone', 'Balance',
+                final headers = ['Customer', 'Balance',
                     'Created Date', 'Status'];
                 final rows = accounts.map((a) => [
                   a['customerName'] as String? ?? '',
-                  a['phone'] as String? ?? '-',
                   CurrencyUtils.format(
                       (a['balance'] as num?)?.toDouble() ?? 0),
                   (a['createdAt'] as String?)?.split('T').first ?? '-',

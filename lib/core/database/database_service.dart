@@ -1,3 +1,7 @@
+import 'dart:io' show Platform;
+
+import 'package:sqflite_common_ffi/sqflite_ffi.dart'
+    show databaseFactoryFfi, sqfliteFfiInit;
 import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
@@ -6,7 +10,7 @@ import '../security/secure_storage_service.dart';
 import 'migrations.dart';
 
 class DatabaseService {
-  static const int _databaseVersion = 16;
+  static const int _databaseVersion = 17;
   final SecureStorageService _secureStorage;
 
   DatabaseService(this._secureStorage);
@@ -40,7 +44,13 @@ class DatabaseService {
     final encryptionKey = await _secureStorage.getDatabaseKey();
     Database? db;
     try {
-      db = await openDatabase(path, password: encryptionKey, readOnly: true);
+      if (Platform.isWindows) {
+        db = await _openWindowsDatabaseRaw(path, encryptionKey,
+            readOnly: true);
+      } else {
+        db = await openDatabase(path,
+            password: encryptionKey, readOnly: true);
+      }
       final version = await db.getVersion();
       return version >= 1;
     } catch (_) {
@@ -55,6 +65,10 @@ class DatabaseService {
     final path = join(documentsDirectory.path, AppConstants.databaseName);
     final encryptionKey = await _secureStorage.getDatabaseKey();
 
+    if (Platform.isWindows) {
+      return _openWindowsDatabase(path, encryptionKey);
+    }
+
     return await openDatabase(
       path,
       password: encryptionKey,
@@ -64,6 +78,50 @@ class DatabaseService {
       onUpgrade: _onUpgrade,
       onOpen: _onOpen,
     );
+  }
+
+  /// Opens the encrypted DB on Windows via `sqflite_common_ffi` + the SQLCipher
+  /// build of `package:sqlite3` (see the `hooks.user_defines` in pubspec.yaml).
+  /// The encryption key is applied with `PRAGMA key` in `onConfigure`, which
+  /// sqflite runs before the `user_version` check — the same SQLCipher 4 file
+  /// format the mobile sqflite_sqlcipher plugin uses, so DBs are portable.
+  Future<Database> _openWindowsDatabase(
+      String path, String encryptionKey) async {
+    sqfliteFfiInit();
+    return databaseFactoryFfi.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: _databaseVersion,
+        onCreate: _onCreate,
+        onConfigure: (db) async {
+          await db.execute(_cipherKeySql(encryptionKey));
+          await _onConfigure(db);
+        },
+        onUpgrade: _onUpgrade,
+        onOpen: _onOpen,
+      ),
+    );
+  }
+
+  /// Raw open used by [verifyDatabaseFile] for candidate backup files.
+  Future<Database> _openWindowsDatabaseRaw(
+      String path, String encryptionKey,
+      {bool readOnly = false}) async {
+    sqfliteFfiInit();
+    return databaseFactoryFfi.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        readOnly: readOnly,
+        onConfigure: (db) async {
+          await db.execute(_cipherKeySql(encryptionKey));
+        },
+      ),
+    );
+  }
+
+  static String _cipherKeySql(String encryptionKey) {
+    final escaped = encryptionKey.replaceAll("'", "''");
+    return "PRAGMA key = '$escaped'";
   }
 
   /// Foreign keys are turned OFF here (outside the migration transaction) and
@@ -94,7 +152,8 @@ class DatabaseService {
         phone TEXT,
         email TEXT,
         reg_no TEXT,
-        owner_name TEXT
+        owner_name TEXT,
+        updated_at TEXT
       )
     ''');
 
@@ -103,7 +162,8 @@ class DatabaseService {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         description TEXT,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        updated_at TEXT
       )
     ''');
 
@@ -144,7 +204,8 @@ class DatabaseService {
         notes TEXT,
         status TEXT NOT NULL,
         credit_score REAL DEFAULT 0.0,
-        group_id TEXT REFERENCES customer_groups(id) ON DELETE SET NULL
+        group_id TEXT REFERENCES customer_groups(id) ON DELETE SET NULL,
+        updated_at TEXT
       )
     ''');
 
@@ -174,6 +235,7 @@ class DatabaseService {
         collector TEXT,
         notes TEXT,
         status TEXT NOT NULL,
+        updated_at TEXT,
         FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE
       )
     ''');
@@ -193,6 +255,7 @@ class DatabaseService {
         type TEXT DEFAULT 'partial',
         status TEXT NOT NULL DEFAULT 'completed',
         prior_loan_status TEXT,
+        updated_at TEXT,
         FOREIGN KEY (loan_id) REFERENCES loans (id) ON DELETE CASCADE,
         FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE
       )
@@ -207,6 +270,7 @@ class DatabaseService {
         amount REAL NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending',
         paid_amount REAL NOT NULL DEFAULT 0.0,
+        updated_at TEXT,
         FOREIGN KEY (loan_id) REFERENCES loans (id) ON DELETE CASCADE
       )
     ''');
@@ -221,6 +285,7 @@ class DatabaseService {
         original_name TEXT NOT NULL,
         mime_type TEXT NOT NULL,
         uploaded_at TEXT NOT NULL,
+        updated_at TEXT,
         FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE,
         FOREIGN KEY (loan_id) REFERENCES loans (id) ON DELETE CASCADE
       )
@@ -232,7 +297,8 @@ class DatabaseService {
         name TEXT NOT NULL,
         date TEXT NOT NULL,
         is_recurring INTEGER NOT NULL,
-        is_enabled INTEGER NOT NULL
+        is_enabled INTEGER NOT NULL,
+        updated_at TEXT
       )
     ''');
 
@@ -242,14 +308,16 @@ class DatabaseService {
         user TEXT NOT NULL,
         action TEXT NOT NULL,
         timestamp TEXT NOT NULL,
-        details TEXT NOT NULL
+        details TEXT NOT NULL,
+        updated_at TEXT
       )
     ''');
 
     await db.execute('''
       CREATE TABLE settings (
         key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
+        value TEXT NOT NULL,
+        updated_at TEXT
       )
     ''');
 
@@ -259,6 +327,7 @@ class DatabaseService {
         customer_id TEXT NOT NULL UNIQUE,
         balance REAL NOT NULL DEFAULT 0.0,
         created_at TEXT NOT NULL,
+        updated_at TEXT,
         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
       )
     ''');
@@ -272,11 +341,15 @@ class DatabaseService {
         reference_loan_payment_id TEXT,
         note TEXT,
         created_at TEXT NOT NULL,
+        updated_at TEXT,
         FOREIGN KEY (savings_account_id) REFERENCES savings_accounts(id) ON DELETE CASCADE
       )
     ''');
 
     await _createIndexes(db);
+
+    // Cloud-sync bookkeeping tables + updated_at/tombstone triggers.
+    await DatabaseMigrations.createSyncSchema(db);
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {

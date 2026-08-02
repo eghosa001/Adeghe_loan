@@ -51,7 +51,7 @@ class CustomerListScreen extends ConsumerWidget {
         // Group filter chips
         groupsAsync.when(
           loading: () => const SizedBox.shrink(),
-          error: (_, __) => const SizedBox.shrink(),
+          error: (_, _) => const SizedBox.shrink(),
           data: (groups) {
             if (groups.isEmpty) return const SizedBox.shrink();
             return SizedBox(

@@ -153,6 +153,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
           const Divider(),
 
+          // ── Cloud ──
+          _SectionHeader(title: 'Cloud'),
+          ListTile(
+            leading: const Icon(Icons.cloud_outlined),
+            title: const Text('Cloud Sync'),
+            subtitle: const Text('Optional backup to your Supabase cloud'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/settings/cloud_sync'),
+          ),
+
+          const Divider(),
+
           // ── Data ──
           _SectionHeader(title: 'Data'),
           ListTile(

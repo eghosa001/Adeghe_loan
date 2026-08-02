@@ -72,7 +72,7 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
       ref.invalidate(collectionListProvider);
       ref.invalidate(reportSummaryProvider);
     } catch (e) {
-      if (context.mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to update status: $e')),
         );
@@ -142,7 +142,7 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
       ref.invalidate(customerListProvider);
       ref.invalidate(collectionListProvider);
     } catch (e) {
-      if (context.mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to change group: $e')),
         );
@@ -298,7 +298,7 @@ class _ProfileTab extends ConsumerWidget {
       // Active Loans section
       activeLoans.when(
         loading: () => const SizedBox.shrink(),
-        error: (_, __) => const SizedBox.shrink(),
+        error: (_, _) => const SizedBox.shrink(),
         data: (loans) {
           if (loans.isEmpty) return const SizedBox.shrink();
           return Card(

@@ -17,9 +17,6 @@ import '../data/models/report_summary.dart';
 class ExportManager {
   ExportManager._();
 
-  static const int _collectionColumnsPerGroup = 3;
-  static const int _collectionSeparatorColumns = 1;
-
   static pw.Font? _font;
   static pw.Font? _fontBold;
 
@@ -340,26 +337,62 @@ class ExportManager {
         return a.compareTo(b);
       });
 
-    bool isFirst = true;
-    int sheetIndex = 0;
+    const totalCols = 3;
+    final allRows = <List<String?>>[];
+    final boldRows = <bool>[];
 
-    for (var i = 0; i < sortedGroups.length; i += 2) {
-      final nameA = sortedGroups[i];
-      final groupA = groupedRows[nameA]!;
-      final nameB = (i + 1 < sortedGroups.length) ? sortedGroups[i + 1] : null;
-      final groupB = nameB != null ? groupedRows[nameB]! : null;
-
-      final String sheetName;
-      if (isFirst) {
-        sheetName = defaultSheet ?? nameA;
-        isFirst = false;
-      } else {
-        sheetName = 'Sheet_$sheetIndex';
-        sheetIndex++;
+    // Groups are stacked vertically on the left; the ungrouped section is
+    // always last, at the bottom under all grouped customers.
+    for (final groupName in sortedGroups) {
+      allRows.add([groupName, null, null]);
+      boldRows.add(true);
+      final block = _buildCollectionRows(
+          _sortedCollectionRows(groupedRows[groupName]!));
+      for (final r in block) {
+        allRows.add(r);
+        boldRows.add(false);
       }
+      allRows.add([null, null, null]);
+      boldRows.add(false);
+    }
 
-      final sheet = excel[sheetName];
-      _populateSideBySideCollectionSheet(sheet, groupA, nameA, groupB, nameB);
+    final sheet = excel[defaultSheet ?? 'Collections'];
+    for (final row in allRows) {
+      sheet.appendRow([
+        row[0] ?? '',
+        row[1] ?? '',
+        row[2] ?? '',
+      ]);
+    }
+
+    // Style all populated cells.
+    final totalRows = sheet.maxRows;
+    for (var r = 0; r < totalRows; r++) {
+      for (var c = 0; c < totalCols; c++) {
+        final cell = sheet.cell(
+            CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r));
+        final value = cell.value?.toString() ?? '';
+        cell.cellStyle = CellStyle(
+          bold: boldRows[r] || _isCollectionHeaderValue(value),
+          horizontalAlign: HorizontalAlign.Left,
+          bottomBorder: Border(borderStyle: BorderStyle.Thin),
+          topBorder: Border(borderStyle: BorderStyle.Thin),
+          leftBorder: Border(borderStyle: BorderStyle.Thin),
+          rightBorder: Border(borderStyle: BorderStyle.Thin),
+        );
+      }
+    }
+
+    // Auto column widths.
+    for (var c = 0; c < totalCols; c++) {
+      var maxWidth = 0;
+      for (var r = 0; r < totalRows; r++) {
+        final cell = sheet.cell(
+            CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r));
+        final text = cell.value?.toString() ?? '';
+        if (text.length > maxWidth) maxWidth = text.length;
+      }
+      sheet.setColWidth(c, (maxWidth + 3).toDouble());
     }
 
     final List<int>? bytes;
@@ -376,6 +409,14 @@ class ExportManager {
     final file = File('${dir.path}/$fileName');
     await file.writeAsBytes(bytes, flush: true);
     return file;
+  }
+
+  static bool _isCollectionHeaderValue(String value) {
+    return value == 'DAILY LOANS' ||
+        value == 'WEEKLY LOANS' ||
+        value == 'Name' ||
+        value == 'Amount' ||
+        value == 'Paid';
   }
 
   static Future<File> exportOverdueToPdf(
@@ -447,147 +488,6 @@ class ExportManager {
     }
 
     return result;
-  }
-
-  static void _populateSideBySideCollectionSheet(
-    Sheet sheet,
-    List<CollectionRow> groupA,
-    String groupAName,
-    List<CollectionRow>? groupB,
-    String? groupBName,
-  ) {
-    final sortedA = _sortedCollectionRows(groupA);
-    final sortedB = groupB != null ? _sortedCollectionRows(groupB) : null;
-
-    const aCol = 0;
-    const bCol = _collectionColumnsPerGroup + _collectionSeparatorColumns;
-    const totalCols = bCol + _collectionColumnsPerGroup;
-
-    final rowsA = _buildCollectionRows(sortedA);
-    final rowsB = sortedB != null ? _buildCollectionRows(sortedB) : <List<String?>>[];
-
-    final maxDataRows = rowsA.length > rowsB.length ? rowsA.length : rowsB.length;
-    final totalRows = 1 + maxDataRows;
-
-    // Pre-create all rows with appendRow to initialize internal structure reliably
-    for (var i = 0; i < totalRows; i++) {
-      sheet.appendRow(List<dynamic>.filled(totalCols, ''));
-    }
-
-    // Write group headers (row 0)
-    _writeCellValue(sheet, 0, aCol, groupAName);
-    if (groupBName != null) {
-      _writeCellValue(sheet, 0, bCol, groupBName);
-    }
-
-    // Write sub-table data rows
-    for (var i = 0; i < maxDataRows; i++) {
-      if (i < rowsA.length) {
-        for (var j = 0; j < rowsA[i].length && j < _collectionColumnsPerGroup; j++) {
-          if (rowsA[i][j] != null) {
-            _writeCellValue(sheet, 1 + i, aCol + j, rowsA[i][j]!);
-          }
-        }
-      }
-      if (i < rowsB.length) {
-        for (var j = 0; j < rowsB[i].length && j < _collectionColumnsPerGroup; j++) {
-          if (rowsB[i][j] != null) {
-            _writeCellValue(sheet, 1 + i, bCol + j, rowsB[i][j]!);
-          }
-        }
-      }
-    }
-
-    // Apply styles to all cells in the sheet
-    for (var r = 0; r < totalRows; r++) {
-      for (var c = aCol; c < totalCols; c++) {
-        final cell = sheet.cell(CellIndex.indexByColumnRow(
-          columnIndex: c,
-          rowIndex: r,
-        ));
-        cell.cellStyle = CellStyle(
-          bold: _isBoldCell(r, c, aCol, bCol, rowsA, rowsB),
-          horizontalAlign: _horizontalAlignForCell(r, c, aCol, bCol),
-          bottomBorder: Border(borderStyle: BorderStyle.Thin),
-          topBorder: Border(borderStyle: BorderStyle.Thin),
-          leftBorder: Border(borderStyle: BorderStyle.Thin),
-          rightBorder: Border(borderStyle: BorderStyle.Thin),
-        );
-      }
-    }
-
-    // Set column widths
-    for (var c = aCol; c < totalCols; c++) {
-      var maxWidth = 0;
-      for (var r = 0; r < totalRows; r++) {
-        final cell = sheet.cell(CellIndex.indexByColumnRow(
-          columnIndex: c,
-          rowIndex: r,
-        ));
-        final text = cell.value?.toString() ?? '';
-        if (text.length > maxWidth) maxWidth = text.length;
-      }
-      sheet.setColWidth(c, (maxWidth + 3).toDouble());
-    }
-  }
-
-  static bool _isBoldCell(
-    int row,
-    int col,
-    int aCol,
-    int bCol,
-    List<List<String?>> rowsA,
-    List<List<String?>> rowsB,
-  ) {
-    if (row == 0) return true;
-    final dataRow = row - 1;
-    if (col >= aCol && col < aCol + _collectionColumnsPerGroup) {
-      if (dataRow < rowsA.length && col == aCol) {
-        final v = rowsA[dataRow][0];
-        if (v == 'DAILY LOANS' || v == 'WEEKLY LOANS' || v == 'Name') return true;
-      }
-      if (dataRow < rowsA.length) {
-        final v = rowsA[dataRow][col - aCol];
-        if (v == 'Name' || v == 'Amount' || v == 'Paid') return true;
-      }
-    }
-    if (col >= bCol && col < bCol + _collectionColumnsPerGroup) {
-      if (dataRow < rowsB.length && col == bCol) {
-        final v = rowsB[dataRow][0];
-        if (v == 'DAILY LOANS' || v == 'WEEKLY LOANS' || v == 'Name') return true;
-      }
-      if (dataRow < rowsB.length) {
-        final v = rowsB[dataRow][col - bCol];
-        if (v == 'Name' || v == 'Amount' || v == 'Paid') return true;
-      }
-    }
-    return false;
-  }
-
-  static HorizontalAlign _horizontalAlignForCell(
-    int row,
-    int col,
-    int aCol,
-    int bCol,
-  ) {
-    if (row == 0) return HorizontalAlign.Center;
-    if (col == aCol || col == bCol) return HorizontalAlign.Left;
-    if (col == aCol + 1 || col == bCol + 1) return HorizontalAlign.Right;
-    if (col == aCol + 2 || col == bCol + 2) return HorizontalAlign.Center;
-    return HorizontalAlign.Left;
-  }
-
-  static void _writeCellValue(
-    Sheet sheet,
-    int row,
-    int col,
-    String value,
-  ) {
-    final cell = sheet.cell(CellIndex.indexByColumnRow(
-      columnIndex: col,
-      rowIndex: row,
-    ));
-    cell.value = value;
   }
 
   // ── Report PDF ──────────────────────────────────────────────────────

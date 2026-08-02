@@ -6,6 +6,8 @@ import '../storage/storage_service.dart';
 import '../security/secure_storage_service.dart';
 import '../security/file_encryption_service.dart';
 import '../database/database_service.dart';
+import '../cloud/cloud_auth_service.dart';
+import '../cloud/cloud_sync_service.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../features/backup/data/backup_service.dart';
 import '../../features/customers/data/statement_service.dart';
@@ -50,6 +52,21 @@ final backupServiceProvider = FutureProvider<BackupService>((ref) async {
 final statementServiceProvider = FutureProvider<StatementService>((ref) async {
   final dbService = await ref.watch(databaseServiceProvider.future);
   return StatementService(dbService);
+});
+
+final cloudAuthServiceProvider = Provider<CloudAuthService>((ref) {
+  return CloudAuthService();
+});
+
+/// Session-scoped: once the owner chooses "Continue offline" on the pre-entry
+/// cloud gate, skip the gate for the rest of this app run (reset on sign-out
+/// or when the process restarts). Signing in makes this irrelevant because
+/// [CloudAuthService.isSignedIn] short-circuits the gate.
+final cloudGateDismissedProvider = StateProvider<bool>((ref) => false);
+
+final cloudSyncServiceProvider = FutureProvider<CloudSyncService>((ref) async {
+  final dbService = await ref.watch(databaseServiceProvider.future);
+  return CloudSyncService(dbService);
 });
 
 final themeModeProvider = StateProvider<ThemeMode>((ref) => ThemeMode.system);

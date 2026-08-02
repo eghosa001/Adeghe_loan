@@ -15,10 +15,8 @@ class BiometricService {
       return await _auth.authenticate(
         localizedReason:
             'Scan your fingerprint (or face) to unlock the application',
-        options: const AuthenticationOptions(
-          stickyAuth: true,
-          biometricOnly: true,
-        ),
+        biometricOnly: true,
+        persistAcrossBackgrounding: true,
       );
     } catch (e) {
       return false;
