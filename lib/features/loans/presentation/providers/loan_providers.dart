@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:loantrack/core/constants/app_constants.dart';
 import 'package:loantrack/core/di/providers.dart';
 import 'package:loantrack/features/customers/presentation/providers/customer_providers.dart';
 import 'package:loantrack/features/dashboard/presentation/providers/dashboard_provider.dart';
@@ -163,6 +164,13 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
       _buildLoanFromForm(String customerId, String loanId) async {
     if (state.calculationResult == null || state.duration <= 0) {
       throw Exception("Cannot save loan with invalid data.");
+    }
+    if (state.duration > AppConstants.maxLoanDuration) {
+      throw Exception(
+          'Loan duration cannot exceed ${AppConstants.maxLoanDuration} installments.');
+    }
+    if (!state.principal.isFinite || state.principal <= 0) {
+      throw Exception('Loan amount must be a valid number greater than zero.');
     }
 
     final effectiveInstallment = state.effectiveInstallment;

@@ -377,4 +377,67 @@ void main() {
       expect(loanAfterReversal, closeTo(outstanding, 0.001));
     });
   });
+
+  group('invalid numeric inputs are rejected', () {
+    // NaN/±Infinity (from typed text like "1e309") must never flow into the
+    // schedule math and get stored as NULL. The debug-only asserts previously
+    // never ran in release builds.
+    test('NaN paymentAmount throws', () {
+      expect(
+        () => computePaymentSplit(
+            paymentAmount: double.nan, outstandingBalance: 10000),
+        throwsArgumentError,
+      );
+    });
+
+    test('Infinity paymentAmount (1e309) throws', () {
+      expect(
+        () => computePaymentSplit(
+            paymentAmount: double.infinity, outstandingBalance: 10000),
+        throwsArgumentError,
+      );
+      expect(
+        () => computePaymentSplit(
+            paymentAmount: double.negativeInfinity, outstandingBalance: 10000),
+        throwsArgumentError,
+      );
+    });
+
+    test('zero and negative paymentAmount throw', () {
+      expect(
+        () => computePaymentSplit(
+            paymentAmount: 0, outstandingBalance: 10000),
+        throwsArgumentError,
+      );
+      expect(
+        () => computePaymentSplit(
+            paymentAmount: -100, outstandingBalance: 10000),
+        throwsArgumentError,
+      );
+    });
+
+    test('non-finite outstandingBalance throws', () {
+      expect(
+        () => computePaymentSplit(
+            paymentAmount: 500, outstandingBalance: double.nan),
+        throwsArgumentError,
+      );
+      expect(
+        () => computePaymentSplit(
+            paymentAmount: 500, outstandingBalance: double.infinity),
+        throwsArgumentError,
+      );
+    });
+
+    test('valid payment with installment context still splits correctly', () {
+      final split = computePaymentSplit(
+        paymentAmount: 1200,
+        outstandingBalance: 10000,
+        installmentDue: 500,
+      );
+      expect(split.appliedToLoan, 500);
+      expect(split.overpaymentSurplus, 700);
+      expect(split.newLoanBalance, 9500);
+    });
+  });
 }

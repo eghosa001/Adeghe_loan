@@ -49,6 +49,18 @@ class CloudSyncService {
 
   static const String _pullFlagKey = 'pull_in_progress';
 
+  /// Remote tombstones applied per pull cycle. Bounds how much deletion a
+  /// single (possibly hostile or corrupted) remote tombstone batch can force
+  /// on this device; any surplus is applied on later cycles.
+  static const int _maxRemoteTombstonesPerCycle = 500;
+
+  /// Minimum time between automatically triggered background syncs. Rapid
+  /// lock/unlock cycles would otherwise each kick off a full push+pull and can
+  /// hit Supabase request/concurrency limits. Manual "Sync now" is unaffected.
+  static const Duration _minAutoSyncInterval = Duration(minutes: 5);
+
+  DateTime? _lastAutoSyncAt;
+
   /// Replicated tables in parent-before-child order (FK-safe for pull writes).
   static const List<String> _tables = [
     'business_profile',
@@ -61,8 +73,6 @@ class CloudSyncService {
     'savings_transactions',
     'documents',
     'holidays',
-    'audit_logs',
-    'settings',
   ];
 
   static const Map<String, String> _tablePrimaryKeys = {
@@ -76,8 +86,6 @@ class CloudSyncService {
     'savings_transactions': 'id',
     'documents': 'id',
     'holidays': 'id',
-    'audit_logs': 'id',
-    'settings': 'key',
   };
 
   bool _syncing = false;
@@ -106,10 +114,18 @@ class CloudSyncService {
   }
 
   /// Runs a background sync when the cloud is configured and the owner is
-  /// signed in. Best-effort — never throws.
+  /// signed in. Best-effort — never throws. Throttled to one automatic attempt
+  /// every [_minAutoSyncInterval] so rapid lock/unlock cycles cannot hammer
+  /// the cloud.
   Future<void> syncIfSignedIn() async {
     try {
       if (!isConfigured || !isSignedIn) return;
+      final now = DateTime.now();
+      final last = _lastAutoSyncAt;
+      if (last != null && now.difference(last) < _minAutoSyncInterval) {
+        return;
+      }
+      _lastAutoSyncAt = now;
       await fullSync();
     } catch (_) {
       // Background sync is best-effort; a failure here never blocks the app.
@@ -155,23 +171,47 @@ class CloudSyncService {
         firstError ??= error.toString();
       }
 
+      var attempted = 0;
+      var pushFailures = 0;
       try {
         final result = await _push(db);
-        pushed = result.$1;
-        deleted = result.$2;
+        pushed = result.pushed;
+        deleted = result.deleted;
+        attempted = result.attempted;
+        pushFailures = result.failures;
       } catch (error) {
         noteError(error);
       }
+      var pullFailures = 0;
       try {
-        pulled = await _pull(db);
+        final result = await _pull(db);
+        pulled = result.pulled;
+        pullFailures = result.failures;
       } catch (error) {
         noteError(error);
+      }
+
+      // Never report a false "Sync complete": any per-table/per-row failure —
+      // or a cycle that moved nothing despite local changes to push — surfaces
+      // as an error so the user can investigate (RLS, network, owner access).
+      String? error = firstError;
+      if (error == null && (pushFailures > 0 || pullFailures > 0)) {
+        error = 'Sync finished but $pushFailures push and $pullFailures pull '
+            'item(s) failed and were not replicated. They retry on the next '
+            'sync.';
+      } else if (error == null &&
+          attempted > 0 &&
+          pushed == 0 &&
+          pulled == 0 &&
+          deleted == 0) {
+        error = 'Nothing was replicated (0 of $attempted local changes reached '
+            'the cloud). Check the owner access and network, then try again.';
       }
       return CloudSyncResult(
         pushedRows: pushed,
         pulledRows: pulled,
         deletedRows: deleted,
-        error: firstError,
+        error: error,
       );
     } finally {
       _syncing = false;
@@ -182,7 +222,8 @@ class CloudSyncService {
   // Push
   // ─────────────────────────────────────────────────────────────────────────
 
-  Future<(int, int)> _push(Database db) async {
+  Future<({int pushed, int deleted, int attempted, int failures})> _push(
+      Database db) async {
     final client = Supabase.instance.client;
     final meta = await _readMeta(db);
     final lastPushed = meta.$1;
@@ -194,7 +235,8 @@ class CloudSyncService {
       final rows = lastPushed == null
           ? await db.query(table)
           : await db.query(table,
-              where: 'updated_at > ? OR updated_at IS NULL', whereArgs: [lastPushed]);
+              where: 'updated_at > ? OR updated_at IS NULL',
+              whereArgs: [lastPushed]);
       snapshots[table] = rows;
     }
     final tombstones = lastPushed == null
@@ -204,19 +246,30 @@ class CloudSyncService {
     final watermark = _isoUtcNow();
 
     var pushed = 0;
+    var attempted = tombstones.length;
+    var failures = 0;
+    final failedTables = <String>{};
     for (final table in _tables) {
       final rows = snapshots[table] ?? const [];
       if (rows.isEmpty) continue;
+      attempted += rows.length;
       try {
         if (table == 'documents') {
-          pushed += await _pushDocuments(client, rows);
+          final documents = await _pushDocuments(client, rows);
+          pushed += documents.pushed;
+          failures += documents.failures;
         } else {
-          final cleaned = [for (final row in rows) _stripNulls(row)];
-          await client.from(table).upsert(cleaned, onConflict: _tablePrimaryKeys[table]!);
+          // Rows are pushed in full (explicit NULLs included) so field-clearing
+          // writes like changeGroup(id, null) propagate; regulated identifiers
+          // (bvn/nin) are stripped first (see cloudSensitiveColumns).
+          await client.from(table).upsert(
+              [for (final row in rows) stripSensitiveColumns(table, row)],
+              onConflict: _tablePrimaryKeys[table]!);
           pushed += rows.length;
         }
       } catch (_) {
-        // Per-table best effort: failed tables retry on the next sync.
+        failures++;
+        failedTables.add(table);
       }
     }
 
@@ -243,20 +296,36 @@ class CloudSyncService {
               whereArgs: [table, id]);
           deleted++;
         } catch (_) {
-          // Keep the local tombstone so the delete is retried next cycle.
+          failures++;
+          failedTables.add(table);
         }
       }
     }
 
-    await _writeMeta(db, pushedAt: watermark);
-    return (pushed, deleted);
+    // Only advance the push watermark when every table (and tombstone) pushed,
+    // so a failed table is re-picked and retried next cycle instead of being
+    // silently skipped forever. Successful upserts are idempotent.
+    if (failedTables.isEmpty) {
+      await _writeMeta(db, pushedAt: watermark);
+    }
+    return (
+      pushed: pushed,
+      deleted: deleted,
+      attempted: attempted,
+      failures: failures,
+    );
   }
 
-  Future<int> _pushDocuments(SupabaseClient client, List<Map<String, Object?>> rows) async {
+  Future<({int pushed, int failures})> _pushDocuments(
+      SupabaseClient client, List<Map<String, Object?>> rows) async {
     var pushed = 0;
+    var failures = 0;
     for (final row in rows) {
       final id = row['id'] as String?;
-      if (id == null) continue;
+      if (id == null) {
+        failures++;
+        continue;
+      }
       final customerId = row['customer_id'] as String? ?? '';
       final localPath = row['file_path'] as String? ?? '';
       final storagePath = _documentStoragePath(customerId, id);
@@ -272,6 +341,7 @@ class CloudSyncService {
         } catch (_) {
           // File upload failed — skip the metadata upsert so the whole
           // document is retried on the next sync.
+          failures++;
           continue;
         }
       }
@@ -280,20 +350,22 @@ class CloudSyncService {
       try {
         await client
             .from('documents')
-            .upsert(_stripNulls(cleaned), onConflict: 'id');
+            .upsert(stripSensitiveColumns('documents', cleaned),
+                onConflict: 'id');
         pushed++;
       } catch (_) {
-        // Metadata upsert failed; retried next cycle.
+        // Metadata upsert failed; counted as a failure and retried next cycle.
+        failures++;
       }
     }
-    return pushed;
+    return (pushed: pushed, failures: failures);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
   // Pull
   // ─────────────────────────────────────────────────────────────────────────
 
-  Future<int> _pull(Database db) async {
+  Future<({int pulled, int failures})> _pull(Database db) async {
     final client = Supabase.instance.client;
     final meta = await _readMeta(db);
     final lastPulled = meta.$2;
@@ -301,16 +373,20 @@ class CloudSyncService {
 
     await _setPullFlag(db, true);
     var pulled = 0;
+    var failures = 0;
     try {
       // Remote deletes first: delete parents first so cascades clean up
-      // children (matching local FK behavior).
+      // children (matching local FK behavior). Each tombstone is validated so
+      // a crafted or hostile row cannot mass-delete local data.
       final remoteTombstones = await client.from('sync_tombstones').select();
+      var appliedTombstones = 0;
       for (final tombstone in remoteTombstones) {
+        if (appliedTombstones >= _maxRemoteTombstonesPerCycle) break;
         final table = tombstone['deleted_table'] as String?;
         final id = tombstone['deleted_row_id'] as String?;
         if (table == null || id == null) continue;
-        final pk = _tablePrimaryKeys[table];
-        if (pk == null) continue;
+        if (!_isValidTombstone(table, id, tombstone['deleted_at'])) continue;
+        final pk = _tablePrimaryKeys[table]!;
         try {
           await db.delete(table, where: '$pk = ?', whereArgs: [id]);
           await client
@@ -318,8 +394,10 @@ class CloudSyncService {
               .delete()
               .eq('deleted_table', table)
               .eq('deleted_row_id', id);
+          appliedTombstones++;
         } catch (_) {
           // Keep the remote tombstone; retried next cycle.
+          failures++;
         }
       }
 
@@ -338,9 +416,18 @@ class CloudSyncService {
         final remoteRows = lastPulled == null
             ? await client.from(table).select()
             : await client.from(table).select().gte('updated_at', lastPulled);
+        final sensitive = cloudSensitiveColumns[table];
         for (final remoteRow in remoteRows) {
           final id = remoteRow[pk];
           if (id == null) continue;
+          if (!isSaneCloudRow(table, remoteRow, pk)) {
+            // API-3/API-4: a malformed, future-dated, or wrongly-typed row is
+            // never applied — it would poison the LWW merge or crash strict
+            // entity casts later. Counted as a failure so a partial pull is
+            // never reported as a clean "Sync complete".
+            failures++;
+            continue;
+          }
           final remoteUpdated = (remoteRow['updated_at'] as String?) ?? '';
           try {
             final localRows = await db.query(table,
@@ -359,7 +446,15 @@ class CloudSyncService {
                 continue;
               }
             }
-            final row = Map<String, Object?>.from(remoteRow);
+            var row = Map<String, Object?>.from(remoteRow);
+            if (sensitive != null && localRows.isNotEmpty) {
+              // Regulated identifiers never leave this device: the cloud row
+              // has no bvn/nin columns, so carry the local values across the
+              // OR-REPLACE (which would otherwise reset them to NULL).
+              for (final column in sensitive) {
+                row[column] = localRows.first[column];
+              }
+            }
             if (table == 'documents') {
               await _materializeDocument(row);
             }
@@ -371,7 +466,9 @@ class CloudSyncService {
             }
             pulled++;
           } catch (_) {
-            // Per-row best effort.
+            // Per-row best effort — counted as a failure so a partial pull is
+            // never reported as a clean "Sync complete".
+            failures++;
           }
         }
       }
@@ -380,7 +477,17 @@ class CloudSyncService {
     }
 
     await _writeMeta(db, pulledAt: watermark);
-    return pulled;
+    return (pulled: pulled, failures: failures);
+  }
+
+  /// Whether a remote tombstone row may be applied locally: the table must be
+  /// known, the id must look sane, and `deleted_at` must be a well-formed
+  /// (non-future) sync timestamp.
+  bool _isValidTombstone(String? table, String? id, Object? deletedAt) {
+    if (table == null || id == null) return false;
+    if (_tablePrimaryKeys[table] == null) return false;
+    if (id.isEmpty || id.length > 64) return false;
+    return isValidSyncTimestamp(deletedAt as String?);
   }
 
   /// Downloads the encrypted document from storage and points the local row at
@@ -421,15 +528,6 @@ class CloudSyncService {
     return '$safeCustomer/$safeDocument.enc';
   }
 
-  Map<String, Object?> _stripNulls(Map<String, Object?> row) {
-    // Nulls are omitted so Postgres falls back to column defaults instead of
-    // trying to write NULL into a NOT NULL column.
-    return {
-      for (final entry in row.entries)
-        if (entry.value != null) entry.key: entry.value,
-    };
-  }
-
   Future<(String?, String?)> _readMeta(Database db) async {
     final rows = await db.query('sync_meta', where: 'id = ?', whereArgs: [1], limit: 1);
     if (rows.isEmpty) return (null, null);
@@ -468,6 +566,135 @@ class CloudSyncException implements Exception {
 
   @override
   String toString() => message;
+}
+
+/// Regulated identifiers that never leave the device. Keys are table names;
+/// values are the columns stripped from pushed rows and preserved from the
+/// local row across pulls. Kept in sync with `supabase_schema.sql`, which drops
+/// these columns from the cloud tables.
+const Map<String, Set<String>> cloudSensitiveColumns = {
+  'customers': {'bvn', 'nin'},
+};
+
+/// Removes [cloudSensitiveColumns] for [table] from [row] so the values never
+/// reach the cloud. Nullable values are otherwise pushed explicitly (see the
+/// push path) so field-clearing writes propagate.
+Map<String, Object?> stripSensitiveColumns(
+    String table, Map<String, Object?> row) {
+  final sensitive = cloudSensitiveColumns[table];
+  if (sensitive == null) return row;
+  return {
+    for (final entry in row.entries)
+      if (!sensitive.contains(entry.key)) entry.key: entry.value,
+  };
+}
+
+/// Whether [value] is a well-formed `syncTimestamp()` string
+/// (`yyyy-MM-ddTHH:mm:ss.SSSZ` UTC, 3-digit millis) that is not dated in the
+/// future beyond a small clock-skew tolerance. Remote tombstones must pass this
+/// before they are applied, so a crafted or hostile row cannot force deletions.
+bool isValidSyncTimestamp(String? value) {
+  if (value == null) return false;
+  if (!RegExp(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$')
+      .hasMatch(value)) {
+    return false;
+  }
+  final parsed = DateTime.tryParse(value);
+  if (parsed == null) return false;
+  if (parsed.isAfter(DateTime.now().toUtc().add(const Duration(minutes: 5)))) {
+    return false;
+  }
+  return true;
+}
+
+/// Replicated columns that must hold a number (or NULL). A tampered cloud row
+/// pushing a string into one of these would crash the strict `(x as num)` casts
+/// in the entity `fromMap` methods on the receiving device (e.g.
+/// `loan_entity.dart` `amount`).
+const Set<String> cloudNumericColumns = {
+  'credit_score',
+  'amount',
+  'interest_rate',
+  'insurance_fee',
+  'commission',
+  'processing_fee',
+  'admin_fee',
+  'other_charges',
+  'duration_days',
+  'duration_weeks',
+  'daily_payment',
+  'weekly_payment',
+  'total_repayment',
+  'outstanding_balance',
+  'custom_collection_amount',
+  'paid_amount',
+  'balance',
+  'is_recurring',
+  'is_enabled',
+};
+
+/// Replicated columns read back with a strict `as int` cast on the receiving
+/// device; only whole integers (or NULL) are safe to write into local SQLite.
+const Set<String> cloudIntColumns = {'installment_number'};
+
+/// Enum-typed replicated columns and the exact values the local app writes.
+/// Mirrors the API-4 CHECK constraints in `supabase_schema.sql`; the client
+/// enforces the same set at the pull boundary so a garbage status cannot reach
+/// SQLite and confuse reporting, even before the server constraints are applied.
+const Map<String, Map<String, Set<String>>> cloudEnumValues = {
+  'customers': {
+    'status': {'active', 'closed', 'blacklisted', 'archived'},
+  },
+  'loans': {
+    'loan_type': {'daily', 'weekly'},
+    'status': {'active', 'completed', 'defaulted', 'pending', 'cancelled'},
+  },
+  'repayment_schedule': {
+    'status': {'pending', 'paid', 'partial', 'missed'},
+  },
+  'payments': {
+    'status': {'completed', 'reversed'},
+    'type': {'partial', 'full', 'advance', 'overpayment'},
+  },
+  'savings_transactions': {
+    'type': {'deposit', 'withdrawal', 'overpayment'},
+  },
+};
+
+/// Whether a pulled row may be written into the local database. Enforces the
+/// same typing the entity `fromMap` methods assume — numeric columns are
+/// finite non-negative numbers (NaN/±Infinity are `num` but would be stored
+/// as NULL or corrupt aggregates, and Infinity even passes the server
+/// `>= 0` CHECK), `installment_number` is an integer, enum columns hold known
+/// values — and requires a well-formed non-future `updated_at` (API-3
+/// LWW-poisoning guard) plus a sane primary key. Malformed or future-dated
+/// rows are skipped and counted as failures, so a hostile cloud row can
+/// neither poison the merge nor crash the app later, and a partial pull is
+/// never reported as clean.
+bool isSaneCloudRow(String table, Map<String, Object?> row, String pk) {
+  final id = row[pk];
+  if (id == null) return false;
+  if (id is String && (id.isEmpty || id.length > 64)) return false;
+  if (!isValidSyncTimestamp(row['updated_at'] as String?)) return false;
+  for (final column in cloudNumericColumns) {
+    final value = row[column];
+    if (value == null) continue;
+    if (value is! num || !value.isFinite || value < 0) return false;
+  }
+  for (final column in cloudIntColumns) {
+    final value = row[column];
+    if (value == null) continue;
+    if (value is! int) return false;
+  }
+  final enums = cloudEnumValues[table];
+  if (enums != null) {
+    for (final entry in enums.entries) {
+      final value = row[entry.key];
+      if (value == null) continue;
+      if (value is! String || !entry.value.contains(value)) return false;
+    }
+  }
+  return true;
 }
 
 /// Neutralizes path-traversal / separator characters so a crafted database id

@@ -19,6 +19,8 @@ class LoanRepository {
 
   Future<Result<void>> saveLoanAndSchedule(
       Loan loan, List<RepaymentInstallment> schedule) async {
+    final validation = _validateLoanFinances(loan, schedule);
+    if (validation != null) return Result.failure(validation);
     try {
       final db = await _database;
       await db.transaction((txn) async {
@@ -42,6 +44,50 @@ class LoanRepository {
     } on DatabaseException catch (e) {
       return Result.failure(DatabaseFailure('Failed to save loan.', cause: e));
     }
+  }
+
+  /// Rejects NaN/±Infinity/negative financial values at the repository
+  /// boundary. A non-finite value written through `toMap()` would be stored
+  /// as NULL (finding N9), and `Loan.fromMap`'s strict `(x as num)` casts
+  /// would then crash every screen that reads the loan.
+  Failure? _validateLoanFinances(
+      Loan loan, List<RepaymentInstallment> schedule) {
+    final nonNegative = <double>[
+      loan.amount,
+      loan.interestRate,
+      loan.insuranceFee,
+      loan.commission,
+      loan.processingFee,
+      loan.administrativeFee,
+      loan.otherCharges,
+      loan.outstandingBalance,
+    ];
+    for (final value in nonNegative) {
+      if (!value.isFinite || value < 0) {
+        return const ValidationFailure(
+            'Loan contains an invalid (non-finite or negative) amount.');
+      }
+    }
+    if (!loan.totalRepayment.isFinite || loan.totalRepayment <= 0) {
+      return const ValidationFailure(
+          'Loan total repayment must be a valid amount.');
+    }
+    if (!loan.installmentAmount.isFinite || loan.installmentAmount < 0) {
+      return const ValidationFailure('Loan installment amount is invalid.');
+    }
+    final custom = loan.customCollectionAmount;
+    if (custom != null && (!custom.isFinite || custom <= 0)) {
+      return const ValidationFailure(
+          'Custom collection amount must be a valid amount.');
+    }
+    for (final installment in schedule) {
+      if (!installment.amount.isFinite || installment.amount <= 0 ||
+          !installment.paidAmount.isFinite || installment.paidAmount < 0) {
+        return const ValidationFailure(
+            'Repayment schedule contains an invalid amount.');
+      }
+    }
+    return null;
   }
 
   Future<Result<Loan>> getLoanById(String loanId) async {
@@ -102,6 +148,12 @@ class LoanRepository {
     List<RepaymentInstallment> schedule, {
     double paidSoFar = 0.0,
   }) async {
+    final validation = _validateLoanFinances(loan, schedule);
+    if (validation != null) return Result.failure(validation);
+    if (!paidSoFar.isFinite || paidSoFar < 0) {
+      return Result.failure(const ValidationFailure(
+          'Paid-so-far amount must be a valid non-negative number.'));
+    }
     try {
       final db = await _database;
       await db.transaction((txn) async {
@@ -140,6 +192,32 @@ class LoanRepository {
   Future<Result<void>> cancelLoan(String loanId) async {
     try {
       final db = await _database;
+      final rows = await db
+          .query('loans', columns: ['status'], where: 'id = ?', whereArgs: [loanId]);
+      if (rows.isEmpty) {
+        return Result.failure(NotFoundFailure('Loan not found.'));
+      }
+      final status = rows.first['status'] as String? ?? 'active';
+      if (status == 'completed' || status == 'cancelled') {
+        return Result.failure(
+            ValidationFailure('Loan is already closed.'));
+      }
+      // Cancelling a loan with collected money would zero the outstanding
+      // balance while the completed payments still count toward "Total
+      // Collected" (and the loan drops out of "Disbursed") — the dashboard
+      // totals would stop reconciling. Refuse and ask for the payments to be
+      // reversed first.
+      final paid = await db.rawQuery(
+        'SELECT COUNT(*) AS count FROM payments '
+        "WHERE loan_id = ? AND status = 'completed'",
+        [loanId],
+      );
+      final paidCount = (paid.first['count'] as int?) ?? 0;
+      if (paidCount > 0) {
+        return Result.failure(ValidationFailure(
+            'Cannot cancel a loan that has completed payments. '
+            'Reverse the payments first, then cancel the loan.'));
+      }
       await db.update('loans', {'status': 'cancelled', 'outstanding_balance': 0},
           where: 'id = ?', whereArgs: [loanId]);
       return const Result.success(null);

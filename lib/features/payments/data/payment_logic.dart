@@ -41,8 +41,18 @@ PaymentAmounts computePaymentSplit({
   required double outstandingBalance,
   double? installmentDue,
 }) {
-  assert(paymentAmount > 0, 'paymentAmount must be positive');
-  assert(outstandingBalance >= 0, 'outstandingBalance must be non-negative');
+  // Runtime checks (the debug-only asserts never ran in release builds, so a
+  // NaN/±Infinity amount could flow straight into the DB). Non-finite inputs
+  // come from typed text like "1e309"; reject them loudly instead of letting
+  // SQLite store NULL.
+  if (!paymentAmount.isFinite || paymentAmount <= 0) {
+    throw ArgumentError.value(
+        paymentAmount, 'paymentAmount', 'must be a finite number > 0');
+  }
+  if (!outstandingBalance.isFinite || outstandingBalance < 0) {
+    throw ArgumentError.value(outstandingBalance, 'outstandingBalance',
+        'must be a finite number >= 0');
+  }
 
   final cap = (installmentDue != null && installmentDue > 0)
       ? installmentDue

@@ -56,6 +56,29 @@ class AppConstants {
   static const int maxLoanTermInDays = 365;
   static const double defaultInterestRate = 5.0;
 
+  // Upper bound for the duration field (days for daily loans, weeks for
+  // weekly loans). Guards against a typo like "9999999999" allocating an
+  // unbounded repayment schedule (`List.generate`) that OOMs the device.
+  static const int maxLoanDuration = 365;
+
+  // Free-text field limits (finding M7: no inputFormatters/length caps
+  // anywhere). Length caps prevent multi-KB pasted strings from bloating
+  // exports/PDFs; the control-character strip is applied in
+  // core/utils/input_formatters.dart.
+  static const int maxNameLength = 100;
+  static const int maxPhoneLength = 20;
+  static const int maxEmailLength = 120;
+  static const int maxAddressLength = 200;
+  static const int maxNotesLength = 2000;
+  static const int maxGroupNameLength = 80;
+  static const int maxGroupDescriptionLength = 300;
+  static const int maxReferenceLength = 50;
+  static const int maxIdentifierLength = 11; // NIN / BVN
+
+  // Session timeout (minutes) bounds for the auto-lock setting (finding M10).
+  static const int minSessionTimeoutMinutes = 1;
+  static const int maxSessionTimeoutMinutes = 120;
+
   // Pagination / limits
   static const int defaultPageSize = 25;
   static const int recentItemsLimit = 10;

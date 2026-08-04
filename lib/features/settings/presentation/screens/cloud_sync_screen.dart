@@ -149,14 +149,36 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
                   const SizedBox(height: 8),
                   Text(
                     'Your data stays encrypted on this device and is '
-                    'replicated to your Supabase cloud in the background. '
-                    'You always need the local PIN to open the app.',
+                    'replicated to your cloud in the background. Transfers are '
+                    'encrypted in transit and the cloud copy is locked to the '
+                    'two owners, but only customer documents are '
+                    'end-to-end encrypted at rest. Regulated identifiers '
+                    '(BVN/NIN) never leave this device. You always need the '
+                    'local PIN to open the app.',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
               ),
             ),
           ),
+
+          if (SupabaseConfig.anonKeyExpiryImminent)
+            Card(
+              color: Theme.of(context).colorScheme.errorContainer,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  'Warning: the cloud anon key expires in under '
+                  '${SupabaseConfig.anonKeyExpiryWarningDays} days'
+                  '${SupabaseConfig.anonKeySecondsToExpiry() < 0 ? ' (already expired)' : ''}. '
+                  'Cloud sync will stop working once it expires. Rotate the key '
+                  'in your Supabase dashboard and update '
+                  'lib/core/cloud/supabase_config.dart.',
+                  style: TextStyle(
+                      color: Theme.of(context).colorScheme.onErrorContainer),
+                ),
+              ),
+            ),
 
           if (!SupabaseConfig.isConfigured)
             Card(

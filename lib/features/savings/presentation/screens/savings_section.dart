@@ -136,7 +136,9 @@ class SavingsSection extends ConsumerWidget {
                 autofocus: true,
                 validator: (v) {
                   final val = double.tryParse(v ?? '');
-                  if (val == null || val <= 0) return 'Enter a valid amount';
+                  if (val == null || !val.isFinite || val <= 0) {
+                    return 'Enter a valid amount';
+                  }
                   return null;
                 },
               ),
@@ -166,7 +168,7 @@ class SavingsSection extends ConsumerWidget {
     );
 
     if (confirmed != true || !context.mounted) return;
-    final amount = double.tryParse(amountCtrl.text) ?? 0;
+    final amount = CurrencyUtils.tryParsePositiveAmount(amountCtrl.text) ?? 0;
     final note = noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim();
 
     try {

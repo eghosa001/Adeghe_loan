@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/providers.dart';
+import '../../../../core/security/secure_storage_service.dart';
 import '../../../backup/data/backup_service.dart';
 import '../../data/notification_item.dart';
 
@@ -102,7 +103,8 @@ final notificationProvider = FutureProvider<List<NotificationItem>>((ref) async 
 
   // 4. Backup reminder — if no backup in 7+ days
   try {
-    final backupService = BackupService(dbService);
+    final backupService =
+        BackupService(dbService, SecureStorageService());
     final backups = await backupService.listBackups();
     if (backups.isEmpty || backups.first.lastModifiedSync().isBefore(now.subtract(const Duration(days: 7)))) {
       notifications.add(NotificationItem(

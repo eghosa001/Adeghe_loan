@@ -81,7 +81,9 @@ class SavingsRepository {
     required double amount,
     String? note,
   }) async {
-    if (amount <= 0) throw Exception('Amount must be greater than zero.');
+    if (!amount.isFinite || amount <= 0) {
+      throw Exception('Amount must be a valid number greater than zero.');
+    }
     final db = await _database;
     return await db.transaction((txn) async {
       final now = DateTime.now().toIso8601String();

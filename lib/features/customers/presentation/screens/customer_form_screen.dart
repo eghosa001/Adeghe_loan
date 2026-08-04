@@ -2,11 +2,14 @@ import 'dart:developer' as developer;
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/providers.dart';
+import '../../../../core/utils/input_formatters.dart';
 import '../../data/customer_repository.dart';
 import '../../data/models/customer_entity.dart';
 import '../providers/customer_providers.dart';
@@ -210,7 +213,10 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
       {bool required = false,
       int maxLines = 1,
       TextInputType? type,
-      VoidCallback? onTap}) {
+      VoidCallback? onTap,
+      int? maxLength,
+      List<TextInputFormatter>? inputFormatters,
+      String? Function(String?)? validator}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: TextFormField(
@@ -219,14 +225,43 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
         keyboardType: type,
         readOnly: onTap != null,
         onTap: onTap,
+        inputFormatters: inputFormatters ??
+            (maxLength != null ? textFormatters(maxLength: maxLength) : null),
         decoration: InputDecoration(labelText: label),
-        validator: required
-            ? (value) => value == null || value.trim().isEmpty
-                ? '$label is required'
-                : null
-            : null,
+        validator: validator ??
+            (required
+                ? (value) => value == null || value.trim().isEmpty
+                    ? '$label is required'
+                    : null
+                : null),
       ),
     );
+  }
+
+  String? _validatePhone(String? value) {
+    final v = value?.trim() ?? '';
+    if (v.isEmpty) return null;
+    return RegExp(r'^\+?[0-9]{7,15}$').hasMatch(v)
+        ? null
+        : 'Enter a valid phone number';
+  }
+
+  String? _validateEmail(String? value) {
+    final v = value?.trim() ?? '';
+    if (v.isEmpty) return null;
+    return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(v)
+        ? null
+        : 'Enter a valid email address';
+  }
+
+  String? Function(String?) _validateNinBvn(String label) {
+    return (value) {
+      final v = value?.trim() ?? '';
+      if (v.isEmpty) return null;
+      return RegExp(r'^\d{11}$').hasMatch(v)
+          ? null
+          : '$label must be 11 digits';
+    };
   }
 
   Widget _imagePicker() => Column(children: [
@@ -289,7 +324,9 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                 content: Column(children: [
                   _imagePicker(),
                   const SizedBox(height: 16),
-                  _field('fullName', 'Full name', required: true),
+                  _field('fullName', 'Full name',
+                      required: true,
+                      maxLength: AppConstants.maxNameLength),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: DropdownButtonFormField<String>(
@@ -306,11 +343,18 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                   _field('dateOfBirth', 'Date of birth',
                       onTap: _selectDateOfBirth),
                   _field('phone', 'Phone number',
-                      required: true, type: TextInputType.phone),
+                      required: true,
+                      type: TextInputType.phone,
+                      maxLength: AppConstants.maxPhoneLength,
+                      validator: _validatePhone),
                   _field('altPhone', 'Alternative phone',
-                      type: TextInputType.phone),
+                      type: TextInputType.phone,
+                      maxLength: AppConstants.maxPhoneLength,
+                      validator: _validatePhone),
                   _field('email', 'Email address',
-                      type: TextInputType.emailAddress),
+                      type: TextInputType.emailAddress,
+                      maxLength: AppConstants.maxEmailLength,
+                      validator: _validateEmail),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: DropdownButtonFormField<String>(
@@ -331,13 +375,32 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                 isActive: _step >= 1,
                 content: Column(children: [
                   _field('residentialAddress', 'Residential address',
-                      maxLines: 2),
-                  _field('businessAddress', 'Business address', maxLines: 2),
-                  _field('occupation', 'Occupation'),
-                  _field('state', 'State'),
-                  _field('lga', 'LGA'),
-                  _field('nin', 'NIN', type: TextInputType.number),
-                  _field('bvn', 'BVN', type: TextInputType.number),
+                      maxLines: 2, maxLength: AppConstants.maxAddressLength),
+                  _field('businessAddress', 'Business address',
+                      maxLines: 2, maxLength: AppConstants.maxAddressLength),
+                  _field('occupation', 'Occupation',
+                      maxLength: AppConstants.maxNameLength),
+                  _field('state', 'State',
+                      maxLength: AppConstants.maxNameLength),
+                  _field('lga', 'LGA', maxLength: AppConstants.maxNameLength),
+                  _field('nin', 'NIN',
+                      type: TextInputType.number,
+                      maxLength: AppConstants.maxIdentifierLength,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(
+                            AppConstants.maxIdentifierLength),
+                      ],
+                      validator: _validateNinBvn('NIN')),
+                  _field('bvn', 'BVN',
+                      type: TextInputType.number,
+                      maxLength: AppConstants.maxIdentifierLength,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(
+                            AppConstants.maxIdentifierLength),
+                      ],
+                      validator: _validateNinBvn('BVN')),
                 ])),
             Step(
                 title: const Text('Guarantors & review'),
@@ -346,20 +409,28 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                   Text('Guarantor 1',
                       style: Theme.of(context).textTheme.titleSmall),
                   const SizedBox(height: 8),
-                  _field('guarantor1Name', 'Name'),
+                  _field('guarantor1Name', 'Name',
+                      maxLength: AppConstants.maxNameLength),
                   _field('guarantor1Phone', 'Phone',
-                      type: TextInputType.phone),
-                  _field('guarantor1Address', 'Address', maxLines: 2),
+                      type: TextInputType.phone,
+                      maxLength: AppConstants.maxPhoneLength,
+                      validator: _validatePhone),
+                  _field('guarantor1Address', 'Address',
+                      maxLines: 2, maxLength: AppConstants.maxAddressLength),
                   const SizedBox(height: 16),
                   const Divider(),
                   const SizedBox(height: 8),
                   Text('Guarantor 2',
                       style: Theme.of(context).textTheme.titleSmall),
                   const SizedBox(height: 8),
-                  _field('guarantor2Name', 'Name'),
+                  _field('guarantor2Name', 'Name',
+                      maxLength: AppConstants.maxNameLength),
                   _field('guarantor2Phone', 'Phone',
-                      type: TextInputType.phone),
-                  _field('guarantor2Address', 'Address', maxLines: 2),
+                      type: TextInputType.phone,
+                      maxLength: AppConstants.maxPhoneLength,
+                      validator: _validatePhone),
+                  _field('guarantor2Address', 'Address',
+                      maxLines: 2, maxLength: AppConstants.maxAddressLength),
                   const SizedBox(height: 20),
                   const Divider(),
                   const SizedBox(height: 8),
@@ -393,7 +464,8 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                       onChanged: (status) =>
                           setState(() => _status = status!)),
                   const SizedBox(height: 12),
-                  _field('notes', 'Notes', maxLines: 4),
+                  _field('notes', 'Notes',
+                      maxLines: 4, maxLength: AppConstants.maxNotesLength),
                 ])),
           ],
         ),

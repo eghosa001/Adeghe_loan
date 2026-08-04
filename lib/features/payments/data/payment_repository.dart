@@ -185,14 +185,48 @@ class PaymentRepository {
     required String collector,
     String? remarks,
     double? installmentDue,
+    String? clientRequestId,
   }) async {
+    // Guard at the repository boundary: NaN/±Infinity (e.g. "1e309") would
+    // otherwise flow into the schedule math and be stored as NULL, crashing
+    // every payment-list read via `Payment.fromMap (amount as num)`.
+    if (!amount.isFinite || amount <= 0) {
+      throw Exception('Invalid payment amount. Please enter a valid amount.');
+    }
     final db = await _db;
     return await db.transaction((txn) async {
+      // Idempotency: if the caller supplied a client-side request key that was
+      // already recorded, return the existing payment instead of applying the
+      // payment a second time. This stops a double-tap or a retry of the same
+      // logical payment from creating a duplicate.
+      if (clientRequestId != null && clientRequestId.trim().isNotEmpty) {
+        final existing = await txn.query(
+          'payments',
+          where: 'client_request_id = ?',
+          whereArgs: [clientRequestId.trim()],
+          limit: 1,
+        );
+        if (existing.isNotEmpty) {
+          return Payment.fromMap(existing.first);
+        }
+      }
+
       final loanRows =
           await txn.query('loans', where: 'id = ?', whereArgs: [loanId]);
       if (loanRows.isEmpty) throw Exception('Loan not found');
 
       final loan = loanRows.first;
+      // Money can only be applied to an open (active/defaulted) loan. Rejecting
+      // completed/cancelled loans at the repository boundary (not just in the
+      // UI) prevents a deep-link or direct call from recording a payment on a
+      // closed loan, which would otherwise credit the whole amount to savings
+      // with no loan offset.
+      final loanStatusBefore = loan['status'] as String? ?? 'active';
+      if (loanStatusBefore == 'completed' ||
+          loanStatusBefore == 'cancelled') {
+        throw Exception('Loan is already closed and cannot accept payments.');
+      }
+
       final outstanding = (loan['outstanding_balance'] as num).toDouble();
       final priorLoanStatus = loan['status'] as String;
 
@@ -207,12 +241,20 @@ class PaymentRepository {
       );
       final loanStatus = split.newLoanBalance <= 0.005 ? 'completed' : 'active';
 
-      await txn.update(
-        'loans',
-        {'outstanding_balance': split.newLoanBalance, 'status': loanStatus},
-        where: 'id = ?',
-        whereArgs: [loanId],
+      // Optimistic compare-and-swap: only apply this payment if the outstanding
+      // balance is still exactly what we computed against. If another write
+      // already moved it (a concurrent/duplicate repayment), the update affects
+      // 0 rows and we abort rather than double-apply against a stale balance.
+      final updated = await txn.rawUpdate(
+        'UPDATE loans SET outstanding_balance = ?, status = ? '
+        'WHERE id = ? AND outstanding_balance = ?',
+        [split.newLoanBalance, loanStatus, loanId, outstanding],
       );
+      if (updated != 1) {
+        throw Exception(
+            'Loan balance changed since this payment was prepared; '
+            'please retry.');
+      }
 
       await _applyPaymentToSchedule(txn, loanId, split.appliedToLoan);
 
@@ -232,6 +274,7 @@ class PaymentRepository {
         status: PaymentStatus.completed,
         remarks: remarks,
         priorLoanStatus: priorLoanStatus,
+        clientRequestId: clientRequestId,
       );
       await txn.insert('payments', payment.toMap());
 
@@ -407,7 +450,9 @@ class PaymentRepository {
       if (loanRows.isEmpty) throw Exception('Loan not found.');
       final loan = loanRows.first;
       final outstanding = (loan['outstanding_balance'] as num).toDouble();
-      if (outstanding <= 0) throw Exception('Loan has no outstanding balance.');
+      if (!outstanding.isFinite || outstanding <= 0) {
+        throw Exception('Loan has no valid outstanding balance.');
+      }
       final status = loan['status'] as String;
       if (status != 'active') throw Exception('Loan is not active.');
 
@@ -424,6 +469,9 @@ class PaymentRepository {
       final accountId = accountRows.first['id'] as String;
       final savingsBalance =
           (accountRows.first['balance'] as num?)?.toDouble() ?? 0.0;
+      if (!savingsBalance.isFinite || savingsBalance < 0) {
+        throw Exception('Customer savings balance is invalid.');
+      }
       if (savingsBalance < outstanding) {
         throw Exception(
             'Insufficient savings. Available: ${savingsBalance.toStringAsFixed(2)}, '

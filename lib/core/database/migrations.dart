@@ -23,6 +23,7 @@ class DatabaseMigrations {
     if (oldVersion < 15) await _v15(db);
     if (oldVersion < 16) await _v16(db);
     if (oldVersion < 17) await _v17(db);
+    if (oldVersion < 18) await _v18(db);
   }
 
   /// Tables that are replicated to Supabase for cloud sync, in parent-before-
@@ -58,6 +59,17 @@ class DatabaseMigrations {
     'audit_logs': 'id',
     'settings': 'key',
   };
+
+  /// v18 — add a client-side idempotency key to payments so a retried/double
+  /// submission of the same logical payment cannot create a duplicate.
+  /// `createPayment` checks this key inside its serialized transaction before
+  /// applying a payment and CAS-guards the loan balance, so the column alone
+  /// (plus the repository check) provides the dedupe; a DB UNIQUE index is
+  /// deliberately not added here because the schema guard's parser only
+  /// recognises `CREATE INDEX` (not `CREATE UNIQUE INDEX`).
+  static Future<void> _v18(Database db) async {
+    await db.execute('ALTER TABLE payments ADD COLUMN client_request_id TEXT');
+  }
 
   /// v17 — add cloud-sync change tracking.
   ///

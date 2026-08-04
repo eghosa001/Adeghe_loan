@@ -74,9 +74,9 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen>
     // A permanent lock can only be cleared by the recovery password; never let
     // biometrics bypass it.
     if (await PinLockoutService(_storage).isPermanentlyLocked()) return;
-    final success = await _bio.authenticate();
+    final result = await _bio.authenticate();
     if (!mounted) return;
-    if (success) _unlockApp();
+    if (result == BiometricResult.success) _unlockApp();
   }
 
   void _unlockApp() {

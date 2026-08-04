@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:loantrack/core/constants/app_constants.dart';
+import 'package:loantrack/core/utils/input_formatters.dart';
 import 'package:loantrack/core/widgets/app_drawer.dart';
 import '../providers/business_providers.dart';
 import 'package:loantrack/core/di/providers.dart';
@@ -114,31 +116,44 @@ class _BusinessSettingsScreenState
                     controller: _nameCtrl,
                     decoration:
                         const InputDecoration(labelText: 'Business Name'),
+                    inputFormatters:
+                        textFormatters(maxLength: AppConstants.maxNameLength),
                     validator: (v) => v!.isEmpty ? 'Required' : null),
                 const SizedBox(height: 12),
                 TextFormField(
                     controller: _ownerCtrl,
-                    decoration: const InputDecoration(labelText: 'Owner Name')),
+                    decoration: const InputDecoration(labelText: 'Owner Name'),
+                    inputFormatters:
+                        textFormatters(maxLength: AppConstants.maxNameLength)),
                 const SizedBox(height: 12),
                 TextFormField(
                     controller: _addressCtrl,
                     decoration:
-                        const InputDecoration(labelText: 'Business Address')),
+                        const InputDecoration(labelText: 'Business Address'),
+                    maxLines: 2,
+                    inputFormatters:
+                        textFormatters(maxLength: AppConstants.maxAddressLength)),
                 const SizedBox(height: 12),
                 TextFormField(
                     controller: _phoneCtrl,
                     decoration:
-                        const InputDecoration(labelText: 'Business Phone')),
+                        const InputDecoration(labelText: 'Business Phone'),
+                    inputFormatters:
+                        textFormatters(maxLength: AppConstants.maxPhoneLength)),
                 const SizedBox(height: 12),
                 TextFormField(
                     controller: _emailCtrl,
                     decoration:
-                        const InputDecoration(labelText: 'Email Address')),
+                        const InputDecoration(labelText: 'Email Address'),
+                    inputFormatters:
+                        textFormatters(maxLength: AppConstants.maxEmailLength)),
                 const SizedBox(height: 12),
                 TextFormField(
                     controller: _regCtrl,
                     decoration: const InputDecoration(
-                        labelText: 'Registration Number')),
+                        labelText: 'Registration Number'),
+                    inputFormatters: textFormatters(
+                        maxLength: AppConstants.maxReferenceLength)),
                 const SizedBox(height: 20),
                 ElevatedButton(
                     onPressed: _save, child: const Text('Save Profile')),

@@ -60,8 +60,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final profile = profileAsync.valueOrNull;
     final appSettingsAsync = ref.watch(appSettingsProvider);
     final appSettings = appSettingsAsync.valueOrNull;
-    final sessionTimeout = int.tryParse(appSettings?['session_timeout_minutes'] ?? '') ??
+    final rawSessionTimeout = int.tryParse(appSettings?['session_timeout_minutes'] ?? '') ??
         AppConstants.defaultInactivityTimeout.inMinutes;
+    // Clamp so a corrupt/huge stored value can neither disable auto-lock nor
+    // crash the DropdownButton assert (value must exist in items).
+    final sessionTimeout = (rawSessionTimeout
+            .clamp(AppConstants.minSessionTimeoutMinutes,
+                AppConstants.maxSessionTimeoutMinutes))
+        .toInt();
     final autoBackup = appSettings?['auto_backup_enabled'] == '1';
     final themeMode = ref.watch(themeModeProvider);
 
@@ -117,6 +123,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       DropdownMenuItem(value: 10, child: Text('10 min')),
                       DropdownMenuItem(value: 15, child: Text('15 min')),
                       DropdownMenuItem(value: 30, child: Text('30 min')),
+                      DropdownMenuItem(value: 120, child: Text('120 min')),
                     ],
                     onChanged: (v) {
                       if (v != null) _updateSessionTimeout(v);

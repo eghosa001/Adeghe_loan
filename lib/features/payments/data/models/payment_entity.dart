@@ -25,6 +25,12 @@ class Payment {
   /// come back as 'active').
   final String? priorLoanStatus;
 
+  /// Client-supplied idempotency key. A retry of the same logical payment
+  /// (e.g. a double-tap that calls `createPayment` twice) reuses the same key,
+  /// so the second call returns the already-recorded payment instead of
+  /// creating a duplicate. Null for legacy/records written without one.
+  final String? clientRequestId;
+
   Payment({
     required this.id,
     required this.loanId,
@@ -39,6 +45,7 @@ class Payment {
     this.status = PaymentStatus.completed,
     this.remarks,
     this.priorLoanStatus,
+    this.clientRequestId,
   });
 
   Payment copyWith({
@@ -59,6 +66,7 @@ class Payment {
       status: status,
       remarks: clearRemarks ? null : (remarks ?? this.remarks),
       priorLoanStatus: priorLoanStatus,
+      clientRequestId: clientRequestId,
     );
   }
 
@@ -76,6 +84,7 @@ class Payment {
         'remarks': remarks,
         'status': status.name,
         'prior_loan_status': priorLoanStatus,
+        'client_request_id': clientRequestId,
       };
 
   factory Payment.fromMap(Map<String, Object?> map) => Payment(
@@ -100,5 +109,6 @@ class Payment {
             orElse: () => PaymentStatus.completed),
         remarks: map['remarks'] as String?,
         priorLoanStatus: map['prior_loan_status'] as String?,
+        clientRequestId: map['client_request_id'] as String?,
       );
 }

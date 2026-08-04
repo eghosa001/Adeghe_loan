@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:loantrack/core/constants/app_constants.dart';
+import 'package:loantrack/core/utils/input_formatters.dart';
 import 'package:loantrack/core/widgets/app_drawer.dart';
 import 'package:loantrack/core/widgets/empty_state.dart';
 
@@ -155,6 +157,8 @@ class _GroupManagementScreenState extends ConsumerState<GroupManagementScreen> {
                 controller: nameCtrl,
                 decoration: const InputDecoration(labelText: 'Group name'),
                 autofocus: true,
+                inputFormatters:
+                    textFormatters(maxLength: AppConstants.maxGroupNameLength),
                 validator: (v) =>
                     v == null || v.trim().isEmpty ? 'Name is required' : null,
               ),
@@ -164,6 +168,8 @@ class _GroupManagementScreenState extends ConsumerState<GroupManagementScreen> {
                 decoration:
                     const InputDecoration(labelText: 'Description (optional)'),
                 maxLines: 2,
+                inputFormatters:
+                    textFormatters(maxLength: AppConstants.maxGroupDescriptionLength),
               ),
             ],
           ),

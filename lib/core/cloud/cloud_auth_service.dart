@@ -51,23 +51,34 @@ class CloudAuthService {
     return instanceClient.rpc(fn, params: params);
   }
 
-  /// Sign-in linking the device to the cloud. Owner accounts are created in the
-  /// Supabase dashboard (Auth → Users → Add user); the first TWO distinct
-  /// accounts to sign in become the project owners.
+  /// Sign-in linking the device to the cloud. Owner emails are allow-listed by
+  /// the operator in `authorized_owners` (Supabase dashboard SQL editor) AFTER
+  /// email signups are turned OFF and the owner accounts are created at Auth →
+  /// Users → Add user — see supabase_schema.sql header (API-2 setup order).
   ///
   /// After a successful password sign-in the device calls the `claim_owner`
   /// RPC (see supabase_schema.sql). That SECURITY DEFINER function derives the
   /// owner id from `auth.uid()` server-side — the caller cannot nominate an
-  /// arbitrary account — and only inserts while fewer than two owners exist.
-  /// The sign-in then verifies the caller really IS an owner via `is_owner`;
-  /// a non-owner session is signed back out so it can never sync data.
+  /// arbitrary account — and only grants a slot while the caller's email is on
+  /// the allow-list and fewer than two owners exist (first-come-first-served
+  /// owner capture is impossible). The sign-in then verifies the caller really
+  /// IS an owner via `is_owner`; a non-owner session is signed back out so it
+  /// can never sync data.
   Future<void> signIn(String email, String password) async {
     await instanceClient.auth
         .signInWithPassword(email: email, password: password);
     final user = instanceClient.auth.currentUser;
     if (user == null) return;
     try {
-      await _callRpc('claim_owner');
+      final claim = await _callRpc('claim_owner');
+      if (claim == emailNotAuthorizedCode) {
+        await instanceClient.auth.signOut();
+        throw StateError(emailNotAuthorizedMessage);
+      }
+      if (claim == ownersFullCode) {
+        await instanceClient.auth.signOut();
+        throw StateError(ownersFullMessage);
+      }
       final isOwner = await _callRpc('is_owner') == true;
       if (!isOwner) {
         await instanceClient.auth.signOut();
@@ -81,10 +92,29 @@ class CloudAuthService {
     }
   }
 
+  /// `claim_owner` returns this when the caller's email is not on the
+  /// operator-maintained `authorized_owners` allow-list.
+  static const String emailNotAuthorizedCode = 'email_not_authorized';
+
+  /// `claim_owner` returns this when both owner slots are already taken.
+  static const String ownersFullCode = 'full';
+
   /// Message shown when a valid cloud account is not one of the two owners.
   static const String notOwnerMessage =
       'This account is not one of the cloud owners. '
       'Sign in with an owner account.';
+
+  /// Message shown when the account's email is valid but not pre-authorized.
+  static const String emailNotAuthorizedMessage =
+      'This email is not on the authorized-owners list for this cloud. '
+      'Ask the account owner to add it in the Supabase dashboard '
+      '(authorized_owners table), then sign in again.';
+
+  /// Message shown when a pre-authorized email signs in but both slots are
+  /// already taken by the two existing owners.
+  static const String ownersFullMessage =
+      'Both cloud owner slots are already taken. '
+      'Ask the owner to free a slot in the Supabase dashboard, then sign in again.';
 
   Future<void> signOut() async {
     await instanceClient.auth.signOut();
@@ -96,6 +126,12 @@ class CloudAuthService {
   static String friendlySignInError(Object error) {
     final message = error is AuthException ? error.message : '$error';
     final lower = message.toLowerCase();
+    if (lower.contains('authorized-owners')) {
+      return emailNotAuthorizedMessage;
+    }
+    if (lower.contains('owner slots are already taken')) {
+      return ownersFullMessage;
+    }
     if (lower.contains('not one of the cloud owners') ||
         lower.contains('not authorized') ||
         lower.contains('owner')) {

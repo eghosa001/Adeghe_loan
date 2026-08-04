@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../../core/utils/currency_utils.dart';
 import '../../../../core/utils/date_utils.dart';
@@ -197,7 +198,7 @@ class FutureScheduleScreen extends ConsumerWidget {
           FilledButton(
             onPressed: () {
               final amount = double.tryParse(ctrl.text) ?? 0;
-              if (amount <= 0) return;
+              if (!amount.isFinite || amount <= 0) return;
               Navigator.pop(ctx);
               _doQuickPay(context, ref, row, amount);
             },
@@ -221,6 +222,7 @@ class FutureScheduleScreen extends ConsumerWidget {
         method: PaymentMethod.cash,
         collector: collector,
         installmentDue: row.amountDue > 0 ? row.amountDue : null,
+        clientRequestId: const Uuid().v4(),
       );
       ref.invalidate(futureScheduleProvider);
       ref.invalidate(dashboardDataProvider);

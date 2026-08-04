@@ -1,21 +1,44 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:crypto/crypto.dart';
+import 'package:encrypt/encrypt.dart' as encrypt;
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/database/database_service.dart';
+import '../../../core/security/secure_storage_service.dart';
 
 class BackupService {
-  BackupService(this._databaseService);
+  BackupService(this._databaseService, this._secureStorage);
 
   final DatabaseService _databaseService;
+  final SecureStorageService _secureStorage;
 
   static const _dbArchiveEntry = 'loantrack.db';
   static const _documentsArchivePrefix = 'secure_documents/';
+
+  /// Marker for the encrypted container format: `LTBK` + a version byte. New
+  /// backups are an AES-GCM-encrypted ZIP; older backups (raw encrypted DB or
+  /// a plain ZIP) are still accepted on restore.
+  static const List<int> _containerHeader = [0x4c, 0x54, 0x42, 0x4b, 0x31];
+  static const _ivLength = 12; // Standard for GCM
+
+  /// 8 random hex chars, appended to backup filenames so two backups created in
+  /// the same instant can never collide.
+  static String _uuidV4Short() {
+    final r = Random.secure();
+    final buffer = StringBuffer();
+    for (var i = 0; i < 8; i++) {
+      buffer.write(r.nextInt(16).toRadixString(16));
+    }
+    return buffer.toString();
+  }
 
   /// A real SQLite (or SQLCipher) file begins with the 16-byte format magic.
   static bool isSqliteFile(List<int> bytes) {
@@ -24,13 +47,62 @@ class BackupService {
         'SQLite format 3\u0000';
   }
 
-  /// Determines whether [bytes] look like a ZIP archive (container format).
+  /// Determines whether [bytes] look like a ZIP archive (legacy container
+  /// format).
   static bool isZipArchive(List<int> bytes) {
     return bytes.length >= 4 &&
         bytes[0] == 0x50 &&
         bytes[1] == 0x4B &&
         bytes[2] == 0x03 &&
         bytes[3] == 0x04;
+  }
+
+  /// Determines whether [bytes] start with the encrypted-container marker
+  /// (`LTBK1`), i.e. an AES-GCM-encrypted ZIP written by this app.
+  static bool isEncryptedContainer(List<int> bytes) {
+    if (bytes.length < _containerHeader.length) return false;
+    for (var i = 0; i < _containerHeader.length; i++) {
+      if (bytes[i] != _containerHeader[i]) return false;
+    }
+    return true;
+  }
+
+  /// Deterministic 32-byte AES key derived from the app's database key, so the
+  /// backup container uses the same secret already held in secure storage.
+  Future<encrypt.Key> _containerKey() async => encrypt.Key(
+      Uint8List.fromList(
+          sha256.convert(utf8.encode(await _secureStorage.getDatabaseKey())).bytes));
+
+  /// Encrypts [plaintext] as `LTBK1 + IV + AES-GCM ciphertext`.
+  Future<Uint8List> _encryptContainer(Uint8List plaintext) async {
+    final iv = encrypt.IV.fromSecureRandom(_ivLength);
+    final encrypter = encrypt.Encrypter(
+        encrypt.AES(await _containerKey(), mode: encrypt.AESMode.gcm));
+    final cipher = encrypter.encryptBytes(plaintext, iv: iv);
+    return Uint8List.fromList([..._containerHeader, ...iv.bytes, ...cipher.bytes]);
+  }
+
+  /// Decrypts an [encrypt.ContainerFormat] ([_encryptContainer]) payload back to
+  /// its ZIP bytes, returning null if the header is missing or the key does not
+  /// match (e.g. a restored device with a different DB key).
+  Future<Uint8List?> _decryptContainer(List<int> bytes) async {
+    if (!isEncryptedContainer(bytes) ||
+        bytes.length <= _containerHeader.length + _ivLength) {
+      return null;
+    }
+    final ivStart = _containerHeader.length;
+    final iv = encrypt.IV(
+        Uint8List.fromList(bytes.sublist(ivStart, ivStart + _ivLength)));
+    final ciphertext =
+        Uint8List.fromList(bytes.sublist(ivStart + _ivLength));
+    try {
+      final encrypter = encrypt.Encrypter(
+          encrypt.AES(await _containerKey(), mode: encrypt.AESMode.gcm));
+      return Uint8List.fromList(
+          encrypter.decryptBytes(encrypt.Encrypted(ciphertext), iv: iv));
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<Directory> get backupDirectory async {
@@ -86,10 +158,16 @@ class BackupService {
         throw Exception('Backup archive could not be written.');
       }
 
+      // Encrypt the container with the app key so the ZIP (and its file names
+      // and sizes) never sit on disk in the clear. The enclosed DB and document
+      // files are already encrypted separately; this adds an outer layer.
+      final payload = await _encryptContainer(Uint8List.fromList(zipBytes));
+
       final backupFileName =
-          'adeghe_backup_${DateTime.now().toIso8601String().replaceAll(':', '-')}${AppConstants.backupFileExtension}';
+          'adeghe_backup_${DateTime.now().toIso8601String().replaceAll(':', '-')}_'
+          '${_uuidV4Short()}.${AppConstants.backupFileExtension}';
       final target = File(join((await backupDirectory).path, backupFileName));
-      await target.writeAsBytes(zipBytes, flush: true);
+      await target.writeAsBytes(payload, flush: true);
       return target;
     } finally {
       await _databaseService.database;
@@ -152,16 +230,32 @@ class BackupService {
       throw Exception('Selected backup file does not exist.');
     }
 
-    final bytes = await backupFile.readAsBytes();
+    var bytes = await backupFile.readAsBytes();
     if (bytes.isEmpty) {
       throw Exception('Selected backup file is empty.');
     }
 
-    // Two supported formats:
+    // Three supported formats:
+    //  - encrypted container (current): LTBK1 + AES-GCM-encrypted ZIP
     //  - legacy: a raw (encrypted) SQLite database copy
-    //  - current: a ZIP container holding the DB plus secure_documents/
-    final isLegacy = BackupService.isSqliteFile(bytes.take(16).toList());
-    if (!isLegacy && !BackupService.isZipArchive(bytes)) {
+    //  - legacy: a plain ZIP holding the DB plus secure_documents/
+    final isEncrypted = BackupService.isEncryptedContainer(bytes);
+    final isLegacyRaw = !isEncrypted && BackupService.isSqliteFile(bytes.take(16).toList());
+    final isLegacyZip = !isEncrypted && BackupService.isZipArchive(bytes);
+    if (isEncrypted) {
+      // Decrypt back to ZIP bytes using the current DB key. A backup taken on
+      // a device with a different DB key cannot be decrypted.
+      final decrypted = await _decryptContainer(bytes);
+      if (decrypted == null) {
+        throw Exception(
+            'This backup was encrypted with a different app key and cannot be '
+            'restored on this device.');
+      }
+      bytes = decrypted;
+      if (!isZipArchive(bytes)) {
+        throw Exception('Decrypted backup is not a valid archive.');
+      }
+    } else if (!isLegacyRaw && !isLegacyZip) {
       throw Exception('Selected file is not a valid database backup.');
     }
 
@@ -172,7 +266,7 @@ class BackupService {
     if (await tempFile.exists()) await tempFile.delete();
 
     Map<String, Uint8List> documentFiles = {};
-    if (isLegacy) {
+    if (isLegacyRaw) {
       await backupFile.copy(tempPath);
     } else {
       final archive = ZipDecoder().decodeBytes(bytes);

@@ -21,6 +21,7 @@ class SecureStorageService implements SecureKeyValueStore {
   static const _biometricKey = 'biometric_enabled';
   static const _dbKey = 'db_encryption_key';
   static const _fileEncryptionKey = 'file_encryption_key';
+  static const _docKeysKey = 'doc_derived_keys';
   static const _pinVersionKey = 'pin_digit_version';
   static const _currentPinVersion = '4';
 
@@ -31,6 +32,24 @@ class SecureStorageService implements SecureKeyValueStore {
   static const _pinIterations = 120000;
   static const _recoveryIterations = 600000;
   static const _pinHashLength = 32;
+
+  /// Fixed, well-known salt for deriving the document-encryption key from the
+  /// recovery password. Deliberately NOT per-device: the same recovery password
+  /// entered on a second device must derive the same key so cloud-synced
+  /// encrypted documents can be decrypted cross-device (API-6). The recovery
+  /// password is a high-entropy secret unique to this app, so the fixed salt
+  /// leaks nothing without the password.
+  static const String docDerivationSalt = 'loantrack-doc-key-v1';
+
+  /// Iterations for the document-key derivation. Runs only when the recovery
+  /// password is set or changed (never on the encrypt/decrypt hot path — the
+  /// derived key is cached in secure storage), so it can share the recovery
+  /// password's 600k.
+  static const int _docDerivedIterations = 600000;
+
+  /// How many derived document keys are retained after a recovery-password
+  /// change, so files encrypted under a previous password stay decryptable.
+  static const int _maxDocKeys = 5;
 
   /// Returns the per-device random salt for the given purpose, creating and
   /// storing it on first use so hashes stay stable across writes.
@@ -106,11 +125,11 @@ class SecureStorageService implements SecureKeyValueStore {
     return false;
   }
 
-  /// Enforces a strong recovery password: at least 12 characters containing
+  /// Enforces a strong recovery password: at least 16 characters containing
   /// both letters and digits. Returns null when [password] is acceptable.
   static String? recoveryPasswordError(String password) {
-    if (password.length < 12) {
-      return 'Recovery password must be at least 12 characters';
+    if (password.length < 16) {
+      return 'Recovery password must be at least 16 characters';
     }
     if (!RegExp(r'[A-Za-z]').hasMatch(password) ||
         !RegExp(r'[0-9]').hasMatch(password)) {
@@ -177,6 +196,44 @@ class SecureStorageService implements SecureKeyValueStore {
         key: _recoveryPassKey,
         value:
             await _hash(password, AppConstants.keyRecoverySalt, _recoveryIterations));
+    await _storeDerivedDocKey(password);
+  }
+
+  /// Derives the document-encryption key from the recovery password and caches
+  /// it (newest first, capped at [_maxDocKeys]) so files encrypted under an
+  /// older recovery password remain decryptable after a change. Any device that
+  /// knows the same recovery password derives the same key, which is what lets
+  /// cloud-synced encrypted documents open on a second device.
+  Future<void> _storeDerivedDocKey(String password) async {
+    final derived = _pbkdf2Hex(password, docDerivationSalt, _docDerivedIterations);
+    final existing = await _storage.read(key: _docKeysKey);
+    final List<String> keys;
+    if (existing == null || existing.isEmpty) {
+      keys = [derived];
+    } else {
+      List<String> parsed;
+      try {
+        parsed = [
+          derived,
+          ...(jsonDecode(existing) as List)
+              .whereType<String>()
+              .where((k) => k != derived),
+        ];
+      } catch (_) {
+        parsed = [derived];
+      }
+      keys = parsed;
+    }
+    await _storage.write(
+        key: _docKeysKey,
+        value: jsonEncode(keys.take(_maxDocKeys).toList()));
+  }
+
+  /// The deterministic document-encryption key derived from [password]. Exposed
+  /// as a pure function (with an overridable iteration count) so the derivation
+  /// contract — same password, same key, cross-device — is unit-testable.
+  static String deriveDocumentKey(String password, {int iterations = 600000}) {
+    return _pbkdf2Hex(password, docDerivationSalt, iterations);
   }
 
   Future<bool> verifyRecoveryPassword(String password) async {
@@ -208,9 +265,45 @@ class SecureStorageService implements SecureKeyValueStore {
     return key;
   }
 
-  /// Returns a device-local secret used exclusively for encrypted documents.
-  /// The secret itself never enters the SQLite database or regular storage.
+  /// Returns the primary document-encryption key used for NEW encryption: the
+  /// key derived from the recovery password when one has been set (so a second
+  /// device with the same recovery password decrypts the same files), otherwise
+  /// the legacy per-device random key.
   Future<String> getFileEncryptionKey() async {
+    final derived = await _storage.read(key: _docKeysKey);
+    if (derived != null && derived.isNotEmpty) {
+      try {
+        final keys =
+            (jsonDecode(derived) as List).whereType<String>().toList();
+        if (keys.isNotEmpty && keys.first.isNotEmpty) return keys.first;
+      } catch (_) {
+        // Fall through to the legacy key on corrupt state.
+      }
+    }
+    return _getLegacyFileKey();
+  }
+
+  /// Every key that may open an existing encrypted document, newest derived key
+  /// first, the legacy per-device random key last. Files encrypted before a
+  /// recovery password existed (or before a password change) stay readable.
+  Future<List<String>> getDocumentDecryptionKeys() async {
+    final keys = <String>[];
+    final derived = await _storage.read(key: _docKeysKey);
+    if (derived != null && derived.isNotEmpty) {
+      try {
+        keys.addAll((jsonDecode(derived) as List).whereType<String>());
+      } catch (_) {
+        // Ignore corrupt derived-key state; the legacy key may still work.
+      }
+    }
+    final legacy = await _storage.read(key: _fileEncryptionKey);
+    if (legacy != null && legacy.isNotEmpty && !keys.contains(legacy)) {
+      keys.add(legacy);
+    }
+    return keys;
+  }
+
+  Future<String> _getLegacyFileKey() async {
     String? key = await _storage.read(key: _fileEncryptionKey);
     if (key == null) {
       key = const Uuid().v4();

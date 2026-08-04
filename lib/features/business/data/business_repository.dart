@@ -1,5 +1,6 @@
 import 'package:sqflite_sqlcipher/sqflite.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../core/database/database_service.dart';
 import 'models/business_profile_entity.dart';
 import 'models/financial_settings_entity.dart';
@@ -46,18 +47,28 @@ class BusinessRepository {
     final map = {for (var e in maps) e['key'] as String: e['value'] as String};
     return FinancialSettings(
       currency: map['currency'] ?? '₦',
-      defaultInterestRate:
-          double.tryParse(map['default_interest'] ?? '0') ?? 0.0,
-      defaultInsuranceFee:
-          double.tryParse(map['default_insurance'] ?? '0') ?? 0.0,
-      defaultCommission:
-          double.tryParse(map['default_commission'] ?? '0') ?? 0.0,
-      defaultProcessingFee:
-          double.tryParse(map['default_processing'] ?? '0') ?? 0.0,
+      defaultInterestRate: _finiteDouble(map['default_interest']),
+      defaultInsuranceFee: _finiteDouble(map['default_insurance']),
+      defaultCommission: _finiteDouble(map['default_commission']),
+      defaultProcessingFee: _finiteDouble(map['default_processing']),
       defaultPenaltyRules: map['default_penalty_rules'] ?? '',
-      defaultLoanDurationDays:
-          int.tryParse(map['default_loan_duration_days'] ?? '') ?? 30,
+      defaultLoanDurationDays: _finiteDuration(map['default_loan_duration_days']),
       defaultLoanType: map['default_loan_type'] ?? 'daily',
     );
+  }
+
+  /// Parses a stored settings value into a finite non-negative double. Guards
+  /// against legacy rows where `double.tryParse('Infinity')` (from a "1e309"
+  /// save) would otherwise poison every new loan calculation.
+  double _finiteDouble(String? raw) {
+    final v = double.tryParse(raw ?? '');
+    return (v != null && v.isFinite && v >= 0) ? v : 0.0;
+  }
+
+  /// Parses a stored duration into a sane installments count (1..max).
+  int _finiteDuration(String? raw) {
+    final v = int.tryParse(raw ?? '');
+    if (v == null || v < 1 || v > AppConstants.maxLoanDuration) return 30;
+    return v;
   }
 }

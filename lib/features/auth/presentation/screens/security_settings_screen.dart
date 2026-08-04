@@ -39,8 +39,8 @@ class _SecuritySettingsScreenState
       }
       // Require a successful biometric scan before enabling, so enabling
       // requires an actual identity check rather than a blind toggle.
-      final verified = await _bio.authenticate();
-      if (!verified) {
+      final result = await _bio.authenticate();
+      if (result != BiometricResult.success) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('Biometric verification failed. Not enabled.')));

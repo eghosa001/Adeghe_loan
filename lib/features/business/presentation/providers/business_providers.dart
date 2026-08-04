@@ -13,11 +13,18 @@ final businessRepoProvider = FutureProvider<BusinessRepository>((ref) async {
 
 /// Session auto-lock timeout in minutes from the settings table (default 5).
 /// Invalidate after changing the setting so the active timeout updates live.
+///
+/// The stored value is clamped to [AppConstants.minSessionTimeoutMinutes] ..
+/// [AppConstants.maxSessionTimeoutMinutes] so a tampered/corrupt setting can
+/// neither disable auto-lock (huge value) nor lock instantly (negative).
 final sessionTimeoutMinutesProvider = FutureProvider<int>((ref) async {
   final repo = await ref.read(businessRepoProvider.future);
   final value = await repo.getSetting('session_timeout_minutes');
-  return int.tryParse(value ?? '') ??
-      AppConstants.defaultInactivityTimeout.inMinutes;
+  final parsed = int.tryParse(value ?? '');
+  final minutes = (parsed ?? AppConstants.defaultInactivityTimeout.inMinutes)
+      .clamp(AppConstants.minSessionTimeoutMinutes,
+          AppConstants.maxSessionTimeoutMinutes);
+  return minutes.toInt();
 });
 
 class BusinessProfileNotifier

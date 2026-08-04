@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/utils/currency_utils.dart';
+import '../../../../core/utils/input_formatters.dart';
 import '../../../business/presentation/providers/business_providers.dart';
 import '../../data/models/payment_entity.dart';
 import '../providers/payment_providers.dart';
@@ -42,6 +45,11 @@ class _RecordPaymentScreenState extends ConsumerState<RecordPaymentScreen> {
   PaymentMethod _method = PaymentMethod.cash;
   bool _loading = false;
 
+  /// Idempotency key for this payment. It is created once when the screen
+  /// opens and reused on every submit attempt, so a double-tap or a retry of
+  /// the same submission is recorded as a single payment, never a duplicate.
+  final String _requestId = const Uuid().v4();
+
   @override
   void initState() {
     super.initState();
@@ -75,7 +83,7 @@ class _RecordPaymentScreenState extends ConsumerState<RecordPaymentScreen> {
 
   Future<void> _savePayment() async {
     final amount = _enteredAmount;
-    if (amount <= 0) {
+    if (!amount.isFinite || amount <= 0) {
       return _showMessage('Enter a valid payment amount.');
     }
     setState(() => _loading = true);
@@ -93,6 +101,7 @@ class _RecordPaymentScreenState extends ConsumerState<RecordPaymentScreen> {
         collector: collectorName,
         remarks: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
         installmentDue: widget.installmentDue,
+        clientRequestId: _requestId,
       );
       if (mounted) {
         _showMessage('Payment recorded: ${payment.receiptNumber}'
@@ -240,6 +249,8 @@ class _RecordPaymentScreenState extends ConsumerState<RecordPaymentScreen> {
                 controller: _referenceCtrl,
                 decoration:
                     const InputDecoration(labelText: 'Reference number'),
+                inputFormatters:
+                    textFormatters(maxLength: AppConstants.maxReferenceLength),
               ),
             ],
             const SizedBox(height: 12),
@@ -250,6 +261,8 @@ class _RecordPaymentScreenState extends ConsumerState<RecordPaymentScreen> {
                 hintText: 'Add payment remarks...',
               ),
               maxLines: 2,
+              maxLength: AppConstants.maxNotesLength,
+              inputFormatters: const [NoControlCharactersFormatter()],
             ),
             const SizedBox(height: 24),
             FilledButton(

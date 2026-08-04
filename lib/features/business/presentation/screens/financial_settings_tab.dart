@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:loantrack/core/constants/app_constants.dart';
+import 'package:loantrack/core/utils/input_formatters.dart';
 import '../providers/business_providers.dart';
 import '../../data/models/financial_settings_entity.dart';
 
@@ -59,11 +61,14 @@ class _FinancialSettingsTabState extends ConsumerState<FinancialSettingsTab> {
         double.tryParse(_processingCtrl.text.trim()) ?? double.nan;
     final duration =
         int.tryParse(_durationCtrl.text.trim()) ?? -1;
-    if (interest.isNaN ||
-        insurance.isNaN ||
-        commission.isNaN ||
-        processing.isNaN ||
-        duration < 1) {
+    // Reject NaN/±Infinity (double.tryParse returns Infinity for "1e309")
+    // and negative values, and cap the duration so the default can never
+    // pre-fill an unbounded loan schedule.
+    if (!interest.isFinite || interest < 0 ||
+        !insurance.isFinite || insurance < 0 ||
+        !commission.isFinite || commission < 0 ||
+        !processing.isFinite || processing < 0 ||
+        duration < 1 || duration > AppConstants.maxLoanDuration) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Enter valid numeric values')));
@@ -200,7 +205,9 @@ class _FinancialSettingsTabState extends ConsumerState<FinancialSettingsTab> {
                 controller: _penaltyCtrl,
                 decoration: const InputDecoration(
                     labelText: 'Penalty Rules (JSON/text)'),
-                maxLines: 3),
+                maxLines: 3,
+                maxLength: AppConstants.maxNotesLength,
+                inputFormatters: const [NoControlCharactersFormatter()]),
             const SizedBox(height: 16),
             const Divider(),
             const Text('Loan Defaults',

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:loantrack/core/constants/app_constants.dart';
 import 'package:loantrack/core/utils/currency_utils.dart';
 import 'package:loantrack/core/utils/date_utils.dart';
+import 'package:loantrack/core/utils/input_formatters.dart';
 import 'package:loantrack/features/loans/data/models/loan_entity.dart';
 import 'package:loantrack/features/loans/presentation/providers/loan_providers.dart';
 
@@ -110,23 +112,29 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
           _buildTextField(
             label: 'Loan Amount (Principal)',
             onChanged: (value) => formNotifier.updateField(
-                principal: double.tryParse(value) ?? 0.0,
+                principal: CurrencyUtils.tryParseAmount(value) ?? 0.0,
                 clearCustomInstallment: true),
           ),
           _buildTextField(
             label: 'Interest Rate (%)',
             onChanged: (value) => formNotifier.updateField(
-                interestRatePercent: double.tryParse(value) ?? 0.0),
+                interestRatePercent: CurrencyUtils.tryParseAmount(value) ?? 0.0),
           ),
           _buildTextField(
             label: formState.loanType == LoanType.daily
                 ? 'Duration (Days)'
                 : 'Duration (Weeks)',
-            onChanged: (value) =>
-                formNotifier.updateField(
-                  duration: int.tryParse(value) ?? 0,
-                  clearCustomInstallment: true,
-                ),
+            onChanged: (value) {
+              final parsedDuration = int.tryParse(value);
+              formNotifier.updateField(
+                duration: (parsedDuration != null &&
+                        parsedDuration > 0 &&
+                        parsedDuration <= AppConstants.maxLoanDuration)
+                    ? parsedDuration
+                    : 0,
+                clearCustomInstallment: true,
+              );
+            },
           ),
           ExpansionTile(
             title: const Text('Fees & charges'),
@@ -134,27 +142,29 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
               _buildTextField(
                 label: 'Insurance fee (%)',
                 onChanged: (value) => formNotifier.updateField(
-                    insuranceFeePercent: double.tryParse(value) ?? 0.0),
+                    insuranceFeePercent:
+                        CurrencyUtils.tryParseAmount(value) ?? 0.0),
               ),
               _buildTextField(
                 label: 'Commission (%)',
                 onChanged: (value) => formNotifier.updateField(
-                    commissionPercent: double.tryParse(value) ?? 0.0),
+                    commissionPercent: CurrencyUtils.tryParseAmount(value) ?? 0.0),
               ),
               _buildTextField(
                 label: 'Processing fee',
                 onChanged: (value) => formNotifier.updateField(
-                    processingFee: double.tryParse(value) ?? 0.0),
+                    processingFee: CurrencyUtils.tryParseAmount(value) ?? 0.0),
               ),
               _buildTextField(
                 label: 'Administrative fee',
                 onChanged: (value) => formNotifier.updateField(
-                    administrativeFee: double.tryParse(value) ?? 0.0),
+                    administrativeFee:
+                        CurrencyUtils.tryParseAmount(value) ?? 0.0),
               ),
               _buildTextField(
                 label: 'Other charges',
                 onChanged: (value) => formNotifier.updateField(
-                    otherCharges: double.tryParse(value) ?? 0.0),
+                    otherCharges: CurrencyUtils.tryParseAmount(value) ?? 0.0),
               ),
             ],
           ),
@@ -163,12 +173,9 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
           _buildTextField(
             label: 'Collection amount per period (optional)',
             hint: 'Amount to collect per period (default: ${CurrencyUtils.format(formState.calculationResult?.installmentAmount ?? 0)})',
-            onChanged: (value) {
-              final parsed = double.tryParse(value);
-              formNotifier.updateField(
-                customInstallmentAmount: (parsed != null && parsed > 0) ? parsed : null,
-              );
-            },
+            onChanged: (value) => formNotifier.updateField(
+              customInstallmentAmount: CurrencyUtils.tryParsePositiveAmount(value),
+            ),
           ),
 
           // Notes
@@ -182,6 +189,8 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
                 border: OutlineInputBorder(),
               ),
               maxLines: 3,
+              maxLength: AppConstants.maxNotesLength,
+              inputFormatters: const [NoControlCharactersFormatter()],
               onChanged: (value) => formNotifier.updateField(notes: value),
             ),
           ),

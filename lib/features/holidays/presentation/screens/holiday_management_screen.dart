@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:loantrack/core/constants/app_constants.dart';
 import 'package:loantrack/core/utils/date_utils.dart';
+import 'package:loantrack/core/utils/input_formatters.dart';
 import 'package:loantrack/core/widgets/app_drawer.dart';
 import 'package:loantrack/core/widgets/empty_state.dart';
 import 'package:loantrack/features/collection/presentation/providers/collection_provider.dart';
@@ -441,6 +443,8 @@ class _HolidayManagementScreenState
                       controller: nameController,
                       decoration:
                           const InputDecoration(labelText: 'Holiday Name'),
+                      inputFormatters:
+                          textFormatters(maxLength: AppConstants.maxNameLength),
                       validator: (value) {
                         if (value == null || value.isEmpty) {
                           return 'Please enter a name';

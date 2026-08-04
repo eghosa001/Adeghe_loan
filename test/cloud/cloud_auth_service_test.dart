@@ -6,6 +6,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Guards the two-owner cloud authorization model:
 ///  * `claim_owner` is invoked WITHOUT any caller-supplied owner id
+///  * an email missing from the `authorized_owners` allow-list is refused a slot
+///  * a claim is refused when both owner slots are already taken
 ///  * a successful sign-in is only accepted once `is_owner` confirms the caller
 ///  * a non-owner session is signed back out and rejected
 ///  * schema misconfiguration surfaces as the "run supabase_schema.sql" error
@@ -72,6 +74,56 @@ void main() {
       verify(() => auth.signOut()).called(1);
     });
 
+    test('rejects an email not on the authorized-owners allow-list', () async {
+      final client = MockSupabaseClient();
+      final auth = MockGoTrueClient();
+      when(() => client.auth).thenReturn(auth);
+      when(() => auth.signInWithPassword(
+          email: any(named: 'email'), password: any(named: 'password')))
+          .thenAnswer((_) async => AuthResponse(user: ownerUser));
+      when(() => auth.currentUser).thenReturn(ownerUser);
+      when(() => auth.signOut()).thenAnswer((_) async {});
+
+      final rpcCalls = <String>[];
+      final service = CloudAuthService(
+        client: client,
+        rpc: (fn, {params}) async {
+          rpcCalls.add(fn);
+          return 'email_not_authorized';
+        },
+      );
+      await expectLater(
+        service.signIn('unlisted@example.com', 'secret'),
+        throwsA(isA<StateError>().having(
+            (e) => e.message, 'message', contains('authorized-owners'))),
+      );
+      // is_owner must never be consulted for a refused claim.
+      expect(rpcCalls, ['claim_owner']);
+      verify(() => auth.signOut()).called(1);
+    });
+
+    test('rejects a claim when both owner slots are already taken', () async {
+      final client = MockSupabaseClient();
+      final auth = MockGoTrueClient();
+      when(() => client.auth).thenReturn(auth);
+      when(() => auth.signInWithPassword(
+          email: any(named: 'email'), password: any(named: 'password')))
+          .thenAnswer((_) async => AuthResponse(user: ownerUser));
+      when(() => auth.currentUser).thenReturn(ownerUser);
+      when(() => auth.signOut()).thenAnswer((_) async {});
+
+      final service = CloudAuthService(
+        client: client,
+        rpc: (fn, {params}) async => 'full',
+      );
+      await expectLater(
+        service.signIn('owner@example.com', 'secret'),
+        throwsA(isA<StateError>().having((e) => e.message, 'message',
+            contains('slots are already taken'))),
+      );
+      verify(() => auth.signOut()).called(1);
+    });
+
     test('reports schema misconfiguration when claim_owner fails', () async {
       final client = MockSupabaseClient();
       final auth = MockGoTrueClient();
@@ -99,6 +151,19 @@ void main() {
       final error = StateError(CloudAuthService.notOwnerMessage);
       expect(CloudAuthService.friendlySignInError(error),
           CloudAuthService.notOwnerMessage);
+    });
+
+    test('maps an unlisted email and a full-slot claim to their messages', () {
+      expect(
+        CloudAuthService.friendlySignInError(
+            StateError(CloudAuthService.emailNotAuthorizedMessage)),
+        CloudAuthService.emailNotAuthorizedMessage,
+      );
+      expect(
+        CloudAuthService.friendlySignInError(
+            StateError(CloudAuthService.ownersFullMessage)),
+        CloudAuthService.ownersFullMessage,
+      );
     });
 
     test('does not enumerate accounts for bad credentials', () {

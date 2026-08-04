@@ -46,7 +46,8 @@ final auditLogRepositoryProvider = FutureProvider<AuditLogRepository>((ref) asyn
 
 final backupServiceProvider = FutureProvider<BackupService>((ref) async {
   final dbService = await ref.watch(databaseServiceProvider.future);
-  return BackupService(dbService);
+  final secure = ref.read(secureStorageProvider);
+  return BackupService(dbService, secure);
 });
 
 final statementServiceProvider = FutureProvider<StatementService>((ref) async {

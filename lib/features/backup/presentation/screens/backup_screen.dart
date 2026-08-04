@@ -21,7 +21,7 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
   bool _isBackupRunning = false;
 
   BackupService _backupService(DatabaseService dbService) =>
-      BackupService(dbService);
+      BackupService(dbService, ref.read(secureStorageProvider));
 
   Future<List<File>> _loadBackups() async {
     final dbService = await ref.read(databaseServiceProvider.future);

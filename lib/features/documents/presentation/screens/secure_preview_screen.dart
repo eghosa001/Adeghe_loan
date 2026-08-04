@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
 
@@ -90,9 +91,32 @@ class SecurePreviewScreen extends ConsumerWidget {
   }
 
   Future<void> _export(BuildContext context, Uint8List data) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Save an unencrypted copy?'),
+        content: const Text(
+          'This copy is stored in plain text in the app Documents folder. '
+          'It will NOT be encrypted, so anyone with access to this device or '
+          'a backup of that folder could read it. The encrypted original '
+          'stays protected on this device.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Save copy'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/${document.originalName}');
+      final file = File('${dir.path}/${_safeExportName(document.originalName)}');
       await file.writeAsBytes(data, flush: true);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -105,6 +129,23 @@ class SecurePreviewScreen extends ConsumerWidget {
         ));
       }
     }
+  }
+
+  /// Makes [name] safe to store on any filesystem (Windows, Android, iOS):
+  /// keeps only the base name, replaces characters that are illegal on Windows
+  /// (and control characters), trims trailing dots/spaces, and falls back to a
+  /// generic name when nothing remains. Path separators cannot survive, so a
+  /// crafted original name cannot escape the Documents folder.
+  String _safeExportName(String name) {
+    final base = path.basename(name);
+    final sanitized = base
+        .replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]'), '_')
+        .replaceAll(RegExp(r'[.\s]+$'), '');
+    if (sanitized.isEmpty || sanitized == '.') {
+      final extension = path.extension(base).toLowerCase();
+      return extension.isEmpty ? 'document' : 'document$extension';
+    }
+    return sanitized;
   }
 }
 

@@ -10,7 +10,7 @@ import '../security/secure_storage_service.dart';
 import 'migrations.dart';
 
 class DatabaseService {
-  static const int _databaseVersion = 17;
+  static const int _databaseVersion = 18;
   final SecureStorageService _secureStorage;
 
   DatabaseService(this._secureStorage);
@@ -255,6 +255,7 @@ class DatabaseService {
         type TEXT DEFAULT 'partial',
         status TEXT NOT NULL DEFAULT 'completed',
         prior_loan_status TEXT,
+        client_request_id TEXT,
         updated_at TEXT,
         FOREIGN KEY (loan_id) REFERENCES loans (id) ON DELETE CASCADE,
         FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE
@@ -361,10 +362,6 @@ class DatabaseService {
         'CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(full_name)');
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)');
-    await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_customers_bvn ON customers(bvn)');
-    await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_customers_nin ON customers(nin)');
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_customers_group ON customers(group_id)');
     await db.execute(

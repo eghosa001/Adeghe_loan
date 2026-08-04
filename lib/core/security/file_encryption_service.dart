@@ -13,8 +13,11 @@ import 'secure_storage_service.dart';
 /// Encrypts customer documents before they are persisted on disk.
 ///
 /// Encrypted files contain a small format marker, a random IV, and the AES-GCM
-/// ciphertext. They can only be opened on a device that has the matching secret
-/// stored in its platform secure storage.
+/// ciphertext. They can only be opened on a device that has the matching secret.
+/// The secret is derived from the recovery password (deterministic — the same
+/// password on a second device yields the same key), with a legacy per-device
+/// random key kept as a decryption fallback for files created before a recovery
+/// password existed.
 class FileEncryptionService {
   FileEncryptionService(this._secureStorage);
 
@@ -51,29 +54,44 @@ class FileEncryptionService {
     final ivStart = _header.length;
     final iv = encrypt.IV(payload.sublist(ivStart, ivStart + _ivLength));
     final ciphertext = payload.sublist(ivStart + _ivLength);
-    try {
-      final encrypter = encrypt.Encrypter(
-          encrypt.AES(await _key(), mode: encrypt.AESMode.gcm)); // Use GCM for authenticated encryption
-      return Uint8List.fromList(
-          encrypter.decryptBytes(encrypt.Encrypted(ciphertext), iv: iv));
-    } catch (_) {
-      throw const FileEncryptionException('Unable to decrypt this document. The file may be corrupt or the key may have changed.');
+    // Try every key that may open this file: the current recovery-password-
+    // derived key first, older derived keys (previous recovery passwords), then
+    // the legacy per-device random key. A second device that knows the recovery
+    // password decrypts the same files (API-6).
+    for (final key in await _candidateKeys()) {
+      try {
+        final encrypter = encrypt.Encrypter(
+            encrypt.AES(key, mode: encrypt.AESMode.gcm)); // GCM authenticates
+        return Uint8List.fromList(
+            encrypter.decryptBytes(encrypt.Encrypted(ciphertext), iv: iv));
+      } catch (_) {
+        // Try the next candidate key.
+      }
     }
+    throw const FileEncryptionException('Unable to decrypt this document. The file may be corrupt or the key may have changed.');
   }
 
   Future<Uint8List> _encrypt(Uint8List source) async {
     final iv = encrypt.IV.fromSecureRandom(_ivLength);
     final encrypter =
-        encrypt.Encrypter(encrypt.AES(await _key(), mode: encrypt.AESMode.gcm)); // Use GCM
+        encrypt.Encrypter(encrypt.AES(await _primaryKey(), mode: encrypt.AESMode.gcm)); // Use GCM
     final cipher = encrypter.encryptBytes(source, iv: iv);
     return Uint8List.fromList([..._header, ...iv.bytes, ...cipher.bytes]);
   }
 
-  Future<encrypt.Key> _key() async {
-    final secret = await _secureStorage.getFileEncryptionKey();
-    return encrypt.Key(
-        Uint8List.fromList(sha256.convert(utf8.encode(secret)).bytes));
+  Future<encrypt.Key> _primaryKey() async {
+    return _toKey(await _secureStorage.getFileEncryptionKey());
   }
+
+  Future<List<encrypt.Key>> _candidateKeys() async {
+    return [
+      for (final secret in await _secureStorage.getDocumentDecryptionKeys())
+        _toKey(secret),
+    ];
+  }
+
+  static encrypt.Key _toKey(String secret) => encrypt.Key(
+      Uint8List.fromList(sha256.convert(utf8.encode(secret)).bytes));
 
   bool _matchesHeader(Uint8List payload) {
     for (var index = 0; index < _header.length; index++) {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:uuid/uuid.dart';
 import 'package:loantrack/core/widgets/app_drawer.dart';
 import 'package:loantrack/core/widgets/debounced_text_field.dart';
 
@@ -411,7 +412,7 @@ class _CollectionRowTile extends ConsumerWidget {
           FilledButton(
             onPressed: () {
               final entered = double.tryParse(amountCtrl.text) ?? 0;
-              if (entered <= 0) return;
+              if (!entered.isFinite || entered <= 0) return;
               Navigator.pop(ctx);
               _recordQuickPayment(context, ref, entered);
             },
@@ -435,6 +436,7 @@ class _CollectionRowTile extends ConsumerWidget {
         method: PaymentMethod.cash,
         collector: collectorName,
         installmentDue: installmentDue > 0 ? installmentDue : null,
+        clientRequestId: const Uuid().v4(),
       );
       logAuditAction(ref, 'UPDATE',
           'Payment ${CurrencyUtils.format(amount)} recorded for ${row.customerName} (loan ${row.loanId})');
