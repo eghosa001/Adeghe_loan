@@ -14,12 +14,15 @@ class LoanListScreen extends ConsumerWidget {
 
   static const _statusTabs = <String?>[null, 'active', 'completed', 'defaulted', 'cancelled'];
   static const _statusLabels = <String>['All', 'Active', 'Completed', 'Defaulted', 'Cancelled'];
+  static const _typeTabs = <String?>[null, 'daily', 'weekly'];
+  static const _typeLabels = <String>['All', 'Daily', 'Weekly'];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final loansAsync = ref.watch(allLoansProvider);
     final searchQuery = ref.watch(loanSearchQueryProvider);
     final statusFilter = ref.watch(loanStatusFilterProvider);
+    final loanTypeFilter = ref.watch(loanTypeFilterProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -102,6 +105,28 @@ class LoanListScreen extends ConsumerWidget {
                     selected: isSelected,
                     onSelected: (_) {
                       ref.read(loanStatusFilterProvider.notifier).state =
+                          isSelected ? null : tabValue;
+                    },
+                  ),
+                );
+              }),
+            ),
+          ),
+          SizedBox(
+            height: 44,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              children: List.generate(_typeTabs.length, (i) {
+                final tabValue = _typeTabs[i];
+                final isSelected = loanTypeFilter == tabValue;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: FilterChip(
+                    label: Text(_typeLabels[i]),
+                    selected: isSelected,
+                    onSelected: (_) {
+                      ref.read(loanTypeFilterProvider.notifier).state =
                           isSelected ? null : tabValue;
                     },
                   ),

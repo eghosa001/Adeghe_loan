@@ -24,6 +24,7 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen>
   final _storage = SecureStorageService();
   final _bio = BiometricService();
   bool _isError = false;
+  bool _isPermanentlyLocked = false;
   String? _lockoutMessage;
   late AnimationController _shakeController;
   late Animation<double> _shakeAnimation;
@@ -44,6 +45,15 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen>
 
   Future<void> _checkLockout() async {
     final lockout = PinLockoutService(_storage);
+    if (await lockout.isPermanentlyLocked()) {
+      if (!mounted) return;
+      setState(() {
+        _isPermanentlyLocked = true;
+        _lockoutMessage = 'Too many failed attempts. This device is locked. '
+            'Use "Forgot PIN" and your recovery password to reset it.';
+      });
+      return;
+    }
     final remaining = await lockout.remainingLockout();
     if (!mounted || remaining == null) return;
     setState(() {
@@ -61,6 +71,9 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen>
   Future<void> _checkBiometrics() async {
     final enabled = await _storage.isBiometricEnabled();
     if (!enabled) return;
+    // A permanent lock can only be cleared by the recovery password; never let
+    // biometrics bypass it.
+    if (await PinLockoutService(_storage).isPermanentlyLocked()) return;
     final success = await _bio.authenticate();
     if (!mounted) return;
     if (success) _unlockApp();
@@ -72,6 +85,7 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen>
   }
 
   void _onKey(String key) async {
+    if (_isPermanentlyLocked) return;
     if (_pin.length < AppConstants.maxPinLength) {
       HapticFeedback.lightImpact();
       setState(() {
@@ -107,13 +121,22 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen>
         } else {
           final triggeredLockout = await lockout.registerFailedAttempt();
           if (!mounted) return;
+          final permanent = await lockout.isPermanentlyLocked();
+          if (!mounted) return;
           HapticFeedback.heavyImpact();
           _shakeController.forward(from: 0);
           setState(() {
             _isError = true;
-            _lockoutMessage = triggeredLockout
-                ? 'Too many attempts. Try again in 5 min.'
-                : 'Incorrect PIN. Try again.';
+            if (permanent) {
+              _isPermanentlyLocked = true;
+              _lockoutMessage = 'Too many failed attempts. This device is '
+                  'locked. Use "Forgot PIN" and your recovery password to '
+                  'reset it.';
+            } else {
+              _lockoutMessage = triggeredLockout
+                  ? 'Too many attempts. Try again in 5 min.'
+                  : 'Incorrect PIN. Try again.';
+            }
             _pin = '';
           });
         }

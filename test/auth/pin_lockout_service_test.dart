@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:loantrack/core/constants/app_constants.dart';
 import 'package:loantrack/core/security/pin_lockout_service.dart';
 import 'package:loantrack/core/security/secure_key_value_store.dart';
 
@@ -68,5 +69,74 @@ void main() {
     final remaining = await service.remainingLockout();
     expect(remaining, isNotNull);
     expect(remaining!.inSeconds, greaterThan(0));
+  });
+
+  test('lockout duration doubles with each lockout cycle', () async {
+    const expectedDurations = [
+      Duration(minutes: 5),
+      Duration(minutes: 10),
+      Duration(minutes: 20),
+      Duration(minutes: 40),
+    ];
+    for (final expected in expectedDurations) {
+      for (var i = 0; i < service.maxAttempts; i++) {
+        await service.registerFailedAttempt();
+      }
+      final storedUntil =
+          await store.read(AppConstants.keyLockoutUntil);
+      expect(storedUntil, isNotNull);
+      final duration = DateTime.parse(storedUntil!).difference(DateTime.now());
+      expect(
+        duration.inMinutes,
+        inInclusiveRange(expected.inMinutes - 1, expected.inMinutes + 1),
+      );
+    }
+  });
+
+  test('permanent lock after maxLockoutCycles blocks further attempts',
+      () async {
+    for (var cycle = 0; cycle < AppConstants.maxLockoutCycles; cycle++) {
+      for (var i = 0; i < service.maxAttempts; i++) {
+        await service.registerFailedAttempt();
+      }
+    }
+    expect(await service.isPermanentlyLocked(), isTrue);
+    expect(await service.isLockedOut(), isTrue);
+
+    // Even after a (simulated) long wait, a permanently locked device stays
+    // locked — a clock change cannot restore guessing.
+    final stillLocked = await service.isLockedOut();
+    expect(stillLocked, isTrue);
+
+    // registerFailedAttempt reports "still locked" and does not escalate.
+    final triggered = await service.registerFailedAttempt();
+    expect(triggered, isTrue);
+    expect(await service.isPermanentlyLocked(), isTrue);
+  });
+
+  test('reset clears permanent lock and cycles', () async {
+    for (var cycle = 0; cycle < AppConstants.maxLockoutCycles; cycle++) {
+      for (var i = 0; i < service.maxAttempts; i++) {
+        await service.registerFailedAttempt();
+      }
+    }
+    expect(await service.isPermanentlyLocked(), isTrue);
+
+    await service.reset();
+    expect(await service.isPermanentlyLocked(), isFalse);
+    expect(await service.isLockedOut(), isFalse);
+    expect(await service.remainingLockout(), isNull);
+  });
+
+  test('remainingLockout returns a long fixed duration when permanently locked',
+      () async {
+    for (var cycle = 0; cycle < AppConstants.maxLockoutCycles; cycle++) {
+      for (var i = 0; i < service.maxAttempts; i++) {
+        await service.registerFailedAttempt();
+      }
+    }
+    final remaining = await service.remainingLockout();
+    expect(remaining, isNotNull);
+    expect(remaining, AppConstants.lockoutMaxDuration);
   });
 }

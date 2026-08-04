@@ -24,22 +24,27 @@ class SecureStorageService implements SecureKeyValueStore {
   static const _pinVersionKey = 'pin_digit_version';
   static const _currentPinVersion = '4';
 
-  // PBKDF2-HMAC-SHA256 iterations — high enough to slow brute force while
-  // staying instant on a phone.
+  // PBKDF2-HMAC-SHA256 iterations. The PIN is a 4-digit secret guarded by the
+  // escalating lockout (PinLockoutService), so 120k keeps unlock instant even
+  // on low-end phones. The recovery password is the high-value escape hatch
+  // (verified rarely), so it uses the OWASP-recommended 600k.
   static const _pinIterations = 120000;
+  static const _recoveryIterations = 600000;
   static const _pinHashLength = 32;
 
-  /// Returns the per-device random salt used for all PIN/recovery hashes.
-  /// Stored once in secure storage so hashes stay stable across writes.
-  Future<String> _getSalt() async {
-    String? salt = await _storage.read(key: AppConstants.keyPinSalt);
+  /// Returns the per-device random salt for the given purpose, creating and
+  /// storing it on first use so hashes stay stable across writes.
+  Future<String> _getSalt(String key) async {
+    String? salt = await _storage.read(key: key);
     if (salt == null) {
       final random = Random.secure();
       salt = base64Encode(List.generate(16, (_) => random.nextInt(256)));
-      await _storage.write(key: AppConstants.keyPinSalt, value: salt);
+      await _storage.write(key: key, value: salt);
     }
     return salt;
   }
+
+  Future<String?> _readSalt(String key) => _storage.read(key: key);
 
   static String _pbkdf2Hex(String data, String salt, int iterations) {
     final hmac = Hmac(sha256, utf8.encode(data));
@@ -80,23 +85,44 @@ class SecureStorageService implements SecureKeyValueStore {
 
   /// PBKDF2-HMAC-SHA256 with the stored random salt. Format:
   /// `pbkdf2-sha256:<iterations>:<digest hex>`.
-  Future<String> _hash(String data) async {
-    final salt = await _getSalt();
-    return 'pbkdf2-sha256:$_pinIterations:${_pbkdf2Hex(data, salt, _pinIterations)}';
+  Future<String> _hash(String data, String saltKey, int iterations) async {
+    final salt = await _getSalt(saltKey);
+    return 'pbkdf2-sha256:$iterations:${_pbkdf2Hex(data, salt, iterations)}';
   }
 
-  Future<bool> _verify(String data, String stored) async {
+  /// Verifies [data] against [stored]. [saltCandidates] are tried in order so
+  /// hashes created before a salt split (recovery vs PIN) still verify.
+  Future<bool> _verify(
+      String data, String stored, List<String> saltCandidates) async {
     final parts = stored.split(':');
     if (parts.length != 3 || parts[0] != 'pbkdf2-sha256') return false;
     final iterations = int.tryParse(parts[1]);
     if (iterations == null || iterations < 1000) return false;
-    final salt = await _getSalt();
-    final expected = _pbkdf2Hex(data, salt, iterations);
-    return _constantTimeEquals(expected, parts[2]);
+    for (final salt in saltCandidates) {
+      if (salt.isEmpty) continue;
+      final expected = _pbkdf2Hex(data, salt, iterations);
+      if (_constantTimeEquals(expected, parts[2])) return true;
+    }
+    return false;
+  }
+
+  /// Enforces a strong recovery password: at least 12 characters containing
+  /// both letters and digits. Returns null when [password] is acceptable.
+  static String? recoveryPasswordError(String password) {
+    if (password.length < 12) {
+      return 'Recovery password must be at least 12 characters';
+    }
+    if (!RegExp(r'[A-Za-z]').hasMatch(password) ||
+        !RegExp(r'[0-9]').hasMatch(password)) {
+      return 'Recovery password must contain both letters and numbers';
+    }
+    return null;
   }
 
   Future<void> savePin(String pin) async {
-    await _storage.write(key: _pinKey, value: await _hash(pin));
+    await _storage.write(
+        key: _pinKey,
+        value: await _hash(pin, AppConstants.keyPinSalt, _pinIterations));
     await _storage.write(key: _pinVersionKey, value: _currentPinVersion);
   }
 
@@ -137,7 +163,8 @@ class SecureStorageService implements SecureKeyValueStore {
   Future<bool> verifyPin(String pin) async {
     final storedHash = await _storage.read(key: _pinKey);
     if (storedHash == null) return false;
-    return _verify(pin, storedHash);
+    final pinSalt = await _readSalt(AppConstants.keyPinSalt);
+    return _verify(pin, storedHash, [pinSalt ?? '']);
   }
 
   Future<bool> hasPin() async {
@@ -146,13 +173,21 @@ class SecureStorageService implements SecureKeyValueStore {
   }
 
   Future<void> saveRecoveryPassword(String password) async {
-    await _storage.write(key: _recoveryPassKey, value: await _hash(password));
+    await _storage.write(
+        key: _recoveryPassKey,
+        value:
+            await _hash(password, AppConstants.keyRecoverySalt, _recoveryIterations));
   }
 
   Future<bool> verifyRecoveryPassword(String password) async {
     final storedHash = await _storage.read(key: _recoveryPassKey);
     if (storedHash == null) return false;
-    return _verify(password, storedHash);
+    // Try the dedicated recovery salt first, then fall back to the PIN salt
+    // so hashes created before the salt split still verify.
+    final recoverySalt = await _readSalt(AppConstants.keyRecoverySalt);
+    final pinSalt = await _readSalt(AppConstants.keyPinSalt);
+    return _verify(
+        password, storedHash, [recoverySalt ?? '', pinSalt ?? '']);
   }
 
   Future<void> setBiometricEnabled(bool enabled) async {

@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import '../database/database_service.dart';
+import 'cloud_auth_service.dart';
 import 'supabase_config.dart';
 import 'sync_timestamps.dart';
 
@@ -93,6 +94,17 @@ class CloudSyncService {
     }
   }
 
+  /// Whether the signed-in account is one of the project owners (RLS-gated
+  /// reads would silently return nothing for a non-owner, so sync refuses to
+  /// start and never reports a false "complete").
+  Future<bool> _isOwner() async {
+    try {
+      return await Supabase.instance.client.rpc('is_owner') == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Runs a background sync when the cloud is configured and the owner is
   /// signed in. Best-effort — never throws.
   Future<void> syncIfSignedIn() async {
@@ -126,6 +138,10 @@ class CloudSyncService {
     }
     if (!isSignedIn) {
       return const CloudSyncResult(error: 'You are not signed in to the cloud.');
+    }
+    if (!await _isOwner()) {
+      return const CloudSyncResult(
+          error: CloudAuthService.notOwnerMessage);
     }
     _syncing = true;
     try {
@@ -399,8 +415,11 @@ class CloudSyncService {
   // Helpers
   // ─────────────────────────────────────────────────────────────────────────
 
-  String _documentStoragePath(String customerId, String documentId) =>
-      '$customerId/$documentId.enc';
+  String _documentStoragePath(String customerId, String documentId) {
+    final safeCustomer = sanitizeCloudPathPart(customerId);
+    final safeDocument = sanitizeCloudPathPart(documentId);
+    return '$safeCustomer/$safeDocument.enc';
+  }
 
   Map<String, Object?> _stripNulls(Map<String, Object?> row) {
     // Nulls are omitted so Postgres falls back to column defaults instead of
@@ -449,4 +468,14 @@ class CloudSyncException implements Exception {
 
   @override
   String toString() => message;
+}
+
+/// Neutralizes path-traversal / separator characters so a crafted database id
+/// can never escape the `documents/<customer_id>/<document_id>.enc` key prefix
+/// in the Storage bucket. Keeps only [A-Za-z0-9_-] (dots are dropped so a `..`
+/// segment can never be formed); anything empty collapses to an inert
+/// placeholder.
+String sanitizeCloudPathPart(String value) {
+  final sanitized = value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+  return sanitized.isEmpty ? '_' : sanitized;
 }

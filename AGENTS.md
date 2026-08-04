@@ -57,6 +57,11 @@ lib/
 
 **Auth:** Local-only. PIN (salted PBKDF2-HMAC-SHA256, 120k iterations, stored as `pbkdf2-sha256:<iterations>:<base64>`) + optional biometrics. 5-minute auto-lock via `InactivityWrapper` (pointer events + hardware keyboard). `databaseServiceProvider` polls `authProvider` until unlocked before initializing DB.
 
+**Auth hardening (2026-08-04, full-auth audit):**
+- **Escalating PIN lockout (M-1):** `PinLockoutService` doubles the lockout per cycle (5m → 10m → 20m → 40m → PERMANENT) and never resets the cumulative cycle counter on a clock change, so forwarding the device clock cannot restore unlimited guessing. After `maxLockoutCycles` (5) lockouts the only way back in is the recovery password via Forgot PIN (`pin_login_screen.dart` / `forgot_pin_screen.dart` handle the permanent-lock UI).
+- **Recovery password (L-2/L-3):** separate per-purpose salt (`keyRecoverySalt`; `keyPinSalt` fallback keeps old hashes verifiable) + PBKDF2 at 600k iterations. Minimum 12 chars with letters AND digits (`SecureStorageService.recoveryPasswordError`). The PIN keeps 120k iterations on purpose — a 4-digit secret is bounded by the lockout, and 600k would add seconds of unlock latency on low-end phones.
+- **Screen-snapshot protection (M-2):** Android `MainActivity` sets `FLAG_SECURE` (no screenshots/recents previews of financial data). Biometric grants do NOT persist across backgrounding (`biometric_service.dart`).
+
 **Document encryption:** `FileEncryptionService` — `[LTD1 header][12-byte IV][AES-GCM ciphertext]`. Max 20 MB. Supported: PDF, PNG, JPG.
 
 **Error handling:** Sealed `Result<T>` type (`Success<T>` / `ResultError<T>`) with 11 `Failure` subtypes. No exceptions across repository boundaries.
@@ -101,7 +106,7 @@ Reference pattern: `lib/features/payments/data/payment_repository.dart` `_recalc
 ## Product decisions (lock-in, 2026-08-01)
 
 - **Notification bell:** displayed only on the Dashboard AppBar (badge when count > 0). Notifications stay reachable from every screen via the AppDrawer. It must never render as a floating button that can overlap pushed screens (e.g. "Add Customer").
-- **Reports screen:** contains ONLY the five tabs — Overview, Daily, Weekly, Overdue, Analytics. No filter chips, no loan-type SegmentedButton, no custom date-range picker (report period defaults to this month; see `reportStartDateProvider`/`reportEndDateProvider`).
+- **Reports screen:** contains ONLY the five tabs — Overview, Daily, Weekly, Overdue, Analytics. No filter chips, no loan-type SegmentedButton. The report period is selectable via quick presets (Today, Yesterday, This Week, Last Week, This Month, Last Month, Last 30 Days) or a custom date range (`reportPeriodPresetProvider` drives the chips; `reportStartDateProvider`/`reportEndDateProvider` feed `reportSummaryProvider(dateRange)`); it defaults to this month. The Analytics tab is independent (fixed last 6 months) and ignores the selected period.
 - **Customer counts are distinct:** a customer holding both a daily and a weekly loan counts ONCE, not per loan. Any "customers" figure must be `COUNT(DISTINCT customer_id)` (or distinct in Dart) across loan types.
 - **Savings report:** totals are across ALL customers (net savings held). Per-customer statements live in the savings statement screen / Excel export.
 - **Customer list keeps groups:** the customer list screen keeps the group filter chips (All / each group) PLUS a "No group" chip (via `ungroupedGroupFilter` in `customer_repository.dart`, matching `COALESCE(c.group_id, '') = ''`), and the "Sort by Group" option (`CustomerSortOption.group`). Groups are never removed from the customer list — the "no group" view exists so ungrouped customers can be found deliberately.
@@ -154,7 +159,7 @@ Verified fixed (Phase 0, 2026-07-31 — all items from the audit have been addre
 
 Accepted/still-open (documented, not regressions):
 - **M14** backup `close()`/reopen of the DB under providers — the close/reopen pattern in `backup_service.dart` is retained as-is.
-- **Holiday schedule regen** intentionally skips active loans that already have payments (regenerating would corrupt paid-installment linkage).
+- **Holiday schedule regen** regenerates all active loans. Payment-free loans get a full regeneration; loans with payments keep every non-pending installment exactly as-is and regenerate only the pending tail (continuing due dates from the last kept installment via `ScheduleGenerator.generateContinuationDueDates`, skipping holidays/weekends); fully-paid loans are skipped. `_recalculateScheduleFromPayments` still orders by `due_date`, so paid-installment linkage stays intact.
 
 Phase 2 (second full-app debug pass, 2026-08-01):
 - **C1(2)** FK enforcement moved out of migrations: sqflite runs `onUpgrade` inside a transaction where `PRAGMA foreign_keys` is a no-op, so `_onConfigure` sets `foreign_keys = OFF` and new `_onOpen` sets it `ON`. Without this, the v8/v16 `DROP TABLE loans` table-recreates would cascade into payments/repayment_schedule/documents during upgrade (`database_service.dart`).
@@ -169,7 +174,7 @@ Full audit details + fix plan: `AUDIT_PLAN.md`.
 
 ## Cloud sync (Supabase)
 
-Optional offline-first replication (2026-08-01). The encrypted local SQLite DB stays the source of truth; Supabase mirrors it when the owner signs in (email/password). App unlock remains local-PIN-only.
+Optional offline-first replication (2026-08-01). The encrypted local SQLite DB stays the source of truth; Supabase mirrors it when one of the (max two) owners signs in (email/password). App unlock remains local-PIN-only.
 
 - **Services:** `lib/core/cloud/` — `supabase_config.dart` (real URL + anon key committed; `isConfigured` is true — never commit the service-role key), `cloud_auth_service.dart`, `cloud_sync_service.dart`, `sync_timestamps.dart`.
 - **Config:** `Supabase.initialize` in `main()` (skipped when placeholders present). Auto-sync runs after unlock in `main.dart` (next to `maybeAutoBackup`); manual trigger on the Cloud Sync screen (`/settings/cloud_sync`).
@@ -179,7 +184,13 @@ Optional offline-first replication (2026-08-01). The encrypted local SQLite DB s
 - **LWW merge:** push snapshots changed rows then sets `last_pushed_at` (watermark captured AFTER the snapshot so concurrent writes are re-picked next cycle). Pull deletes parents-first (local FK cascades clean children), then upserts rows where remote `updated_at` > local (or local missing and no newer local tombstone).
 - **Documents:** metadata rows replicate like any table (cloud `file_path` is `''`); the encrypted file bytes live in the `documents` storage bucket at `<customer_id>/<document_id>.enc` and are downloaded into `secure_documents/` on pull.
 - **Remote schema:** `supabase_schema.sql` must mirror the local schema (column types + FKs). Any local schema change (new table/column) must be added there AND to `_syncTables`/`_tablePrimaryKeys` in `cloud_sync_service.dart` AND the v17/`createSyncSchema` trigger list if it needs change tracking.
-- **Tests:** `test/database/migration_v17_sync_test.dart` (real SQLite via `sqflite_common_ffi` — dev dependency) validates the migration, stamping, tombstones, and pull-flag suppression. `supabase_flutter` is a direct dependency; INTERNET permission added to `AndroidManifest.xml`.
+- **Security hardening (2026-08-04, full-auth audit; two-owner model 2026-08-04):**
+  - **Owner-scoped RLS (C-1):** every cloud table + the `documents` storage bucket is RLS-locked to the rows in `app_owner` (max TWO owner uids; see `supabase_schema.sql`). `CloudAuthService.signIn` calls the SECURITY DEFINER RPC `claim_owner` (NO parameters — it derives the id from `auth.uid()` server-side; the old `claim_owner(text)` signature that let the caller nominate an owner is dropped) after a successful sign-in, then verifies with `is_owner()` and signs a non-owner back out. All policies read `auth.uid() in (select id from app_owner)`; `claim_owner` uses a `pg_advisory_xact_lock` + a BEFORE-INSERT trigger (`trg_app_owner_max_two`) so the "at most two owners" invariant cannot be raced. Also disable email signups in the dashboard (Settings → Authentication → Providers → Email → "Allow new users to sign up" OFF) — the anon key is public.
+  - **Owner-gated sync:** `CloudSyncService.fullSync` calls `is_owner()` before pushing/pulling and refuses to start (returns a result error) for a non-owner — silent RLS failures can no longer masquerade as "Sync complete".
+  - **Storage key sanitization:** `sanitizeCloudPathPart` (cloud_sync_service.dart) strips `[^A-Za-z0-9_-]` from `customer_id`/`document_id` before building `<customer_id>/<document_id>.enc` so crafted ids cannot escape the bucket prefix.
+  - **Secure session storage (H-1):** `Supabase.initialize` passes `FlutterAuthClientOptions(localStorage: SecureCloudLocalStorage(...), pkceAsyncStorage: SecureCloudAsyncStorage(...))` from `lib/core/cloud/secure_cloud_storage.dart` so the auth session/PKCE verifier live in `flutter_secure_storage`, NOT plaintext SharedPreferences. `AndroidManifest.xml` sets `android:allowBackup="false"` so prefs never reach cloud backups.
+  - **Friendly errors (L-4):** sign-in failures use `CloudAuthService.friendlySignInError` — raw GoTrue messages are never shown (account enumeration). The claim-owner failure surfaces a "run the updated supabase_schema.sql" message; a non-owner account gets `CloudAuthService.notOwnerMessage`.
+- **Tests:** `test/database/migration_v17_sync_test.dart` (real SQLite via `sqflite_common_ffi` — dev dependency) validates the migration, stamping, tombstones, and pull-flag suppression. `test/cloud/cloud_auth_service_test.dart` guards the two-owner model: claim_owner called with no caller-supplied id, non-owner rejected + signed out, misconfiguration mapped to the schema message, and storage-path sanitization. `supabase_flutter` is a direct dependency; INTERNET permission added to `AndroidManifest.xml`.
 
 ## Windows desktop build (packaged with Inno Setup)
 

@@ -55,6 +55,11 @@ add_subdirectory("runner")
 
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
+#
+# local_auth_windows (C++/WinRT coroutines with /await) trips MSVC's hard
+# error on the deprecated <experimental/coroutine> header. Silence it for all
+# plugin targets; C++20 <coroutine> remains the active path.
+add_compile_definitions(_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
 include(flutter/generated_plugins.cmake)
 
 

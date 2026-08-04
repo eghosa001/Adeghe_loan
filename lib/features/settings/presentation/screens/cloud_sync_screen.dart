@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:loantrack/core/cloud/cloud_auth_service.dart';
 import 'package:loantrack/core/cloud/supabase_config.dart';
 import 'package:loantrack/core/di/providers.dart';
 import 'package:loantrack/core/widgets/app_drawer.dart';
@@ -60,7 +61,7 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
       await _syncNow();
     } catch (error) {
       if (mounted) {
-        setState(() => _message = 'Sign-in failed: $error');
+        setState(() => _message = CloudAuthService.friendlySignInError(error));
       }
     } finally {
       if (mounted) setState(() => _busy = false);

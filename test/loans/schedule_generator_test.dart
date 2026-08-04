@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loantrack/core/utils/currency_utils.dart';
+import 'package:loantrack/features/holidays/data/models/holiday_entity.dart';
 import 'package:loantrack/features/loans/data/models/loan_entity.dart';
 import 'package:loantrack/features/loans/domain/schedule_generator.dart';
 
@@ -78,6 +79,67 @@ void main() {
       expect(schedule[0].dueDate, DateTime(2026, 8, 7));
       expect(schedule[1].dueDate, DateTime(2026, 8, 10));
       expect(schedule[2].dueDate, DateTime(2026, 8, 11));
+    });
+  });
+
+  group('ScheduleGenerator.generateContinuationDueDates', () {
+    test('daily continues on the next working day after the last kept date',
+        () {
+      final dates = ScheduleGenerator.generateContinuationDueDates(
+        loanType: LoanType.daily,
+        afterDate: DateTime(2026, 8, 7), // Friday
+        count: 3,
+        holidays: const [],
+      );
+      // Fri(7) → Mon(10), Tue(11), Wed(12) — weekend skipped.
+      expect(dates, [
+        DateTime(2026, 8, 10),
+        DateTime(2026, 8, 11),
+        DateTime(2026, 8, 12),
+      ]);
+    });
+
+    test('daily skips a holiday in the pending tail', () {
+      final holidays = [
+        Holiday(
+          id: 'H1',
+          name: 'Public Holiday',
+          date: DateTime(2026, 8, 10), // Monday
+        ),
+      ];
+      final dates = ScheduleGenerator.generateContinuationDueDates(
+        loanType: LoanType.daily,
+        afterDate: DateTime(2026, 8, 7), // Friday
+        count: 2,
+        holidays: holidays,
+      );
+      // Mon(10) is a holiday → Tue(11), then Wed(12).
+      expect(dates, [
+        DateTime(2026, 8, 11),
+        DateTime(2026, 8, 12),
+      ]);
+    });
+
+    test('weekly adds seven days then shifts past a holiday', () {
+      final holidays = [
+        Holiday(
+          id: 'H1',
+          name: 'Public Holiday',
+          date: DateTime(2026, 8, 17), // Monday
+        ),
+      ];
+      final dates = ScheduleGenerator.generateContinuationDueDates(
+        loanType: LoanType.weekly,
+        afterDate: DateTime(2026, 8, 10), // Monday
+        count: 3,
+        holidays: holidays,
+      );
+      // Mon(10) → +7 = Mon(17) holiday → Tue(18); → +7 = Mon(25); → +7 = Sep 1.
+      expect(dates, [
+        DateTime(2026, 8, 18),
+        DateTime(2026, 8, 25),
+        DateTime(2026, 9, 1),
+      ]);
     });
   });
 }

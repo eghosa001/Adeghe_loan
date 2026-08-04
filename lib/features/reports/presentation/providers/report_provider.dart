@@ -22,6 +22,28 @@ final reportEndDateProvider = StateProvider<DateTime>((ref) {
   return DateTime.now();
 });
 
+/// Report period quick presets selectable on the Reports screen. Each maps to
+/// a start/end date range; [ReportPeriodPreset.thisMonth] is the default.
+enum ReportPeriodPreset {
+  today('Today'),
+  yesterday('Yesterday'),
+  thisWeek('This Week'),
+  lastWeek('Last Week'),
+  thisMonth('This Month'),
+  lastMonth('Last Month'),
+  last30Days('Last 30 Days');
+
+  const ReportPeriodPreset(this.label);
+
+  /// Display label shown on the preset chips.
+  final String label;
+}
+
+/// Currently selected report period preset, or `null` when a custom date
+/// range is active.
+final reportPeriodPresetProvider =
+    StateProvider<ReportPeriodPreset?>((ref) => ReportPeriodPreset.thisMonth);
+
 /// Key used to memoize report queries per date range.
 class ReportDateRange {
   const ReportDateRange({required this.start, required this.end, this.loanType});

@@ -20,6 +20,7 @@ class _ForgotPinScreenState extends ConsumerState<ForgotPinScreen> {
 
   PinLockoutService? _lockout;
   DateTime? _lockoutUntil;
+  bool _isPermanentlyLocked = false;
   Timer? _lockoutTimer;
 
   @override
@@ -37,6 +38,11 @@ class _ForgotPinScreenState extends ConsumerState<ForgotPinScreen> {
   }
 
   Future<void> _refreshLockout() async {
+    if (await _lockout?.isPermanentlyLocked() ?? false) {
+      if (!mounted) return;
+      setState(() => _isPermanentlyLocked = true);
+      return;
+    }
     final until = await _lockout?.remainingLockout();
     if (!mounted) return;
     if (until != null) {
@@ -54,6 +60,10 @@ class _ForgotPinScreenState extends ConsumerState<ForgotPinScreen> {
     return false;
   }
 
+  /// Under a permanent lock the PIN input stays blocked, but the recovery
+  /// password field must stay usable — it is the only way back in.
+  bool get _blocked => _isLockedOut && !_isPermanentlyLocked;
+
   int get _remainingSeconds {
     if (_lockoutUntil == null) return 0;
     return _lockoutUntil!.difference(DateTime.now()).inSeconds.clamp(0, 999);
@@ -65,7 +75,7 @@ class _ForgotPinScreenState extends ConsumerState<ForgotPinScreen> {
       return;
     }
 
-    if (_isLockedOut) {
+    if (_blocked) {
       setState(() =>
           _message = 'Too many attempts. Try again in $_remainingSeconds seconds.');
       return;
@@ -83,9 +93,25 @@ class _ForgotPinScreenState extends ConsumerState<ForgotPinScreen> {
       if (!mounted) return;
       GoRouter.of(context).go('/auth/setup_pin');
     } else {
+      if (_isPermanentlyLocked) {
+        setState(() => _message = 'Recovery password incorrect.');
+        return;
+      }
       final triggered = await _lockout?.registerFailedAttempt() ?? false;
       if (!mounted) return;
       if (triggered) {
+        final permanent = await _lockout?.isPermanentlyLocked() ?? false;
+        if (!mounted) return;
+        if (permanent) {
+          setState(() {
+            _isPermanentlyLocked = true;
+            _lockoutUntil = null;
+            _lockoutTimer?.cancel();
+            _message = 'Too many failed attempts. This device is locked. '
+                'Enter your recovery password to reset your PIN.';
+          });
+          return;
+        }
         setState(() {
           _lockoutUntil = DateTime.now().add(_lockout!.lockoutDuration);
           _message = 'Too many failed attempts. Locked out for '
@@ -118,7 +144,7 @@ class _ForgotPinScreenState extends ConsumerState<ForgotPinScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isLocked = _isLockedOut;
+    final isLocked = _blocked;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Forgot PIN')),
@@ -126,7 +152,10 @@ class _ForgotPinScreenState extends ConsumerState<ForgotPinScreen> {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            const Text('Enter your recovery password to reset PIN'),
+            Text(_isPermanentlyLocked
+                ? 'Too many failed attempts. This device is locked. Enter '
+                    'your recovery password to reset your PIN.'
+                : 'Enter your recovery password to reset PIN'),
             const SizedBox(height: 12),
             TextField(
                 controller: _controller,

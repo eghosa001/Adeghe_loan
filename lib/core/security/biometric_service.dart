@@ -16,7 +16,9 @@ class BiometricService {
         localizedReason:
             'Scan your fingerprint (or face) to unlock the application',
         biometricOnly: true,
-        persistAcrossBackgrounding: true,
+        // Do not keep the biometric grant alive across app backgrounding: the
+        // app re-locks when paused, so the grant must not outlive it.
+        persistAcrossBackgrounding: false,
       );
     } catch (e) {
       return false;

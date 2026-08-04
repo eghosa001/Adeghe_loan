@@ -339,10 +339,14 @@ final loanSearchQueryProvider = StateProvider<String>((ref) => '');
 
 final loanStatusFilterProvider = StateProvider<String?>((ref) => null);
 
+final loanTypeFilterProvider = StateProvider<String?>((ref) => null);
+
 final allLoansProvider = FutureProvider<List<Loan>>((ref) async {
   final repo = await ref.watch(loanRepositoryProvider.future);
   final query = ref.watch(loanSearchQueryProvider);
   final statusFilter = ref.watch(loanStatusFilterProvider);
-  final result = await repo.getAllLoans(query: query, statusFilter: statusFilter);
+  final loanType = ref.watch(loanTypeFilterProvider);
+  final result = await repo.getAllLoans(
+      query: query, statusFilter: statusFilter, loanType: loanType);
   return result.when(success: (l) => l, failure: (f) => throw f);
 });

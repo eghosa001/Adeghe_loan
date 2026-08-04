@@ -63,10 +63,21 @@ class _PinSetupScreenState extends ConsumerState<PinSetupScreen> {
           'Set Recovery Password',
           style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700),
         ),
-        content: TextField(
-          controller: _recoveryCtrl,
-          decoration: const InputDecoration(labelText: 'Recovery Password'),
-          obscureText: true,
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _recoveryCtrl,
+              decoration: const InputDecoration(labelText: 'Recovery Password'),
+              obscureText: true,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'At least 12 characters, with letters and numbers. '
+              'It is the only way to recover if you forget your PIN.',
+              style: TextStyle(fontSize: 12),
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -89,11 +100,10 @@ class _PinSetupScreenState extends ConsumerState<PinSetupScreen> {
           ElevatedButton(
             onPressed: () {
               final recovery = _recoveryCtrl.text.trim();
-              if (recovery.length < 8) {
+              final error = SecureStorageService.recoveryPasswordError(recovery);
+              if (error != null) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                      content: Text(
-                          'Recovery password must be at least 8 characters')),
+                  SnackBar(content: Text(error)),
                 );
                 return;
               }

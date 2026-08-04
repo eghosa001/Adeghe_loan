@@ -39,6 +39,30 @@ class ScheduleGenerator {
     );
   }
 
+  /// Generates [count] due dates continuing after [afterDate] (the last kept
+  /// installment's due date) for a loan that already has paid installments:
+  /// daily loans advance to the next working day, weekly loans advance a full
+  /// week then shift forward past any non-working day. Used by holiday-driven
+  /// schedule regeneration so only the pending tail of a partially-paid loan
+  /// is re-dated while paid installments stay untouched.
+  static List<DateTime> generateContinuationDueDates({
+    required LoanType loanType,
+    required DateTime afterDate,
+    required int count,
+    required List<Holiday> holidays,
+  }) {
+    final dates = <DateTime>[];
+    var current = AppDateUtils.stripTime(afterDate);
+    for (var i = 0; i < count; i++) {
+      current = loanType == LoanType.weekly
+          ? current.add(const Duration(days: 7))
+          : current.add(const Duration(days: 1));
+      current = _findNextWorkingDay(current, holidays);
+      dates.add(current);
+    }
+    return dates;
+  }
+
   static List<RepaymentInstallment> _generateDaily({
     required String loanId,
     required DateTime startDate,

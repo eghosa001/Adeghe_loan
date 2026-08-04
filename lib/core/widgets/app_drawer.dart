@@ -81,43 +81,21 @@ class AppDrawer extends StatelessWidget {
                     currentRoute: currentRoute,
                   ),
                   _MenuItem(
-                    icon: Icons.monetization_on_rounded,
-                    label: 'Loans',
-                    route: '/loans',
-                    currentRoute: currentRoute,
-                  ),
-                  _MenuItem(
                     icon: Icons.group_rounded,
                     label: 'Customer Groups',
                     route: '/groups',
                     currentRoute: currentRoute,
                   ),
                   _MenuItem(
+                    icon: Icons.monetization_on_rounded,
+                    label: 'Loans',
+                    route: '/loans',
+                    currentRoute: currentRoute,
+                  ),
+                  _MenuItem(
                     icon: Icons.account_balance_wallet_rounded,
                     label: 'Collections',
                     route: '/collections',
-                    currentRoute: currentRoute,
-                  ),
-                  _MenuItem(
-                    icon: Icons.savings_rounded,
-                    label: 'Savings',
-                    route: '/savings',
-                    currentRoute: currentRoute,
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Divider(),
-                  ),
-                  _MenuItem(
-                    icon: Icons.search_rounded,
-                    label: 'Global Search',
-                    route: '/search',
-                    currentRoute: currentRoute,
-                  ),
-                  _MenuItem(
-                    icon: Icons.notifications_rounded,
-                    label: 'Notifications',
-                    route: '/notifications',
                     currentRoute: currentRoute,
                   ),
                   const Padding(
@@ -137,9 +115,27 @@ class AppDrawer extends StatelessWidget {
                     currentRoute: currentRoute,
                   ),
                   _MenuItem(
+                    icon: Icons.savings_rounded,
+                    label: 'Savings',
+                    route: '/savings',
+                    currentRoute: currentRoute,
+                  ),
+                  _MenuItem(
                     icon: Icons.calendar_month_rounded,
                     label: 'Holidays',
                     route: '/holidays',
+                    currentRoute: currentRoute,
+                  ),
+                  _MenuItem(
+                    icon: Icons.notifications_rounded,
+                    label: 'Notifications',
+                    route: '/notifications',
+                    currentRoute: currentRoute,
+                  ),
+                  _MenuItem(
+                    icon: Icons.search_rounded,
+                    label: 'Global Search',
+                    route: '/search',
                     currentRoute: currentRoute,
                   ),
                   _MenuItem(

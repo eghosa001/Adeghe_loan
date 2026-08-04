@@ -151,6 +151,7 @@ class LoanRepository {
   Future<Result<List<Loan>>> getAllLoans({
     String? query,
     String? statusFilter,
+    String? loanType,
     int? limit,
     int offset = 0,
   }) async {
@@ -166,6 +167,10 @@ class LoanRepository {
       if (statusFilter != null && statusFilter.isNotEmpty) {
         conditions.add('l.status = ?');
         args.add(statusFilter);
+      }
+      if (loanType != null && loanType.isNotEmpty) {
+        conditions.add('l.loan_type = ?');
+        args.add(loanType);
       }
 
       final where = conditions.join(' AND ');
@@ -188,7 +193,11 @@ class LoanRepository {
     }
   }
 
-  Future<Result<int>> countAllLoans({String? query, String? statusFilter}) async {
+  Future<Result<int>> countAllLoans({
+    String? query,
+    String? statusFilter,
+    String? loanType,
+  }) async {
     try {
       final db = await _database;
       final conditions = <String>['1=1'];
@@ -201,6 +210,10 @@ class LoanRepository {
       if (statusFilter != null && statusFilter.isNotEmpty) {
         conditions.add('l.status = ?');
         args.add(statusFilter);
+      }
+      if (loanType != null && loanType.isNotEmpty) {
+        conditions.add('l.loan_type = ?');
+        args.add(loanType);
       }
 
       final where = conditions.join(' AND ');
@@ -234,10 +247,16 @@ class LoanRepository {
     }
   }
 
-  /// Regenerates the repayment schedule of every active loan that has no
-  /// recorded payments, so holiday changes are reflected in upcoming
-  /// installments. Loans with payments are intentionally left untouched to
-  /// avoid breaking the paid-installment linkage.
+  /// Regenerates the repayment schedule of every active loan so holiday
+  /// changes are reflected in upcoming installments:
+  ///  * Payment-free loans get a full regeneration (existing behavior).
+  ///  * Loans with paid installments keep every non-pending installment
+  ///    exactly as-is and only regenerate the pending tail, continuing due
+  ///    dates from the last kept installment and skipping holidays/weekends.
+  ///  * Fully-paid loans are skipped (nothing pending).
+  /// Because consumers read `due_date` from storage, honoring the holiday
+  /// propagates everywhere (collection list, date-range queries, future
+  /// schedule, overdue queries, dashboard expected/due counts).
   Future<Result<int>> regenSchedulesForActiveLoans(
       List<Holiday> holidays) async {
     try {
@@ -248,33 +267,65 @@ class LoanRepository {
 
       for (final row in rows) {
         final loan = Loan.fromMap(row);
-        final paid = await db.query('payments',
-            columns: ['id'],
-            where: 'loan_id = ? AND status = ?',
-            whereArgs: [loan.id, 'completed']);
-        if (paid.isNotEmpty) continue;
-
-        final customAmount = loan.customCollectionAmount;
-        final isCustom = customAmount != null && customAmount > 0;
-        final totalRepayment = isCustom
-            ? CurrencyUtils.roundToCents(customAmount * loan.duration)
-            : loan.totalRepayment;
-        final amounts =
-            CurrencyUtils.splitEvenly(totalRepayment, loan.duration);
-        final schedule = ScheduleGenerator.generate(
-          loanId: loan.id,
-          loanType: loan.loanType,
-          startDate: loan.repaymentStartDate,
-          amounts: amounts,
-          holidays: holidays,
+        final existingMaps = await db.query(
+          'repayment_schedule',
+          where: 'loan_id = ?',
+          whereArgs: [loan.id],
+          orderBy: 'installment_number ASC',
         );
-        if (schedule.isEmpty) continue;
+        if (existingMaps.isEmpty) continue;
+        final existing = existingMaps
+            .map((map) => RepaymentInstallment.fromMap(map))
+            .toList();
+
+        final pendingTail = existing
+            .where((inst) => inst.status == RepaymentStatus.pending)
+            .toList();
+        if (pendingTail.isEmpty) continue;
+
+        final kept = existing
+            .where((inst) => inst.status != RepaymentStatus.pending)
+            .toList();
+
+        final List<RepaymentInstallment> rebuilt;
+        if (kept.isEmpty) {
+          // Payment-free loan: full regeneration (existing behavior).
+          final customAmount = loan.customCollectionAmount;
+          final isCustom = customAmount != null && customAmount > 0;
+          final totalRepayment = isCustom
+              ? CurrencyUtils.roundToCents(customAmount * loan.duration)
+              : loan.totalRepayment;
+          final amounts =
+              CurrencyUtils.splitEvenly(totalRepayment, loan.duration);
+          rebuilt = ScheduleGenerator.generate(
+            loanId: loan.id,
+            loanType: loan.loanType,
+            startDate: loan.repaymentStartDate,
+            amounts: amounts,
+            holidays: holidays,
+          );
+        } else {
+          // Loan with paid installments: regenerate only the pending tail,
+          // continuing due dates from the last kept installment.
+          final newDueDates = ScheduleGenerator.generateContinuationDueDates(
+            loanType: loan.loanType,
+            afterDate: kept.last.dueDate,
+            count: pendingTail.length,
+            holidays: holidays,
+          );
+          rebuilt = [
+            ...kept,
+            for (var i = 0; i < pendingTail.length; i++)
+              pendingTail[i].copyWith(dueDate: newDueDates[i]),
+          ];
+        }
+        if (rebuilt.isEmpty) continue;
 
         await db.transaction((txn) async {
           await txn.delete('repayment_schedule',
               where: 'loan_id = ?', whereArgs: [loan.id]);
           final batch = txn.batch();
-          for (final installment in schedule) {
+          for (final installment in rebuilt) {
             batch.insert('repayment_schedule', installment.toMap(),
                 conflictAlgorithm: ConflictAlgorithm.replace);
           }

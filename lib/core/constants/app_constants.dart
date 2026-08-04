@@ -21,10 +21,13 @@ class AppConstants {
   // Secure storage keys
   static const String keyPinHash = 'secure_pin_hash';
   static const String keyPinSalt = 'secure_pin_salt';
+  static const String keyRecoverySalt = 'secure_recovery_salt';
   static const String keyBiometricEnabled = 'secure_biometric_enabled';
   static const String keyEncryptionKey = 'secure_file_encryption_key';
   static const String keyFailedAttempts = 'secure_failed_pin_attempts';
   static const String keyLockoutUntil = 'secure_lockout_until';
+  static const String keyLockoutCycles = 'secure_lockout_cycles';
+  static const String keyPermanentLock = 'secure_permanent_lock';
   static const String keyRecoveryPasswordHash = 'secure_recovery_password_hash';
 
   // Shared preference keys
@@ -41,6 +44,9 @@ class AppConstants {
   static const int maxPinLength = pinLength;
   static const int maxPinAttempts = 5;
   static const Duration lockoutDuration = Duration(minutes: 5);
+  // Lockout length doubles per cycle: 5m, 10m, 20m, 40m, then permanent.
+  static const int maxLockoutCycles = 5;
+  static const Duration lockoutMaxDuration = Duration(hours: 24);
   static const Duration defaultInactivityTimeout = Duration(minutes: 5);
 
   // Loans

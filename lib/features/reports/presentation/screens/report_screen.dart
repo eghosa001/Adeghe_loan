@@ -39,10 +39,73 @@ class _ReportScreenState extends ConsumerState<ReportScreen>
   String _periodLabel(DateTime startDate, DateTime endDate) =>
       '${AppDateUtils.formatDate(startDate)} to ${AppDateUtils.formatDate(endDate)}';
 
+  ({DateTime start, DateTime end}) _presetRange(ReportPeriodPreset preset) {
+    final today = AppDateUtils.stripTime(DateTime.now());
+    switch (preset) {
+      case ReportPeriodPreset.today:
+        return (start: today, end: today);
+      case ReportPeriodPreset.yesterday:
+        final day = today.subtract(const Duration(days: 1));
+        return (start: day, end: day);
+      case ReportPeriodPreset.thisWeek:
+        return (start: AppDateUtils.startOfWeek(today), end: today);
+      case ReportPeriodPreset.lastWeek:
+        final weekStart = AppDateUtils.startOfWeek(today);
+        return (
+          start: weekStart.subtract(const Duration(days: 7)),
+          end: weekStart.subtract(const Duration(days: 1)),
+        );
+      case ReportPeriodPreset.thisMonth:
+        return (start: DateTime(today.year, today.month, 1), end: today);
+      case ReportPeriodPreset.lastMonth:
+        return (
+          start: DateTime(today.year, today.month - 1, 1),
+          end: DateTime(today.year, today.month, 0),
+        );
+      case ReportPeriodPreset.last30Days:
+        return (
+          start: today.subtract(const Duration(days: 29)),
+          end: today,
+        );
+    }
+  }
+
+  void _selectPreset(ReportPeriodPreset preset) {
+    final range = _presetRange(preset);
+    ref.read(reportStartDateProvider.notifier).state = range.start;
+    ref.read(reportEndDateProvider.notifier).state = range.end;
+    ref.read(reportPeriodPresetProvider.notifier).state = preset;
+  }
+
+  Future<void> _pickCustomRange() async {
+    final now = DateTime.now();
+    final currentStart = ref.read(reportStartDateProvider);
+    final currentEnd = ref.read(reportEndDateProvider);
+    final pickedStart = await showDatePicker(
+      context: context,
+      initialDate: currentStart,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(now.year + 5, now.month, now.day),
+    );
+    if (pickedStart == null) return;
+    if (!mounted) return;
+    final pickedEnd = await showDatePicker(
+      context: context,
+      initialDate: currentEnd.isAfter(pickedStart) ? currentEnd : pickedStart,
+      firstDate: pickedStart,
+      lastDate: DateTime(now.year + 5, now.month, now.day),
+    );
+    if (pickedEnd == null) return;
+    ref.read(reportStartDateProvider.notifier).state = pickedStart;
+    ref.read(reportEndDateProvider.notifier).state = pickedEnd;
+    ref.read(reportPeriodPresetProvider.notifier).state = null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final startDate = ref.watch(reportStartDateProvider);
     final endDate = ref.watch(reportEndDateProvider);
+    final selectedPreset = ref.watch(reportPeriodPresetProvider);
     final selectedLoanType = ref.watch(reportLoanTypeFilterProvider);
     final dateRange = ReportDateRange(start: startDate, end: endDate, loanType: selectedLoanType);
     final reportAsync = ref.watch(reportSummaryProvider(dateRange));
@@ -115,24 +178,60 @@ class _ReportScreenState extends ConsumerState<ReportScreen>
       drawer: const AppDrawer(currentRoute: '/reports'),
       body: Column(
         children: [
-          // Period banner
+          // Report period selector
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            color: Theme.of(context).colorScheme.primaryContainer,
-            child: Row(
+            color: Theme.of(context).colorScheme.surface,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.date_range, size: 16, color: Theme.of(context).colorScheme.onPrimaryContainer),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Report Period: ${_periodLabel(startDate, endDate)}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onPrimaryContainer,
-                      fontWeight: FontWeight.w600,
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Row(
+                    children: [
+                      for (final preset in ReportPeriodPreset.values) ...[
+                        ChoiceChip(
+                          label: Text(preset.label),
+                          selected: selectedPreset == preset,
+                          onSelected: (_) => _selectPreset(preset),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      ChoiceChip(
+                        avatar: const Icon(Icons.calendar_month_rounded, size: 18),
+                        label: const Text('Custom'),
+                        selected: selectedPreset == null,
+                        onSelected: (_) => _pickCustomRange(),
+                      ),
+                    ],
+                  ),
+                ),
+                InkWell(
+                  onTap: _pickCustomRange,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    child: Row(
+                      children: [
+                        Icon(Icons.date_range,
+                            size: 16, color: Theme.of(context).colorScheme.primary),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Report Period: ${_periodLabel(startDate, endDate)}',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ),
+                        Icon(Icons.edit_calendar_outlined,
+                            size: 16, color: Theme.of(context).colorScheme.primary),
+                      ],
                     ),
                   ),
                 ),
+                const Divider(height: 1),
               ],
             ),
           ),
@@ -653,6 +752,42 @@ class _OverdueTab extends ConsumerWidget {
   const _OverdueTab({required this.summary});
   final ReportSummary summary;
 
+  String _currencySymbol(WidgetRef ref) =>
+      ref.read(currencySymbolProvider).valueOrNull ??
+      CurrencyUtils.defaultSymbol;
+
+  Future<void> _savePdf(
+      BuildContext context, WidgetRef ref, List<OverdueEntry> entries) async {
+    try {
+      final path = await ExportManager.saveOverduePdf(entries, 'Overdue Report',
+          currencySymbol: _currencySymbol(ref));
+      if (!context.mounted) return;
+      if (path != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('PDF saved to Documents')),
+        );
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to save PDF: $e')),
+      );
+    }
+  }
+
+  Future<void> _sharePdf(
+      BuildContext context, WidgetRef ref, List<OverdueEntry> entries) async {
+    try {
+      await ExportManager.shareOverduePdf(entries, 'Overdue Report',
+          currencySymbol: _currencySymbol(ref));
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to share PDF: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final selectedLoanType = ref.watch(reportLoanTypeFilterProvider);
@@ -719,6 +854,28 @@ class _OverdueTab extends ConsumerWidget {
               icon: Icons.timer,
               color: Colors.orange.shade700,
             )),
+          ],
+        ),
+        const SizedBox(height: 16),
+
+        // Export actions
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.download),
+                label: const Text('Save PDF'),
+                onPressed: () => _savePdf(context, ref, entries),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.share),
+                label: const Text('Share PDF'),
+                onPressed: () => _sharePdf(context, ref, entries),
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 16),

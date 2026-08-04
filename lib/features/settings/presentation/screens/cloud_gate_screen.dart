@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../../../core/cloud/cloud_auth_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/di/providers.dart';
 
@@ -49,7 +50,7 @@ class _CloudGateScreenState extends ConsumerState<CloudGateScreen> {
       if (mounted) {
         setState(() {
           _busy = false;
-          _message = 'Sign-in failed. Check your internet connection.\n$error';
+          _message = CloudAuthService.friendlySignInError(error);
         });
       }
     }
