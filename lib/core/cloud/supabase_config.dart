@@ -1,35 +1,41 @@
-/// Cloud-sync configuration for Supabase.
+﻿/// Cloud-sync configuration for Supabase.
 ///
-/// Fill in [supabaseUrl] and [anonKey] from your Supabase project dashboard
-/// (Project Settings → API). Until real values are provided the app keeps
-/// running fully offline and simply never syncs.
+/// For security, do NOT hardcode secrets in source. Build the app with the
+/// Supabase values supplied at build time using Dart defines:
+///
+///   flutter run --dart-define=SUPABASE_URL=https://<project>.supabase.co \
+///               --dart-define=SUPABASE_ANON_KEY=<anon-key>
+///
+/// Or pass the same defines to `flutter build` / CI. When the defines are not
+/// provided the app remains offline-only and cloud sync is disabled.
 class SupabaseConfig {
   SupabaseConfig._();
 
-  /// Your Supabase project URL, e.g. `https://abcdxyz.supabase.co`.
-  static const String supabaseUrl = 'https://tpqyilakpsjmevqgdqur.supabase.co';
+  /// Supply your Supabase project URL at build time with `--dart-define`.
+  /// Example: `--dart-define=SUPABASE_URL=https://abcdxyz.supabase.co`
+  static const String supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: '');
 
-  /// Your Supabase project `anon` public key.
-  static const String anonKey =
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwcXlpbGFrcHNqbWV2cWdkcXVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2MDk2MzQsImV4cCI6MjEwMTE4NTYzNH0.-OcBMI2cLOyNQTu7w74cPOyzWZiekltDcexxiIsleak';
+  /// Supply your Supabase public (anon) key at build time with `--dart-define`.
+  /// Example: `--dart-define=SUPABASE_ANON_KEY=eyJhbGci...`
+  static const String anonKey = String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: '');
 
   /// Storage bucket that holds the encrypted customer documents. Must be
   /// created with the `supabase_schema.sql` script.
   static const String documentsBucket = 'documents';
 
-  /// Whether the placeholder values are still present (i.e. sync is disabled).
+  /// Whether the runtime configuration is present (both URL and anon key).
+  /// Avoid treating the anon key as secret in the client — the service role
+  /// key must never be shipped to clients. If either value is missing the app
+  /// will keep operating offline-only.
   static bool get isConfigured {
-    return !supabaseUrl.contains('YOUR-PROJECT-URL') &&
+    return supabaseUrl.isNotEmpty && anonKey.isNotEmpty &&
+        !supabaseUrl.contains('YOUR-PROJECT-URL') &&
         !anonKey.contains('YOUR-ANON-KEY');
   }
 
   /// The Unix-epoch second at which the [anonKey] JWT expires (the `exp`
-  /// claim). When it reaches zero seconds the anon key no longer authorizes
-  /// Supabase requests and the app would silently stop syncing.
-  ///
-  /// IMPORTANT: keep this in sync with the `exp` claim in [anonKey]. A wrong
-  /// value only affects the surface of the expiring-key warning, never the
-  /// actual auth (`expsInSeconds`) — that is signed into the JWT itself.
+  /// claim). Keep this value in sync with the anon key's `exp` claim when
+  /// providing it; a wrong value only affects the expiry warning surface.
   static const int anonKeyExpiresAtEpochSeconds = 2101185634;
 
   /// Seconds between now and [anonKeyExpiresAtEpochSeconds]. Negative when the
