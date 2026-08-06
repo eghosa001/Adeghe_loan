@@ -12,7 +12,7 @@ class AppDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Drawer(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       child: SafeArea(
         child: Column(
           children: [
@@ -167,7 +167,7 @@ class AppDrawer extends StatelessWidget {
                     style: GoogleFonts.plusJakartaSans(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.primaryColor,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -175,7 +175,7 @@ class AppDrawer extends StatelessWidget {
                     'v${AppConstants.appVersion} (Build ${AppConstants.appBuildNumber})',
                     style: GoogleFonts.plusJakartaSans(
                       fontSize: 12,
-                      color: Colors.grey.shade400,
+                      color: Theme.of(context).colorScheme.outline,
                     ),
                   ),
                 ],
@@ -205,12 +205,13 @@ class _MenuItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final isSelected = currentRoute == route ||
         (route != '/dashboard' && currentRoute.startsWith(route));
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Material(
         color: isSelected
-            ? AppTheme.primaryColor.withValues(alpha: 0.06)
+            ? colorScheme.primary.withValues(alpha: 0.12)
             : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
@@ -233,7 +234,9 @@ class _MenuItem extends StatelessWidget {
                 Icon(
                   icon,
                   size: 22,
-                  color: isSelected ? AppTheme.primaryColor : Colors.grey.shade600,
+                  color: isSelected
+                      ? colorScheme.primary
+                      : colorScheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 16),
                 Expanded(
@@ -243,8 +246,8 @@ class _MenuItem extends StatelessWidget {
                       fontSize: 15,
                       fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
                       color: isSelected
-                          ? AppTheme.primaryColor
-                          : Colors.grey.shade800,
+                          ? colorScheme.primary
+                          : colorScheme.onSurface,
                     ),
                   ),
                 ),

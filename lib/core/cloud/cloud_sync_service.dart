@@ -676,16 +676,27 @@ const Map<String, Map<String, Set<String>>> cloudEnumValues = {
   },
 };
 
+/// Text columns that are NOT NULL in the schema and must hold a non-empty
+/// string. A pulled row with an empty string in one of these would violate the
+/// local NOT NULL constraint (or, worse, feed an empty `fullName`/`name` into
+/// UI that indexes `[0]` or `DateTime.parse`, crashing the receiving device).
+/// Mirrors the `text not null` columns in `supabase_schema.sql`.
+const Map<String, Set<String>> cloudRequiredTextColumns = {
+  'customers': {'full_name', 'phone', 'date_registered'},
+  'customer_groups': {'name', 'created_at'},
+};
+
 /// Whether a pulled row may be written into the local database. Enforces the
 /// same typing the entity `fromMap` methods assume — numeric columns are
 /// finite non-negative numbers (NaN/±Infinity are `num` but would be stored
 /// as NULL or corrupt aggregates, and Infinity even passes the server
 /// `>= 0` CHECK), `installment_number` is an integer, enum columns hold known
-/// values — and requires a well-formed non-future `updated_at` (API-3
-/// LWW-poisoning guard) plus a sane primary key. Malformed or future-dated
-/// rows are skipped and counted as failures, so a hostile cloud row can
-/// neither poison the merge nor crash the app later, and a partial pull is
-/// never reported as clean.
+/// values, and NOT NULL text columns (`full_name`, `phone`, `name`, …) are
+/// non-empty strings — and requires a well-formed non-future `updated_at`
+/// (API-3 LWW-poisoning guard) plus a sane primary key. Malformed or
+/// future-dated rows are skipped and counted as failures, so a hostile cloud
+/// row can neither poison the merge nor crash the app later, and a partial
+/// pull is never reported as clean.
 bool isSaneCloudRow(String table, Map<String, Object?> row, String pk) {
   final id = row[pk];
   if (id == null) return false;
@@ -707,6 +718,14 @@ bool isSaneCloudRow(String table, Map<String, Object?> row, String pk) {
       final value = row[entry.key];
       if (value == null) continue;
       if (value is! String || !entry.value.contains(value)) return false;
+    }
+  }
+  final requiredText = cloudRequiredTextColumns[table];
+  if (requiredText != null) {
+    for (final column in requiredText) {
+      final value = row[column];
+      if (value == null) return false;
+      if (value is! String || value.trim().isEmpty) return false;
     }
   }
   return true;

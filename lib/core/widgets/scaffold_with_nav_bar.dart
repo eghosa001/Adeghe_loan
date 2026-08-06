@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import '../theme/app_theme.dart';
 
 class ScaffoldWithNavBar extends StatelessWidget {
   const ScaffoldWithNavBar({
@@ -34,36 +33,37 @@ class ScaffoldWithNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
       body: child,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) => _onTap(context, index),
-        backgroundColor: Colors.white,
-        indicatorColor: AppTheme.primaryColor.withValues(alpha: 0.1),
-        destinations: const [
+        backgroundColor: colorScheme.surface,
+        indicatorColor: colorScheme.primary.withValues(alpha: 0.12),
+        destinations: [
           NavigationDestination(
-            icon: Icon(Icons.dashboard_outlined),
+            icon: const Icon(Icons.dashboard_outlined),
             selectedIcon:
-                Icon(Icons.dashboard, color: AppTheme.primaryColor),
+                Icon(Icons.dashboard, color: colorScheme.primary),
             label: 'Dashboard',
           ),
           NavigationDestination(
-            icon: Icon(Icons.account_balance_wallet_outlined),
+            icon: const Icon(Icons.account_balance_wallet_outlined),
             selectedIcon: Icon(Icons.account_balance_wallet,
-                color: AppTheme.primaryColor),
+                color: colorScheme.primary),
             label: 'Collections',
           ),
           NavigationDestination(
-            icon: Icon(Icons.insert_chart_outlined),
+            icon: const Icon(Icons.insert_chart_outlined),
             selectedIcon:
-                Icon(Icons.insert_chart, color: AppTheme.primaryColor),
+                Icon(Icons.insert_chart, color: colorScheme.primary),
             label: 'Reports',
           ),
           NavigationDestination(
-            icon: Icon(Icons.savings_outlined),
+            icon: const Icon(Icons.savings_outlined),
             selectedIcon:
-                Icon(Icons.savings, color: AppTheme.primaryColor),
+                Icon(Icons.savings, color: colorScheme.primary),
             label: 'Savings',
           ),
         ],

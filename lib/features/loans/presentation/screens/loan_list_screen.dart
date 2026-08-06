@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/utils/currency_utils.dart';
 import '../../../../core/widgets/app_drawer.dart';
+import '../../../../core/widgets/debounced_text_field.dart';
 import '../../../../core/widgets/empty_state.dart';
 import '../../data/models/loan_entity.dart';
 import '../../../reports/services/excel_export_service.dart';
@@ -81,7 +82,7 @@ class LoanListScreen extends ConsumerWidget {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: TextField(
+            child: DebouncedTextField(
               onChanged: (value) => ref.read(loanSearchQueryProvider.notifier).state = value,
               decoration: const InputDecoration(
                 labelText: 'Search loans',

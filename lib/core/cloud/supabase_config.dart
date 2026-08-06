@@ -20,10 +20,11 @@ class SupabaseConfig {
 
   /// The Supabase public (anon) key (defaults committed; override via `--dart-define`).
   /// Example: `--dart-define=SUPABASE_ANON_KEY=eyJhbGci...`
+  // The anon key is a publishable client key, not a secret (see doc comment).
   static const String anonKey = String.fromEnvironment(
     'SUPABASE_ANON_KEY',
     defaultValue:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwcXlpbGFrcHNqbWV2cWdkcXVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2MDk2MzQsImV4cCI6MjEwMTE4NTYzNH0.-OcBMI2cLOyNQTu7w74cPOyzWZiekltDcexxiIsleak',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwcXlpbGFrcHNqbWV2cWdkcXVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2MDk2MzQsImV4cCI6MjEwMTE4NTYzNH0.-OcBMI2cLOyNQTu7w74cPOyzWZiekltDcexxiIsleak', // nosemgrep: generic.secrets.security.detected-jwt-token.detected-jwt-token
   );
 
   /// Storage bucket that holds the encrypted customer documents. Must be

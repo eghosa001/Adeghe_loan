@@ -83,8 +83,16 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
   }
 
   Future<void> _printStatement() async {
-    final statementService = await ref.read(statementServiceProvider.future);
-    await statementService.printCustomerStatement(widget.customer.id);
+    try {
+      final statementService = await ref.read(statementServiceProvider.future);
+      await statementService.printCustomerStatement(widget.customer.id);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to print statement: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _delete(BuildContext context) async {
@@ -277,7 +285,11 @@ class _ProfileTab extends ConsumerWidget {
                   ? null
                   : FileImage(File(customer.passportPath!)),
               child: customer.passportPath == null
-                  ? Text(customer.fullName[0].toUpperCase(),
+                  ? Text(
+                      (customer.fullName.isEmpty
+                              ? '?'
+                              : customer.fullName[0])
+                          .toUpperCase(),
                       style: Theme.of(context).textTheme.headlineMedium)
                   : null)),
       const SizedBox(height: 12),

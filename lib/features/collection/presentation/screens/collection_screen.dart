@@ -56,30 +56,49 @@ class CollectionScreen extends ConsumerWidget {
             icon: const Icon(Icons.download),
             tooltip: 'Export',
             onSelected: (value) async {
-              final result = await ref.read(collectionListProvider.future);
-              final currencySymbol =
-                  ref.read(currencySymbolProvider).valueOrNull ??
-                      CurrencyUtils.defaultSymbol;
-              if (value == 'excel') {
-                final file = await ExportManager.exportCollectionToExcel(
-                    result, selectedDate);
-                final opened = await OpenFilex.open(file.path);
+              try {
+                final result = await ref.read(collectionListProvider.future);
+                final currencySymbol =
+                    ref.read(currencySymbolProvider).valueOrNull ??
+                        CurrencyUtils.defaultSymbol;
+                if (value == 'excel') {
+                  final file = await ExportManager.exportCollectionToExcel(
+                      result, selectedDate);
+                  final opened = await OpenFilex.open(file.path);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                          content: Text(opened.type == ResultType.done
+                              ? 'Excel opened: ${p.basename(file.path)}'
+                              : 'Excel saved to downloads: ${p.basename(file.path)}')),
+                    );
+                  }
+                } else if (value == 'share_excel') {
+                  await ExportManager.shareCollectionExcel(
+                      result, selectedDate);
+                } else if (value == 'pdf') {
+                  final file =
+                      await ExportManager.exportCollectionToPdf(result,
+                          selectedDate,
+                          currencySymbol: currencySymbol);
+                  final opened = await OpenFilex.open(file.path);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                          content: Text(opened.type == ResultType.done
+                              ? 'PDF opened: ${p.basename(file.path)}'
+                              : 'PDF saved: ${p.basename(file.path)}')),
+                    );
+                  }
+                } else if (value == 'share') {
+                  await ExportManager.shareCollectionPdf(result, selectedDate,
+                      currencySymbol: currencySymbol);
+                }
+              } catch (e) {
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                        content: Text(opened.type == ResultType.done
-                            ? 'Excel opened: ${p.basename(file.path)}'
-                            : 'Excel saved to downloads: ${p.basename(file.path)}')),
-                  );
+                      SnackBar(content: Text('Export failed: $e')));
                 }
-              } else if (value == 'share_excel') {
-                await ExportManager.shareCollectionExcel(result, selectedDate);
-              } else if (value == 'pdf') {
-                await ExportManager.shareCollectionPdf(result, selectedDate,
-                    currencySymbol: currencySymbol);
-              } else if (value == 'share') {
-                await ExportManager.shareCollectionPdf(result, selectedDate,
-                    currencySymbol: currencySymbol);
               }
             },
             itemBuilder: (_) => [

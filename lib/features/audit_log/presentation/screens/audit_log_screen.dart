@@ -153,7 +153,7 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
                   leading: CircleAvatar(
                     radius: 16,
                     child: Text(
-                      log.action.characters.first,
+                      log.action.isEmpty ? '?' : log.action.characters.first,
                       style: const TextStyle(fontSize: 12),
                     ),
                   ),

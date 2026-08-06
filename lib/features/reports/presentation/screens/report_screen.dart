@@ -197,20 +197,27 @@ class ReportScreen extends ConsumerWidget {
         ref.read(currencySymbolProvider).valueOrNull ?? CurrencyUtils.defaultSymbol;
     final data =
         _buildExportData(summary, trends, periodLabel, currencySymbol);
-    if (value == 'pdf') {
-      final path = await ExportManager.saveReportPdf(data, profile: profile);
-      if (context.mounted && path != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('PDF saved to Documents')));
+    try {
+      if (value == 'pdf') {
+        final path = await ExportManager.saveReportPdf(data, profile: profile);
+        if (context.mounted && path != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('PDF saved to Documents')));
+        }
+      } else if (value == 'excel') {
+        final file = await ExportManager.exportReportToXlsx(data);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Excel exported: ${file.path.split(RegExp(r'[/\\]')).last}')));
+        }
+      } else if (value == 'print') {
+        await ExportManager.printReportPdf(data, profile: profile);
       }
-    } else if (value == 'excel') {
-      final file = await ExportManager.exportReportToXlsx(data);
+    } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Excel exported: ${file.path.split(RegExp(r'[/\\]')).last}')));
+            SnackBar(content: Text('Export failed: $e')));
       }
-    } else if (value == 'print') {
-      await ExportManager.printReportPdf(data, profile: profile);
     }
   }
 

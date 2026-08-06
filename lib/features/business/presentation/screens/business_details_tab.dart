@@ -57,6 +57,7 @@ class _BusinessDetailsTabState extends ConsumerState<BusinessDetailsTab> {
     final saved = await ref
         .read(storageServiceProvider)
         .saveDocument(File(picked.path), 'business_assets', 'logo.png');
+    if (!mounted) return;
     setState(() => _logoPath = saved);
   }
 
@@ -73,11 +74,10 @@ class _BusinessDetailsTabState extends ConsumerState<BusinessDetailsTab> {
       regNo: _regCtrl.text.trim(),
     );
     await ref.read(businessProfileProvider.notifier).saveProfile(profile);
+    if (!mounted) return;
     setState(() => _isEditing = false);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Business profile saved')));
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Business profile saved')));
   }
 
   Widget _buildDetailRow(String label, String value) {

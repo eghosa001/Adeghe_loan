@@ -89,14 +89,13 @@ class _FinancialSettingsTabState extends ConsumerState<FinancialSettingsTab> {
     final repo = await ref.read(businessRepoProvider.future);
     await repo.saveSettings(map);
     ref.invalidate(financialSettingsProvider);
+    if (!mounted) return;
     setState(() {
       _isEditing = false;
       _hasPrefilled = false;
     });
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Financial defaults saved')));
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Financial defaults saved')));
   }
 
   Widget _buildDetailRow(String label, String value) {

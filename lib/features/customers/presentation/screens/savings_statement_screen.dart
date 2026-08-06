@@ -83,8 +83,16 @@ class _SavingsStatementScreenState extends ConsumerState<SavingsStatementScreen>
   }
 
   void _printStatement() async {
-    final service = await ref.read(statementServiceProvider.future);
-    await service.printCustomerStatement(_selectedCustomerId!);
+    try {
+      final service = await ref.read(statementServiceProvider.future);
+      await service.printCustomerStatement(_selectedCustomerId!);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to print statement: $e')),
+        );
+      }
+    }
   }
 }
 

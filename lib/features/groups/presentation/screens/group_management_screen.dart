@@ -100,7 +100,9 @@ class _GroupManagementScreenState extends ConsumerState<GroupManagementScreen> {
                       final group = filtered[index];
                       return ListTile(
                         leading: CircleAvatar(
-                          child: Text(group.name[0].toUpperCase()),
+                          child: Text(
+                              (group.name.isEmpty ? '?' : group.name[0])
+                                  .toUpperCase()),
                         ),
                         title: Text(group.name),
                         subtitle: group.description != null

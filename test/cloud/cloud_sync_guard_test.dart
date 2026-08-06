@@ -206,6 +206,64 @@ void main() {
         ..['status'] = null;
       expect(isSaneCloudRow('loans', row, 'id'), isTrue);
     });
+
+    test('rejects a customers row with an empty full_name (empty-name crash)', () {
+      final row = {
+        'id': 'c1',
+        'full_name': '',
+        'phone': '08000000000',
+        'date_registered': '2026-01-01',
+        'status': 'active',
+        'updated_at': '2026-08-04T10:00:00.000Z',
+      };
+      expect(isSaneCloudRow('customers', row, 'id'), isFalse);
+    });
+
+    test('rejects a customers row with a blank-only full_name', () {
+      final row = {
+        'id': 'c1',
+        'full_name': '   ',
+        'phone': '08000000000',
+        'date_registered': '2026-01-01',
+        'status': 'active',
+        'updated_at': '2026-08-04T10:00:00.000Z',
+      };
+      expect(isSaneCloudRow('customers', row, 'id'), isFalse);
+    });
+
+    test('rejects a customer_groups row with an empty name', () {
+      final row = {
+        'id': 'g1',
+        'name': '',
+        'created_at': '2026-01-01',
+        'updated_at': '2026-08-04T10:00:00.000Z',
+      };
+      expect(isSaneCloudRow('customer_groups', row, 'id'), isFalse);
+    });
+
+    test('rejects a customers row missing a required text column', () {
+      final row = {
+        'id': 'c1',
+        'full_name': 'Ada',
+        // 'date_registered' missing — NOT NULL in the schema
+        'phone': '08000000000',
+        'status': 'active',
+        'updated_at': '2026-08-04T10:00:00.000Z',
+      };
+      expect(isSaneCloudRow('customers', row, 'id'), isFalse);
+    });
+
+    test('accepts a well-formed customers row with non-empty required text', () {
+      final row = {
+        'id': 'c1',
+        'full_name': 'Ada',
+        'phone': '08000000000',
+        'date_registered': '2026-01-01',
+        'status': 'active',
+        'updated_at': '2026-08-04T10:00:00.000Z',
+      };
+      expect(isSaneCloudRow('customers', row, 'id'), isTrue);
+    });
   });
 }
 

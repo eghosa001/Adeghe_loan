@@ -461,21 +461,6 @@ class ExportManager {
     }
   }
 
-  static Future<void> shareReportXlsx(ReportExportData data) async {
-    final file = await exportReportToXlsx(data);
-    await SharePlus.instance.share(
-      ShareParams(
-        files: [
-          XFile(file.path,
-              mimeType:
-                  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        ],
-        text: data.reportName,
-        subject: data.reportName,
-      ),
-    );
-  }
-
   // ── Collection PDF/Excel (preserved public API for the Collection screen) ──
 
   static Future<Uint8List> _buildCollectionPdfBytes(

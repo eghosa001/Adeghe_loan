@@ -20,10 +20,17 @@ class CollectionStatementScreen extends ConsumerStatefulWidget {
 class _CollectionStatementScreenState extends ConsumerState<CollectionStatementScreen> {
   DateTime _startDate = DateTime.now().subtract(const Duration(days: 30));
   DateTime _endDate = DateTime.now();
+  late Future<List<CollectionRow>> _collectionsFuture;
 
   String get _currencySymbol =>
       ref.read(currencySymbolProvider).valueOrNull ??
       CurrencyUtils.defaultSymbol;
+
+  @override
+  void initState() {
+    super.initState();
+    _collectionsFuture = _fetchCollections();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -70,6 +77,7 @@ class _CollectionStatementScreenState extends ConsumerState<CollectionStatementS
                 setState(() {
                   _startDate = pickedStart;
                   if (pickedEnd != null) _endDate = pickedEnd;
+                  _collectionsFuture = _fetchCollections();
                 });
               }
             },
@@ -87,7 +95,7 @@ class _CollectionStatementScreenState extends ConsumerState<CollectionStatementS
   Widget _buildCollectionList() {
     // Use the existing collection provider with date range mode
     return FutureBuilder(
-      future: _fetchCollections(),
+      future: _collectionsFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -173,40 +181,56 @@ class _CollectionStatementScreenState extends ConsumerState<CollectionStatementS
   }
 
   Future<void> _printCollectionSheet() async {
-    final rows = await _fetchCollections();
-    if (!mounted) return;
-    if (rows.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No collections to print')),
-      );
-      return;
+    try {
+      final rows = await _fetchCollections();
+      if (!mounted) return;
+      if (rows.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No collections to print')),
+        );
+        return;
+      }
+      final file = await ExportManager.exportCollectionToPdf(
+          rows, _startDate,
+          currencySymbol: _currencySymbol);
+      if (!mounted) return;
+      await Printing.layoutPdf(onLayout: (format) async => file.readAsBytesSync());
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to print: $e')),
+        );
+      }
     }
-    final file = await ExportManager.exportCollectionToPdf(
-        rows, _startDate,
-        currencySymbol: _currencySymbol);
-    if (!mounted) return;
-    await Printing.layoutPdf(onLayout: (format) async => file.readAsBytesSync());
   }
 
   Future<void> _shareCollectionSheet() async {
-    final rows = await _fetchCollections();
-    if (!mounted) return;
-    if (rows.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No collections to share')),
+    try {
+      final rows = await _fetchCollections();
+      if (!mounted) return;
+      if (rows.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No collections to share')),
+        );
+        return;
+      }
+      final file = await ExportManager.exportCollectionToPdf(
+          rows, _startDate,
+          currencySymbol: _currencySymbol);
+      if (!mounted) return;
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path, mimeType: 'application/pdf')],
+          subject: 'Collection Statement ${AppDateUtils.formatDate(_startDate)} - ${AppDateUtils.formatDate(_endDate)}',
+        ),
       );
-      return;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to share: $e')),
+        );
+      }
     }
-    final file = await ExportManager.exportCollectionToPdf(
-        rows, _startDate,
-        currencySymbol: _currencySymbol);
-    if (!mounted) return;
-    await SharePlus.instance.share(
-      ShareParams(
-        files: [XFile(file.path, mimeType: 'application/pdf')],
-        subject: 'Collection Statement ${AppDateUtils.formatDate(_startDate)} - ${AppDateUtils.formatDate(_endDate)}',
-      ),
-    );
   }
 }
 

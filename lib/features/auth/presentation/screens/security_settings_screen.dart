@@ -25,6 +25,7 @@ class _SecuritySettingsScreenState
 
   Future<void> _load() async {
     _biometricEnabled = await _storage.isBiometricEnabled();
+    if (!mounted) return;
     setState(() {});
   }
 
@@ -63,6 +64,7 @@ class _SecuritySettingsScreenState
       if (confirmed != true) return;
     }
     await _storage.setBiometricEnabled(val);
+    if (!mounted) return;
     setState(() => _biometricEnabled = val);
   }
 

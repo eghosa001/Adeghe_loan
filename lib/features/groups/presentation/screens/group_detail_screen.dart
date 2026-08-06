@@ -131,6 +131,7 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
     final repo = await ref.read(groupRepositoryProvider.future);
     await repo.moveMembers(_selectedIds.toList(), target.id);
     _invalidate();
+    if (!mounted) return;
     setState(() {
       _selectedIds.clear();
       _selectionMode = false;
@@ -301,7 +302,9 @@ class _GroupInfoCard extends StatelessWidget {
               children: [
                 CircleAvatar(
                   backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                  child: Text(group!.name[0].toUpperCase(),
+                  child: Text(
+                      (group!.name.isEmpty ? '?' : group!.name[0])
+                          .toUpperCase(),
                       style: TextStyle(
                           color: Theme.of(context).colorScheme.onPrimaryContainer)),
                 ),
