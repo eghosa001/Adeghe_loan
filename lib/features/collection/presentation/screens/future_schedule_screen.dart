@@ -6,7 +6,9 @@ import 'package:uuid/uuid.dart';
 import '../../../../core/utils/currency_utils.dart';
 import '../../../../core/utils/date_utils.dart';
 import '../../../business/presentation/providers/business_providers.dart';
+import '../../../customers/presentation/providers/customer_providers.dart';
 import '../../../dashboard/presentation/providers/dashboard_provider.dart';
+import '../../../reports/presentation/providers/report_provider.dart';
 import '../../../savings/presentation/providers/savings_providers.dart';
 import '../../../loans/presentation/providers/loan_providers.dart';
 import '../../../payments/presentation/providers/payment_providers.dart';
@@ -225,11 +227,19 @@ class FutureScheduleScreen extends ConsumerWidget {
         clientRequestId: const Uuid().v4(),
       );
       ref.invalidate(futureScheduleProvider);
+      ref.invalidate(collectionListProvider);
       ref.invalidate(dashboardDataProvider);
       ref.invalidate(savingsBalanceProvider(row.customerId));
+      ref.invalidate(savingsTransactionsProvider(row.customerId));
+      ref.invalidate(allSavingsAccountsProvider);
+      ref.invalidate(allAccountsWithNamesProvider);
+      ref.invalidate(customerProvider(row.customerId));
+      ref.invalidate(customerListProvider);
+      ref.invalidate(reportSummaryProvider);
       ref.invalidate(loanDetailsProvider(row.loanId));
       ref.invalidate(loanScheduleProvider(row.loanId));
       ref.invalidate(paymentsForLoanProvider(row.loanId));
+      ref.invalidate(activeLoansForCustomerProvider(row.customerId));
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

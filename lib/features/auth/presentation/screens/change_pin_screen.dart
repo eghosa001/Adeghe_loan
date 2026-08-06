@@ -50,10 +50,22 @@ class _ChangePinScreenState extends ConsumerState<ChangePinScreen> {
       final lockout = PinLockoutService(_storage);
       final triggered = await lockout.registerFailedAttempt();
       if (!mounted) return;
-      setState(() => _msg = triggered
-          ? 'Too many failed attempts. Try again in '
-              '${lockout.lockoutDuration.inMinutes} min.'
-          : 'Current PIN incorrect');
+      if (triggered) {
+        final permanent = await lockout.isPermanentlyLocked();
+        if (!mounted) return;
+        if (permanent) {
+          setState(() => _msg = 'Too many failed attempts. This device is '
+              'locked. Use "Forgot PIN" and your recovery password to reset it.');
+          return;
+        }
+        final remaining = await lockout.remainingLockout();
+        if (!mounted) return;
+        final minutes = (remaining?.inMinutes ?? 0).clamp(1, 120);
+        setState(
+            () => _msg = 'Too many failed attempts. Try again in $minutes min.');
+      } else {
+        setState(() => _msg = 'Current PIN incorrect');
+      }
       return;
     }
     await PinLockoutService(_storage).reset();

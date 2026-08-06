@@ -71,6 +71,7 @@ create table if not exists app_owner (
   id text primary key
 );
 alter table app_owner enable row level security;
+drop policy if exists "app_owner self" on app_owner;
 create policy "app_owner self" on app_owner
   for select to authenticated using (auth.uid() = id);
 grant select on app_owner to authenticated;
@@ -185,6 +186,20 @@ end;
 $$;
 grant execute on function remove_owner(text) to authenticated;
 
+-- Stale/legacy functions from earlier schema versions. They are not used by the
+-- app or referenced anywhere in the current codebase, and (SECURITY DEFINER,
+-- executable by ANY authenticated user) they are undocumented destructive/extra
+-- surfaces, so drop them for parity and hygiene. The old `remove_owner(uuid)`
+-- overload (pre-uuid id type) is dropped the same way `claim_owner(text)` above
+-- was, so stale clients can never call it.
+--
+-- NOTE: `rls_auto_enable()` must NOT be dropped — it is wired to Supabase's
+-- platform-managed `ensure_rls` event trigger and is a dependency of the hosting
+-- platform, not project code.
+drop function if exists remove_owner(uuid);
+drop function if exists purge_old_audit_logs();
+drop function if exists purge_old_sync_tombstones();
+
 -- ── Business profile ────────────────────────────────────────────────────────
 create table if not exists business_profile (
   id text primary key,
@@ -198,6 +213,7 @@ create table if not exists business_profile (
   updated_at text
 );
 alter table business_profile enable row level security;
+drop policy if exists "business_profile all" on business_profile;
 create policy "business_profile all" on business_profile
   for all to authenticated
   using (auth.uid() in (select id from app_owner))
@@ -212,6 +228,7 @@ create table if not exists customer_groups (
   updated_at text
 );
 alter table customer_groups enable row level security;
+drop policy if exists "customer_groups all" on customer_groups;
 create policy "customer_groups all" on customer_groups
   for all to authenticated
   using (auth.uid() in (select id from app_owner))
@@ -265,6 +282,7 @@ create index if not exists idx_customers_group on customers(group_id);
 alter table customers drop column if exists nin;
 alter table customers drop column if exists bvn;
 alter table customers enable row level security;
+drop policy if exists "customers all" on customers;
 create policy "customers all" on customers
   for all to authenticated
   using (auth.uid() in (select id from app_owner))
@@ -302,6 +320,7 @@ create index if not exists idx_loans_customer on loans(customer_id);
 create index if not exists idx_loans_type_status on loans(loan_type, status);
 create index if not exists idx_loans_type_date on loans(loan_type, loan_date);
 alter table loans enable row level security;
+drop policy if exists "loans all" on loans;
 create policy "loans all" on loans
   for all to authenticated
   using (auth.uid() in (select id from app_owner))
@@ -320,6 +339,7 @@ create table if not exists repayment_schedule (
 );
 create index if not exists idx_repayment_schedule_loan on repayment_schedule(loan_id);
 alter table repayment_schedule enable row level security;
+drop policy if exists "repayment_schedule all" on repayment_schedule;
 create policy "repayment_schedule all" on repayment_schedule
   for all to authenticated
   using (auth.uid() in (select id from app_owner))
@@ -346,6 +366,7 @@ create table if not exists payments (
 create index if not exists idx_payments_loan on payments(loan_id);
 create index if not exists idx_payments_loan_date on payments(loan_id, payment_date);
 alter table payments enable row level security;
+drop policy if exists "payments all" on payments;
 create policy "payments all" on payments
   for all to authenticated
   using (auth.uid() in (select id from app_owner))
@@ -360,6 +381,7 @@ create table if not exists savings_accounts (
   updated_at text
 );
 alter table savings_accounts enable row level security;
+drop policy if exists "savings_accounts all" on savings_accounts;
 create policy "savings_accounts all" on savings_accounts
   for all to authenticated
   using (auth.uid() in (select id from app_owner))
@@ -378,6 +400,7 @@ create table if not exists savings_transactions (
 );
 create index if not exists idx_savings_transactions_account on savings_transactions(savings_account_id);
 alter table savings_transactions enable row level security;
+drop policy if exists "savings_transactions all" on savings_transactions;
 create policy "savings_transactions all" on savings_transactions
   for all to authenticated
   using (auth.uid() in (select id from app_owner))
@@ -397,6 +420,7 @@ create table if not exists documents (
 );
 create index if not exists idx_documents_customer on documents(customer_id);
 alter table documents enable row level security;
+drop policy if exists "documents all" on documents;
 create policy "documents all" on documents
   for all to authenticated
   using (auth.uid() in (select id from app_owner))
@@ -412,6 +436,7 @@ create table if not exists holidays (
   updated_at text
 );
 alter table holidays enable row level security;
+drop policy if exists "holidays all" on holidays;
 create policy "holidays all" on holidays
   for all to authenticated
   using (auth.uid() in (select id from app_owner))
@@ -428,6 +453,7 @@ create table if not exists audit_logs (
 );
 create index if not exists idx_audit_logs_timestamp on audit_logs(timestamp);
 alter table audit_logs enable row level security;
+drop policy if exists "audit_logs all" on audit_logs;
 create policy "audit_logs all" on audit_logs
   for all to authenticated
   using (auth.uid() in (select id from app_owner))
@@ -440,6 +466,7 @@ create table if not exists settings (
   updated_at text
 );
 alter table settings enable row level security;
+drop policy if exists "settings all" on settings;
 create policy "settings all" on settings
   for all to authenticated
   using (auth.uid() in (select id from app_owner))
@@ -454,6 +481,7 @@ create table if not exists sync_tombstones (
   primary key (deleted_table, deleted_row_id)
 );
 alter table sync_tombstones enable row level security;
+drop policy if exists "sync_tombstones all" on sync_tombstones;
 create policy "sync_tombstones all" on sync_tombstones
   for all to authenticated
   using (auth.uid() in (select id from app_owner))
@@ -482,6 +510,7 @@ on conflict (id) do nothing;
 -- access either way.
 update storage.buckets set public = false where id = 'documents' and public = true;
 
+drop policy if exists "documents storage all" on storage.objects;
 create policy "documents storage all" on storage.objects
   for all to authenticated
   using (bucket_id = 'documents' and auth.uid() in (select id from app_owner))
@@ -490,7 +519,23 @@ create policy "documents storage all" on storage.objects
 -- Server-side size/path enforcement for the documents bucket (defense-in-depth
 -- on top of the Dart-side checks). Encrypted files are at most the 20 MB source
 -- limit plus ~32 bytes of LTD1 header + GCM IV/tag; 4 KB of margin is allowed.
-create or replace function storage.enforce_document_object_rules()
+--
+-- PLATFORM NOTE (2026-08-04): Supabase no longer runs `postgres` as a superuser,
+-- and the role is NOT allowed to create functions inside the `storage` schema
+-- (a Supabase-managed schema owned by `supabase_storage_admin`). `create function
+-- storage.enforce_document_object_rules()` fails with `permission denied for
+-- schema storage` in the SQL Editor AND the Management API. Creating RLS policies
+-- and triggers ON storage.objects is still permitted, so the trigger function
+-- lives in the `public` schema instead and the trigger references it there.
+-- This is functionally identical: the trigger fires on storage.objects exactly
+-- the same way regardless of which schema the function is defined in.
+--
+-- `drop function if exists storage.enforce_document_object_rules` is kept for
+-- upgrade paths that ran an older copy of this script on a project where the
+-- storage-schema function could still be created; `IF EXISTS` is a safe no-op
+-- when it is absent.
+drop function if exists storage.enforce_document_object_rules();
+create or replace function public.enforce_document_object_rules()
 returns trigger
 language plpgsql
 set search_path = public
@@ -510,7 +555,50 @@ $$;
 drop trigger if exists trg_document_object_rules on storage.objects;
 create trigger trg_document_object_rules
   before insert or update on storage.objects
-  for each row execute function storage.enforce_document_object_rules();
+  for each row execute function public.enforce_document_object_rules();
+
+-- ── Upgrade existing deployments (mirror of migrations.dart, SAFE TO RE-RUN) ─
+-- The CREATE TABLE statements above include the FINAL schema, so a fresh run is
+-- complete. For a deployment created by an older copy of this file these ALTERs
+-- add any columns the migrations introduced (v3/v5/v7/v9/v10/v11/v12/v15/v17/v18),
+-- matching the columns/orders in migrations.dart. `IF NOT EXISTS` keeps the whole
+-- script idempotent, so re-running it on an already-current project is a no-op.
+alter table customers add column if not exists group_id text;
+alter table customers add column if not exists guarantor_1_phone text;
+alter table customers add column if not exists guarantor_1_address text;
+alter table customers add column if not exists guarantor_2_phone text;
+alter table customers add column if not exists guarantor_2_address text;
+alter table customers add column if not exists updated_at text;
+
+alter table loans add column if not exists duration_weeks integer;
+alter table loans add column if not exists weekly_payment real;
+alter table loans add column if not exists custom_collection_amount real;
+alter table loans add column if not exists updated_at text;
+
+alter table payments add column if not exists status text not null default 'completed';
+alter table payments add column if not exists type text default 'partial';
+alter table payments add column if not exists prior_loan_status text;
+alter table payments add column if not exists client_request_id text;
+alter table payments add column if not exists updated_at text;
+
+alter table documents add column if not exists original_name text not null default 'Document';
+alter table documents add column if not exists mime_type text not null default 'application/octet-stream';
+alter table documents add column if not exists updated_at text;
+
+alter table repayment_schedule add column if not exists updated_at text;
+alter table savings_accounts add column if not exists updated_at text;
+alter table savings_transactions add column if not exists updated_at text;
+alter table business_profile add column if not exists updated_at text;
+alter table customer_groups add column if not exists updated_at text;
+alter table holidays add column if not exists updated_at text;
+alter table audit_logs add column if not exists updated_at text;
+alter table settings add column if not exists updated_at text;
+
+-- Money-rule join index: "total collected / paid" reads each payment's linked
+-- savings overpayment via reference_loan_payment_id (LEFT JOIN in
+-- payment_repository / report_repository). Matches the local index style.
+create index if not exists idx_savings_transactions_loan_ref
+  on savings_transactions(reference_loan_payment_id);
 
 -- ── Data integrity checks (API-4, 2026-08-04) ────────────────────────────────
 -- The app enforces the same typing at the pull boundary (`isSaneCloudRow` in

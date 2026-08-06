@@ -73,7 +73,7 @@ class _PinSetupScreenState extends ConsumerState<PinSetupScreen> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'At least 12 characters, with letters and numbers. '
+              'At least 16 characters, with letters and numbers. '
               'It is the only way to recover if you forget your PIN.',
               style: TextStyle(fontSize: 12),
             ),

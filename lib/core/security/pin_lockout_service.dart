@@ -59,6 +59,14 @@ class PinLockoutService {
     return remaining;
   }
 
+  /// Attempts left before the next lockout. Only meaningful when not locked
+  /// out (the counter is cleared when a lockout starts).
+  Future<int> remainingAttempts() async {
+    if (await isPermanentlyLocked()) return 0;
+    final attempts = await _failedAttempts();
+    return max(0, maxAttempts - attempts);
+  }
+
   /// Records a failed attempt. Returns true when this attempt starts (or
   /// continues) a lockout.
   Future<bool> registerFailedAttempt() async {

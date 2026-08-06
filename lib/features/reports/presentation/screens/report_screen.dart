@@ -1,114 +1,38 @@
-import 'dart:io' show Platform;
-
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:loantrack/core/widgets/app_drawer.dart';
 
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_utils.dart';
 import '../../../../core/utils/date_utils.dart';
 import '../../../business/presentation/providers/business_providers.dart';
+import '../../data/models/report_models.dart';
 import '../../data/models/report_summary.dart';
-import '../providers/report_provider.dart';
 import '../../services/export_manager.dart';
-import 'analytics_tab.dart';
+import '../providers/report_provider.dart';
+import '../widgets/report_ui.dart';
 
-class ReportScreen extends ConsumerStatefulWidget {
+/// Reports dashboard: 18 financial summary cards + 4 filter-aware trend
+/// charts + navigation into the seven per-report screens.
+class ReportScreen extends ConsumerWidget {
   const ReportScreen({super.key});
 
   @override
-  ConsumerState<ReportScreen> createState() => _ReportScreenState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final preset = ref.watch(reportPeriodPresetProvider);
+    final start = ref.watch(reportStartDateProvider);
+    final end = ref.watch(reportEndDateProvider);
+    final loanType = ref.watch(reportLoanTypeFilterProvider);
 
-class _ReportScreenState extends ConsumerState<ReportScreen>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabController;
+    final range = ReportDateRange(start: start, end: end, loanType: loanType);
+    final summaryAsync = ref.watch(reportSummaryProvider(range));
+    final trendsAsync = ref.watch(dashboardTrendsProvider(range));
+    final currencySymbol =
+        ref.watch(currencySymbolProvider).valueOrNull ?? CurrencyUtils.defaultSymbol;
 
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 5, vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
-
-  String _periodLabel(DateTime startDate, DateTime endDate) =>
-      '${AppDateUtils.formatDate(startDate)} to ${AppDateUtils.formatDate(endDate)}';
-
-  ({DateTime start, DateTime end}) _presetRange(ReportPeriodPreset preset) {
-    final today = AppDateUtils.stripTime(DateTime.now());
-    switch (preset) {
-      case ReportPeriodPreset.today:
-        return (start: today, end: today);
-      case ReportPeriodPreset.yesterday:
-        final day = today.subtract(const Duration(days: 1));
-        return (start: day, end: day);
-      case ReportPeriodPreset.thisWeek:
-        return (start: AppDateUtils.startOfWeek(today), end: today);
-      case ReportPeriodPreset.lastWeek:
-        final weekStart = AppDateUtils.startOfWeek(today);
-        return (
-          start: weekStart.subtract(const Duration(days: 7)),
-          end: weekStart.subtract(const Duration(days: 1)),
-        );
-      case ReportPeriodPreset.thisMonth:
-        return (start: DateTime(today.year, today.month, 1), end: today);
-      case ReportPeriodPreset.lastMonth:
-        return (
-          start: DateTime(today.year, today.month - 1, 1),
-          end: DateTime(today.year, today.month, 0),
-        );
-      case ReportPeriodPreset.last30Days:
-        return (
-          start: today.subtract(const Duration(days: 29)),
-          end: today,
-        );
-    }
-  }
-
-  void _selectPreset(ReportPeriodPreset preset) {
-    final range = _presetRange(preset);
-    ref.read(reportStartDateProvider.notifier).state = range.start;
-    ref.read(reportEndDateProvider.notifier).state = range.end;
-    ref.read(reportPeriodPresetProvider.notifier).state = preset;
-  }
-
-  Future<void> _pickCustomRange() async {
-    final now = DateTime.now();
-    final currentStart = ref.read(reportStartDateProvider);
-    final currentEnd = ref.read(reportEndDateProvider);
-    final pickedStart = await showDatePicker(
-      context: context,
-      initialDate: currentStart,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(now.year + 5, now.month, now.day),
-    );
-    if (pickedStart == null) return;
-    if (!mounted) return;
-    final pickedEnd = await showDatePicker(
-      context: context,
-      initialDate: currentEnd.isAfter(pickedStart) ? currentEnd : pickedStart,
-      firstDate: pickedStart,
-      lastDate: DateTime(now.year + 5, now.month, now.day),
-    );
-    if (pickedEnd == null) return;
-    ref.read(reportStartDateProvider.notifier).state = pickedStart;
-    ref.read(reportEndDateProvider.notifier).state = pickedEnd;
-    ref.read(reportPeriodPresetProvider.notifier).state = null;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final startDate = ref.watch(reportStartDateProvider);
-    final endDate = ref.watch(reportEndDateProvider);
-    final selectedPreset = ref.watch(reportPeriodPresetProvider);
-    final selectedLoanType = ref.watch(reportLoanTypeFilterProvider);
-    final dateRange = ReportDateRange(start: startDate, end: endDate, loanType: selectedLoanType);
-    final reportAsync = ref.watch(reportSummaryProvider(dateRange));
+    final periodLabel = _periodLabel(preset, start, end);
 
     return Scaffold(
       appBar: AppBar(
@@ -119,991 +43,472 @@ class _ReportScreenState extends ConsumerState<ReportScreen>
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Overview', icon: Icon(Icons.dashboard_outlined)),
-            Tab(text: 'Daily', icon: Icon(Icons.today)),
-            Tab(text: 'Weekly', icon: Icon(Icons.date_range)),
-            Tab(text: 'Overdue', icon: Icon(Icons.warning_amber_outlined)),
-            Tab(text: 'Analytics', icon: Icon(Icons.analytics_outlined)),
-          ],
-        ),
         actions: [
           PopupMenuButton<String>(
-            icon: const Icon(Icons.file_download),
-            onSelected: (value) async {
-              final summary = await ref.read(reportSummaryProvider(dateRange).future);
-              final range =
-                  '${AppDateUtils.formatDate(startDate)} - ${AppDateUtils.formatDate(endDate)}';
-              final currencySymbol =
-                  ref.read(currencySymbolProvider).valueOrNull ??
-                      CurrencyUtils.defaultSymbol;
-              if (value == 'csv') {
-                final file = await ExportManager.exportReportToCsv(
-                    summary, 'Report_$range');
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                        content:
-                            Text('CSV exported: ${file.path.split(Platform.pathSeparator).last}')),
-                  );
-                }
-              } else if (value == 'pdf') {
-                final path =
-                    await ExportManager.saveReportPdf(summary, 'Report_$range',
-                        currencySymbol: currencySymbol);
-                if (context.mounted && path != null) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('PDF saved to Documents')),
-                  );
-                }
-              } else if (value == 'share_pdf') {
-                await ExportManager.shareReportPdf(summary, 'Report_$range',
-                    currencySymbol: currencySymbol);
-              } else if (value == 'share_excel') {
-                await ExportManager.shareReportXlsx(summary, 'Report_$range');
-              }
-            },
-            itemBuilder: (_) => [
-              const PopupMenuItem(value: 'csv', child: Text('Export CSV')),
-              const PopupMenuItem(value: 'pdf', child: Text('Save PDF')),
-              const PopupMenuItem(value: 'share_pdf', child: Text('Share PDF')),
-              const PopupMenuItem(value: 'share_excel', child: Text('Share Excel')),
+            icon: const Icon(Icons.download),
+            tooltip: 'Export',
+            onSelected: (value) => _handleExport(
+                context, ref, value, summaryAsync, trendsAsync, periodLabel),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'pdf', child: Text('Save PDF')),
+              PopupMenuItem(value: 'excel', child: Text('Export Excel')),
+              PopupMenuItem(value: 'print', child: Text('Print')),
             ],
           ),
         ],
       ),
       drawer: const AppDrawer(currentRoute: '/reports'),
-      body: Column(
-        children: [
-          // Report period selector
-          Container(
-            width: double.infinity,
-            color: Theme.of(context).colorScheme.surface,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: Row(
-                    children: [
-                      for (final preset in ReportPeriodPreset.values) ...[
-                        ChoiceChip(
-                          label: Text(preset.label),
-                          selected: selectedPreset == preset,
-                          onSelected: (_) => _selectPreset(preset),
-                        ),
-                        const SizedBox(width: 8),
-                      ],
-                      ChoiceChip(
-                        avatar: const Icon(Icons.calendar_month_rounded, size: 18),
-                        label: const Text('Custom'),
-                        selected: selectedPreset == null,
-                        onSelected: (_) => _pickCustomRange(),
-                      ),
-                    ],
-                  ),
-                ),
-                InkWell(
-                  onTap: _pickCustomRange,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                    child: Row(
-                      children: [
-                        Icon(Icons.date_range,
-                            size: 16, color: Theme.of(context).colorScheme.primary),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Report Period: ${_periodLabel(startDate, endDate)}',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: Theme.of(context).colorScheme.primary,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                          ),
-                        ),
-                        Icon(Icons.edit_calendar_outlined,
-                            size: 16, color: Theme.of(context).colorScheme.primary),
-                      ],
-                    ),
-                  ),
-                ),
-                const Divider(height: 1),
-              ],
+      body: RefreshIndicator(
+        onRefresh: () async {
+          // Invalidate only the current range so switching periods or pulling
+          // to refresh does not re-run every cached date range's queries.
+          ref.invalidate(reportSummaryProvider(range));
+          ref.invalidate(dashboardTrendsProvider(range));
+        },
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            ReportPeriodSelector(
+              onChanged: (period) {
+                ref.read(reportPeriodPresetProvider.notifier).state =
+                    _presetFromLabel(period.label);
+                ref.read(reportStartDateProvider.notifier).state = period.start;
+                ref.read(reportEndDateProvider.notifier).state = period.end;
+              },
             ),
-          ),
-          const SizedBox(height: 6),
-          Expanded(
-            child: reportAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('Error: $e')),
-              data: (summary) => TabBarView(
-                controller: _tabController,
+            const SizedBox(height: 12),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Loan Type',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: Theme.of(context).colorScheme.onSurface),
+                    ),
+                    const SizedBox(height: 8),
+                    SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment(value: '', label: Text('All')),
+                        ButtonSegment(value: 'daily', label: Text('Daily')),
+                        ButtonSegment(value: 'weekly', label: Text('Weekly')),
+                      ],
+                      selected: {loanType ?? ''},
+                      onSelectionChanged: (selection) {
+                        ref
+                            .read(reportLoanTypeFilterProvider.notifier)
+                            .state = selection.first.isEmpty
+                            ? null
+                            : selection.first;
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text('Financial Summary',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
+            const SizedBox(height: 10),
+            summaryAsync.when(
+              loading: () => const Padding(
+                padding: EdgeInsets.all(48),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+              error: (e, _) => Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text('Error: $e'),
+                ),
+              ),
+              data: (summary) => _SummaryGrid(
+                summary: summary,
+                currencySymbol: currencySymbol,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text('Report Screens',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
+            const SizedBox(height: 10),
+            const _ReportNavGrid(),
+            const SizedBox(height: 20),
+            Text('Trends',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
+            const SizedBox(height: 10),
+            trendsAsync.when(
+              loading: () => const Padding(
+                padding: EdgeInsets.all(48),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+              error: (e, _) => Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text('Error: $e'),
+                ),
+              ),
+              data: (trends) => _TrendsSection(
+                trends: trends,
+                currencySymbol: currencySymbol,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _periodLabel(ReportPeriodPreset? preset, DateTime start, DateTime end) {
+    if (preset != null) return preset.label;
+    return '${AppDateUtils.formatDate(start)} - ${AppDateUtils.formatDate(end)}';
+  }
+
+  ReportPeriodPreset? _presetFromLabel(String label) {
+    for (final preset in ReportPeriodPreset.values) {
+      if (preset.label == label) return preset;
+    }
+    return null;
+  }
+
+  Future<void> _handleExport(
+    BuildContext context,
+    WidgetRef ref,
+    String value,
+    AsyncValue<ReportSummary> summaryAsync,
+    AsyncValue<DashboardTrends> trendsAsync,
+    String periodLabel,
+  ) async {
+    final summary = summaryAsync.valueOrNull;
+    final trends = trendsAsync.valueOrNull;
+    if (summary == null || trends == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Report data not ready yet.')));
+      }
+      return;
+    }
+    final profile = ref.read(businessProfileProvider).valueOrNull;
+    final currencySymbol =
+        ref.read(currencySymbolProvider).valueOrNull ?? CurrencyUtils.defaultSymbol;
+    final data =
+        _buildExportData(summary, trends, periodLabel, currencySymbol);
+    if (value == 'pdf') {
+      final path = await ExportManager.saveReportPdf(data, profile: profile);
+      if (context.mounted && path != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('PDF saved to Documents')));
+      }
+    } else if (value == 'excel') {
+      final file = await ExportManager.exportReportToXlsx(data);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Excel exported: ${file.path.split(RegExp(r'[/\\]')).last}')));
+      }
+    } else if (value == 'print') {
+      await ExportManager.printReportPdf(data, profile: profile);
+    }
+  }
+
+  ReportExportData _buildExportData(ReportSummary s, DashboardTrends t,
+      String periodLabel, String currencySymbol) {
+    String fmt(num v) => CurrencyUtils.format(v, symbol: currencySymbol);
+    final cards = <ReportCard>[
+      ReportCard('Total Disbursed', fmt(s.totalDisbursed)),
+      ReportCard('Total Collected', fmt(s.totalCollected)),
+      ReportCard('Net Profit', fmt(s.netProfit), highlight: s.netProfit < 0),
+      ReportCard('Total Customers', '${s.totalCustomers}'),
+      ReportCard('Active Loans', '${s.activeLoans}'),
+      ReportCard('Completed Loans', '${s.completedLoans}'),
+      ReportCard('Defaulted Loans', '${s.defaultedLoans}'),
+      ReportCard('Outstanding', fmt(s.dailyLoans.outstandingBalance + s.weeklyLoans.outstandingBalance)),
+      ReportCard('Expected', fmt(s.dailyLoans.expectedCollections + s.weeklyLoans.expectedCollections)),
+      ReportCard('Efficiency', '${s.collectionEfficiency.toStringAsFixed(1)}%'),
+      ReportCard('Interest', fmt(s.dailyLoans.interestEarned + s.weeklyLoans.interestEarned)),
+      ReportCard('Fees', fmt(s.dailyLoans.feesEarned + s.weeklyLoans.feesEarned)),
+      ReportCard('Savings', fmt(s.dailyLoans.savingsFromOverpayments + s.weeklyLoans.savingsFromOverpayments)),
+      ReportCard('Daily Disbursed', fmt(s.dailyLoans.amountDisbursed)),
+      ReportCard('Daily Collected', fmt(s.dailyLoans.amountCollected)),
+      ReportCard('Daily Overdue', '${s.dailyLoans.overdueLoans}'),
+      ReportCard('Weekly Disbursed', fmt(s.weeklyLoans.amountDisbursed)),
+      ReportCard('Weekly Collected', fmt(s.weeklyLoans.amountCollected)),
+    ];
+
+    final headers = ['Period', 'Collected', 'Disbursed', 'Savings In', 'Savings Out', 'Customers', 'Loans'];
+    final rows = <List<String>>[];
+    var totalCollected = 0.0;
+    var totalDisbursed = 0.0;
+    var totalSavingsIn = 0.0;
+    var totalSavingsOut = 0.0;
+    var totalCustomers = 0.0;
+    var totalLoans = 0.0;
+    for (var i = 0; i < t.collected.length; i++) {
+      final label = t.collected[i].label;
+      final collected = t.collected[i].value;
+      final disbursed = i < t.disbursed.length ? t.disbursed[i].value : 0;
+      final sin = i < t.savingsIn.length ? t.savingsIn[i].value : 0;
+      final sout = i < t.savingsOut.length ? t.savingsOut[i].value : 0;
+      final cus = i < t.customers.length ? t.customers[i].value : 0;
+      final lo = i < t.loans.length ? t.loans[i].value : 0;
+      totalCollected += collected;
+      totalDisbursed += disbursed;
+      totalSavingsIn += sin;
+      totalSavingsOut += sout;
+      totalCustomers += cus;
+      totalLoans += lo;
+      rows.add([
+        label,
+        fmt(collected),
+        fmt(disbursed),
+        fmt(sin),
+        fmt(sout),
+        cus.toStringAsFixed(0),
+        lo.toStringAsFixed(0),
+      ]);
+    }
+
+    return ReportExportData(
+      reportName: 'Reports Dashboard',
+      periodLabel: periodLabel,
+      cards: cards,
+      headers: headers,
+      rows: rows,
+      rightAlignColumns: const [1, 2, 3, 4, 5, 6],
+      totalsRow: [
+        'Total',
+        fmt(totalCollected),
+        fmt(totalDisbursed),
+        fmt(totalSavingsIn),
+        fmt(totalSavingsOut),
+        totalCustomers.toStringAsFixed(0),
+        totalLoans.toStringAsFixed(0),
+      ],
+    );
+  }
+}
+
+class _SummaryGrid extends StatelessWidget {
+  const _SummaryGrid({required this.summary, required this.currencySymbol});
+
+  final ReportSummary summary;
+  final String currencySymbol;
+
+  String fmt(num v) => CurrencyUtils.format(v, symbol: currencySymbol);
+
+  @override
+  Widget build(BuildContext context) {
+    final s = summary;
+    final items = <(String, String, IconData, bool)>[
+      ('Total Disbursed', fmt(s.totalDisbursed), Icons.payments_rounded, false),
+      ('Total Collected', fmt(s.totalCollected), Icons.savings_rounded, false),
+      ('Net Profit', fmt(s.netProfit), Icons.trending_up_rounded, s.netProfit < 0),
+      ('Total Customers', '${s.totalCustomers}', Icons.people_alt_rounded, false),
+      ('Active Loans', '${s.activeLoans}', Icons.fact_check_rounded, false),
+      ('Completed Loans', '${s.completedLoans}', Icons.check_circle_rounded, false),
+      ('Defaulted Loans', '${s.defaultedLoans}', Icons.error_rounded, s.defaultedLoans > 0),
+      ('Outstanding', fmt(s.dailyLoans.outstandingBalance + s.weeklyLoans.outstandingBalance), Icons.account_balance_rounded, false),
+      ('Expected', fmt(s.dailyLoans.expectedCollections + s.weeklyLoans.expectedCollections), Icons.event_available_rounded, false),
+      ('Efficiency', '${s.collectionEfficiency.toStringAsFixed(1)}%', Icons.speed_rounded, false),
+      ('Interest Earned', fmt(s.dailyLoans.interestEarned + s.weeklyLoans.interestEarned), Icons.percent_rounded, false),
+      ('Fees Earned', fmt(s.dailyLoans.feesEarned + s.weeklyLoans.feesEarned), Icons.receipt_rounded, false),
+      ('Savings', fmt(s.dailyLoans.savingsFromOverpayments + s.weeklyLoans.savingsFromOverpayments), Icons.savings_rounded, false),
+      ('Daily Disbursed', fmt(s.dailyLoans.amountDisbursed), Icons.today_rounded, false),
+      ('Daily Collected', fmt(s.dailyLoans.amountCollected), Icons.done_all_rounded, false),
+      ('Daily Overdue', '${s.dailyLoans.overdueLoans}', Icons.warning_rounded, s.dailyLoans.overdueLoans > 0),
+      ('Weekly Disbursed', fmt(s.weeklyLoans.amountDisbursed), Icons.calendar_view_week_rounded, false),
+      ('Weekly Collected', fmt(s.weeklyLoans.amountCollected), Icons.task_alt_rounded, false),
+    ];
+
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 200,
+        mainAxisExtent: 86,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+      ),
+      itemCount: items.length,
+      itemBuilder: (context, index) {
+        final (label, value, icon, accent) = items[index];
+        return ReportMetricCard(
+            label: label, value: value, icon: icon, accent: accent);
+      },
+    );
+  }
+}
+
+class _ReportNavGrid extends StatelessWidget {
+  const _ReportNavGrid();
+
+  static const _destinations = [
+    (Icons.today_rounded, 'Daily Loans', '/reports/daily-loans'),
+    (Icons.calendar_view_week_rounded, 'Weekly Loans', '/reports/weekly-loans'),
+    (Icons.warning_amber_rounded, 'Overdue', '/reports/overdue'),
+    (Icons.people_alt_rounded, 'Customers', '/reports/customers'),
+    (Icons.savings_rounded, 'Savings', '/reports/savings-report'),
+    (Icons.trending_up_rounded, 'Profit', '/reports/profit'),
+    (Icons.receipt_long_rounded, 'Collections', '/reports/collections'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 220,
+        mainAxisExtent: 92,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+      ),
+      itemCount: _destinations.length,
+      itemBuilder: (context, index) {
+        final (icon, label, route) = _destinations[index];
+        return Card(
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: () => context.push(route),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  _OverviewTab(summary: summary),
-                  _DailyLoanTab(summary: summary),
-                  _WeeklyLoanTab(summary: summary),
-                  _OverdueTab(summary: summary),
-                  const AnalyticsTab(),
+                  Icon(icon, size: 26, color: Theme.of(context).colorScheme.primary),
+                  const SizedBox(height: 8),
+                  Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w700),
+                  ),
                 ],
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Overview Tab ───────────────────────────────────────────────────────────
-
-class _OverviewTab extends StatelessWidget {
-  const _OverviewTab({required this.summary});
-  final ReportSummary summary;
-
-  @override
-  Widget build(BuildContext context) {
-    final daily = summary.dailyLoans;
-    final weekly = summary.weeklyLoans;
-    final totalLoans = summary.activeLoans + summary.completedLoans + summary.defaultedLoans;
-    final totalCustomers = summary.totalCustomers;
-    final combinedEfficiency = (daily.expectedCollections + weekly.expectedCollections) > 0
-        ? ((daily.amountCollected + weekly.amountCollected) /
-            (daily.expectedCollections + weekly.expectedCollections) *
-            100)
-            .clamp(0.0, 100.0)
-        : 0.0;
-
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        // Top-level summary row
-        Row(
-          children: [
-            Expanded(child: _SummaryCard(
-              title: 'Total Disbursed',
-              value: CurrencyUtils.format(summary.totalDisbursed),
-              icon: Icons.trending_up,
-              color: Colors.orange,
-            )),
-            const SizedBox(width: 10),
-            Expanded(child: _SummaryCard(
-              title: 'Total Collected',
-              value: CurrencyUtils.format(summary.totalCollected),
-              icon: Icons.savings_outlined,
-              color: Colors.green,
-            )),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(child: _SummaryCard(
-              title: 'Net Profit',
-              value: CurrencyUtils.format(summary.netProfit),
-              icon: Icons.account_balance,
-              color: summary.netProfit >= 0 ? Colors.teal : Colors.red,
-            )),
-            const SizedBox(width: 10),
-            Expanded(child: _SummaryCard(
-              title: 'Expected Collections',
-              value: CurrencyUtils.format(daily.expectedCollections + weekly.expectedCollections),
-              icon: Icons.calendar_today,
-              color: Colors.blue,
-            )),
-          ],
-        ),
-        const SizedBox(height: 20),
-
-        // Combined loan status
-        Text('Loan Status Overview',
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(child: _StatusCard(
-                label: 'Active', count: summary.activeLoans, color: Colors.green)),
-            const SizedBox(width: 8),
-            Expanded(child: _StatusCard(
-                label: 'Completed', count: summary.completedLoans, color: Colors.blue)),
-            const SizedBox(width: 8),
-            Expanded(child: _StatusCard(
-                label: 'Defaulted', count: summary.defaultedLoans, color: Colors.red)),
-          ],
-        ),
-        const SizedBox(height: 16),
-
-        // Second metrics row
-        Row(
-          children: [
-            Expanded(child: _SummaryCard(
-              title: 'Total Loans',
-              value: totalLoans.toString(),
-              icon: Icons.layers,
-              color: Colors.indigo,
-            )),
-            const SizedBox(width: 10),
-            Expanded(child: _SummaryCard(
-              title: 'Total Customers',
-              value: totalCustomers.toString(),
-              icon: Icons.people,
-              color: Colors.purple,
-            )),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(child: _SummaryCard(
-              title: 'Interest Earned',
-              value: CurrencyUtils.format(daily.interestEarned + weekly.interestEarned),
-              icon: Icons.monetization_on,
-              color: Colors.amber.shade700,
-            )),
-            const SizedBox(width: 10),
-            Expanded(child: _SummaryCard(
-              title: 'Fees Earned',
-              value: CurrencyUtils.format(daily.feesEarned + weekly.feesEarned),
-              icon: Icons.receipt,
-              color: Colors.brown,
-            )),
-          ],
-        ),
-        const SizedBox(height: 10),
-
-        // Collection efficiency with progress bar
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Collection Efficiency',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          value: combinedEfficiency / 100,
-                          minHeight: 12,
-                          backgroundColor: Colors.grey.shade200,
-                          valueColor: AlwaysStoppedAnimation(
-                            combinedEfficiency >= 75 ? Colors.green
-                                : combinedEfficiency >= 50 ? Colors.orange
-                                : Colors.red,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      '${combinedEfficiency.toStringAsFixed(1)}%',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: combinedEfficiency >= 75 ? Colors.green
-                            : combinedEfficiency >= 50 ? Colors.orange
-                            : Colors.red,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        // Side-by-side comparison
-        Text('Daily vs Weekly Breakdown',
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(child: _ComparisonCard(
-              title: 'Daily',
-              disbursed: daily.amountDisbursed,
-              collected: daily.amountCollected,
-              outstanding: daily.outstandingBalance,
-              efficiency: daily.collectionEfficiency,
-              active: daily.activeLoans,
-              completed: daily.completedLoans,
-              overdue: daily.overdueLoans,
-            )),
-            const SizedBox(width: 8),
-            Expanded(child: _ComparisonCard(
-              title: 'Weekly',
-              disbursed: weekly.amountDisbursed,
-              collected: weekly.amountCollected,
-              outstanding: weekly.outstandingBalance,
-              efficiency: weekly.collectionEfficiency,
-              active: weekly.activeLoans,
-              completed: weekly.completedLoans,
-              overdue: weekly.overdueLoans,
-            )),
-          ],
-        ),
-        const SizedBox(height: 20),
-
-        // Outstanding by client
-        Text('Outstanding by Client',
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 10),
-        if (summary.clientReports.isEmpty)
-          const Card(
-            child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('No outstanding loans.'),
-            ),
-          )
-        else
-          ...summary.clientReports.map((c) => Card(
-                child: ListTile(
-                  leading: CircleAvatar(
-                    child: Text(c.customerName.isNotEmpty
-                        ? c.customerName[0].toUpperCase()
-                        : '?'),
-                  ),
-                  title: Text(c.customerName),
-                  subtitle: Text(
-                    '${c.loanType} loan${c.groupName != null ? ' — ${c.groupName}' : ''}'
-                    '${c.phone.isNotEmpty ? '\n${c.phone}' : ''}',
-                  ),
-                  isThreeLine: c.phone.isNotEmpty,
-                  trailing: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        CurrencyUtils.format(c.outstandingBalance),
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      Text(
-                        'Paid: ${CurrencyUtils.format(c.totalPaid)}',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
-                  onTap: () => context.push('/customers/${c.customerId}'),
-                ),
-              )),
-      ],
-    );
-  }
-}
-
-// ── Daily Loan Tab ──────────────────────────────────────────────────────────
-
-class _DailyLoanTab extends StatelessWidget {
-  const _DailyLoanTab({required this.summary});
-  final ReportSummary summary;
-
-  @override
-  Widget build(BuildContext context) {
-    final daily = summary.dailyLoans;
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        // Loan Status Row
-        Row(children: [
-          Expanded(child: _StatusCard(label: 'Active', count: daily.activeLoans, color: Colors.green)),
-          const SizedBox(width: 8),
-          Expanded(child: _StatusCard(label: 'Completed', count: daily.completedLoans, color: Colors.blue)),
-          const SizedBox(width: 8),
-          Expanded(child: _StatusCard(label: 'Defaulted', count: daily.defaultedLoans, color: Colors.red)),
-        ]),
-        const SizedBox(height: 8),
-        Row(children: [
-          Expanded(child: _StatusCard(label: 'Overdue', count: daily.overdueLoans, color: Colors.orange)),
-          const SizedBox(width: 8),
-          Expanded(child: _StatusCard(label: 'Customers', count: daily.customerCount, color: Colors.purple)),
-          const SizedBox(width: 8),
-          Expanded(child: _StatusCard(label: 'Total Loans', count: daily.activeLoans + daily.completedLoans + daily.defaultedLoans, color: Colors.indigo)),
-        ]),
-        const SizedBox(height: 12),
-
-        // Financial Metrics
-        _SummaryCard(title: 'Amount Disbursed', value: CurrencyUtils.format(daily.amountDisbursed), icon: Icons.trending_up, color: Colors.orange),
-        const SizedBox(height: 10),
-        _SummaryCard(title: 'Amount Collected', value: CurrencyUtils.format(daily.amountCollected), icon: Icons.savings_outlined, color: Colors.green),
-        const SizedBox(height: 10),
-        _SummaryCard(title: 'Outstanding Balance', value: CurrencyUtils.format(daily.outstandingBalance), icon: Icons.receipt_long, color: Colors.red),
-        const SizedBox(height: 10),
-        _SummaryCard(title: 'Expected Collections', value: CurrencyUtils.format(daily.expectedCollections), icon: Icons.calendar_today, color: Colors.blue),
-        const SizedBox(height: 10),
-
-        // Collection efficiency with progress bar
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Collection Efficiency',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          value: (daily.collectionEfficiency / 100).clamp(0.0, 1.0),
-                          minHeight: 10,
-                          backgroundColor: Colors.grey.shade200,
-                          valueColor: AlwaysStoppedAnimation(
-                            daily.collectionEfficiency >= 75 ? Colors.green
-                                : daily.collectionEfficiency >= 50 ? Colors.orange
-                                : Colors.red,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      '${daily.collectionEfficiency.toStringAsFixed(1)}%',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: daily.collectionEfficiency >= 75 ? Colors.green
-                            : daily.collectionEfficiency >= 50 ? Colors.orange
-                            : Colors.red,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 20),
-
-        // Financial Breakdown
-        Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Financial Breakdown', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-          const Divider(),
-          _DetailRow(label: 'Interest Earned', value: CurrencyUtils.format(daily.interestEarned)),
-          _DetailRow(label: 'Fees Earned', value: CurrencyUtils.format(daily.feesEarned)),
-          _DetailRow(label: 'Savings from Overpayments', value: CurrencyUtils.format(daily.savingsFromOverpayments)),
-          _DetailRow(label: 'Total Revenue', value: CurrencyUtils.format(daily.interestEarned + daily.feesEarned + daily.savingsFromOverpayments)),
-        ]))),
-        // Client breakdown
-        const SizedBox(height: 16),
-        Text('Outstanding by Client', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        if (daily.clientReports.isEmpty)
-          const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('No outstanding loans.')))
-        else
-          ...daily.clientReports.map((c) => Card(child: ListTile(
-            leading: CircleAvatar(child: Text(c.customerName.isNotEmpty ? c.customerName[0].toUpperCase() : '?')),
-            title: Text(c.customerName),
-            subtitle: Text(
-              '${c.loanType} loan${c.groupName != null ? ' — ${c.groupName}' : ''}'
-              '${c.phone.isNotEmpty ? '\n${c.phone}' : ''}',
-            ),
-            isThreeLine: c.phone.isNotEmpty,
-            trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text(CurrencyUtils.format(c.outstandingBalance), style: const TextStyle(fontWeight: FontWeight.bold)),
-              Text('Paid: ${CurrencyUtils.format(c.totalPaid)}', style: Theme.of(context).textTheme.bodySmall),
-            ]),
-            onTap: () => context.push('/customers/${c.customerId}'),
-          ))),
-      ],
-    );
-  }
-}
-
-// ── Weekly Loan Tab ─────────────────────────────────────────────────────────
-
-class _WeeklyLoanTab extends StatelessWidget {
-  const _WeeklyLoanTab({required this.summary});
-  final ReportSummary summary;
-
-  @override
-  Widget build(BuildContext context) {
-    final weekly = summary.weeklyLoans;
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        // Loan Status Row
-        Row(children: [
-          Expanded(child: _StatusCard(label: 'Active', count: weekly.activeLoans, color: Colors.green)),
-          const SizedBox(width: 8),
-          Expanded(child: _StatusCard(label: 'Completed', count: weekly.completedLoans, color: Colors.blue)),
-          const SizedBox(width: 8),
-          Expanded(child: _StatusCard(label: 'Defaulted', count: weekly.defaultedLoans, color: Colors.red)),
-        ]),
-        const SizedBox(height: 8),
-        Row(children: [
-          Expanded(child: _StatusCard(label: 'Overdue', count: weekly.overdueLoans, color: Colors.orange)),
-          const SizedBox(width: 8),
-          Expanded(child: _StatusCard(label: 'Customers', count: weekly.customerCount, color: Colors.purple)),
-          const SizedBox(width: 8),
-          Expanded(child: _StatusCard(label: 'Total Loans', count: weekly.activeLoans + weekly.completedLoans + weekly.defaultedLoans, color: Colors.indigo)),
-        ]),
-        const SizedBox(height: 12),
-
-        // Financial Metrics
-        _SummaryCard(title: 'Amount Disbursed', value: CurrencyUtils.format(weekly.amountDisbursed), icon: Icons.trending_up, color: Colors.orange),
-        const SizedBox(height: 10),
-        _SummaryCard(title: 'Amount Collected', value: CurrencyUtils.format(weekly.amountCollected), icon: Icons.savings_outlined, color: Colors.green),
-        const SizedBox(height: 10),
-        _SummaryCard(title: 'Outstanding Balance', value: CurrencyUtils.format(weekly.outstandingBalance), icon: Icons.receipt_long, color: Colors.red),
-        const SizedBox(height: 10),
-        _SummaryCard(title: 'Expected Collections', value: CurrencyUtils.format(weekly.expectedCollections), icon: Icons.calendar_today, color: Colors.blue),
-        const SizedBox(height: 10),
-
-        // Collection efficiency with progress bar
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Collection Efficiency',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          value: (weekly.collectionEfficiency / 100).clamp(0.0, 1.0),
-                          minHeight: 10,
-                          backgroundColor: Colors.grey.shade200,
-                          valueColor: AlwaysStoppedAnimation(
-                            weekly.collectionEfficiency >= 75 ? Colors.green
-                                : weekly.collectionEfficiency >= 50 ? Colors.orange
-                                : Colors.red,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      '${weekly.collectionEfficiency.toStringAsFixed(1)}%',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: weekly.collectionEfficiency >= 75 ? Colors.green
-                            : weekly.collectionEfficiency >= 50 ? Colors.orange
-                            : Colors.red,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 20),
-
-        // Financial Breakdown
-        Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Financial Breakdown', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-          const Divider(),
-          _DetailRow(label: 'Interest Earned', value: CurrencyUtils.format(weekly.interestEarned)),
-          _DetailRow(label: 'Fees Earned', value: CurrencyUtils.format(weekly.feesEarned)),
-          _DetailRow(label: 'Savings from Overpayments', value: CurrencyUtils.format(weekly.savingsFromOverpayments)),
-          _DetailRow(label: 'Total Revenue', value: CurrencyUtils.format(weekly.interestEarned + weekly.feesEarned + weekly.savingsFromOverpayments)),
-        ]))),
-        // Client breakdown
-        const SizedBox(height: 16),
-        Text('Outstanding by Client', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        if (weekly.clientReports.isEmpty)
-          const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('No outstanding loans.')))
-        else
-          ...weekly.clientReports.map((c) => Card(child: ListTile(
-            leading: CircleAvatar(child: Text(c.customerName.isNotEmpty ? c.customerName[0].toUpperCase() : '?')),
-            title: Text(c.customerName),
-            subtitle: Text(
-              '${c.loanType} loan${c.groupName != null ? ' — ${c.groupName}' : ''}'
-              '${c.phone.isNotEmpty ? '\n${c.phone}' : ''}',
-            ),
-            isThreeLine: c.phone.isNotEmpty,
-            trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text(CurrencyUtils.format(c.outstandingBalance), style: const TextStyle(fontWeight: FontWeight.bold)),
-              Text('Paid: ${CurrencyUtils.format(c.totalPaid)}', style: Theme.of(context).textTheme.bodySmall),
-            ]),
-            onTap: () => context.push('/customers/${c.customerId}'),
-          ))),
-      ],
-    );
-  }
-}
-
-// ── Overdue Tab ─────────────────────────────────────────────────────────────
-
-class _OverdueTab extends ConsumerWidget {
-  const _OverdueTab({required this.summary});
-  final ReportSummary summary;
-
-  String _currencySymbol(WidgetRef ref) =>
-      ref.read(currencySymbolProvider).valueOrNull ??
-      CurrencyUtils.defaultSymbol;
-
-  Future<void> _savePdf(
-      BuildContext context, WidgetRef ref, List<OverdueEntry> entries) async {
-    try {
-      final path = await ExportManager.saveOverduePdf(entries, 'Overdue Report',
-          currencySymbol: _currencySymbol(ref));
-      if (!context.mounted) return;
-      if (path != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('PDF saved to Documents')),
         );
-      }
-    } catch (e) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to save PDF: $e')),
-      );
-    }
+      },
+    );
   }
+}
 
-  Future<void> _sharePdf(
-      BuildContext context, WidgetRef ref, List<OverdueEntry> entries) async {
-    try {
-      await ExportManager.shareOverduePdf(entries, 'Overdue Report',
-          currencySymbol: _currencySymbol(ref));
-    } catch (e) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to share PDF: $e')),
-      );
-    }
-  }
+class _TrendsSection extends StatelessWidget {
+  const _TrendsSection({required this.trends, required this.currencySymbol});
+
+  final DashboardTrends trends;
+  final String currencySymbol;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final selectedLoanType = ref.watch(reportLoanTypeFilterProvider);
-    final entries = selectedLoanType != null
-        ? summary.overdueEntries.where((e) => e.loanType == selectedLoanType).toList()
-        : summary.overdueEntries;
-
-    final totalOverdue = entries.fold<double>(0, (sum, e) => sum + e.amountRemaining);
-    final dailyOverdue = entries.where((e) => e.loanType == 'daily').toList();
-    final weeklyOverdue = entries.where((e) => e.loanType == 'weekly').toList();
-    final totalDaily = dailyOverdue.fold<double>(0, (s, e) => s + e.amountRemaining);
-    final totalWeekly = weeklyOverdue.fold<double>(0, (s, e) => s + e.amountRemaining);
-    final uniqueCustomers = entries.map((e) => e.customerId).toSet().length;
-
-    if (entries.isEmpty) {
-      return const Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.check_circle_outline, size: 48, color: Colors.green),
-            SizedBox(height: 12),
-            Text('No overdue installments', style: TextStyle(fontSize: 16)),
-          ],
-        ),
-      );
-    }
-
-    return ListView(
-      padding: const EdgeInsets.all(16),
+  Widget build(BuildContext context) {
+    return Column(
       children: [
-        // Summary cards
-        Row(
-          children: [
-            Expanded(child: _SummaryCard(
-              title: 'Total Overdue',
-              value: CurrencyUtils.format(totalOverdue),
-              icon: Icons.warning_amber,
-              color: Colors.red,
-            )),
-            const SizedBox(width: 10),
-            Expanded(child: _SummaryCard(
-              title: 'Installments',
-              value: entries.length.toString(),
-              icon: Icons.receipt_long,
-              color: Colors.orange,
-            )),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(child: _SummaryCard(
-              title: 'Affected Customers',
-              value: uniqueCustomers.toString(),
-              icon: Icons.people,
-              color: Colors.red.shade700,
-            )),
-            const SizedBox(width: 10),
-            Expanded(child: _SummaryCard(
-              title: 'Avg. Overdue Days',
-              value: entries.isEmpty
-                  ? '0'
-                  : '${(entries.fold<int>(0, (s, e) => s + e.overdueDays) / entries.length).round()}',
-              icon: Icons.timer,
-              color: Colors.orange.shade700,
-            )),
-          ],
+        _BarTrendChart(
+          title: 'Collected vs Disbursed',
+          series1: trends.collected,
+          series2: trends.disbursed,
+          series1Color: AppTheme.secondaryColor,
+          series2Color: Theme.of(context).colorScheme.primary,
+          series1Label: 'Collected',
+          series2Label: 'Disbursed',
+          currencySymbol: currencySymbol,
         ),
         const SizedBox(height: 16),
-
-        // Export actions
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.download),
-                label: const Text('Save PDF'),
-                onPressed: () => _savePdf(context, ref, entries),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.share),
-                label: const Text('Share PDF'),
-                onPressed: () => _sharePdf(context, ref, entries),
-              ),
-            ),
-          ],
+        _LineTrendChart(
+          title: 'Savings In vs Out',
+          series1: trends.savingsIn,
+          series2: trends.savingsOut,
+          series1Color: AppTheme.secondaryColor,
+          series2Color: AppTheme.accentColor,
+          series1Label: 'Savings In',
+          series2Label: 'Savings Out',
+          currencySymbol: currencySymbol,
         ),
         const SizedBox(height: 16),
-
-        // Loan type breakdown
-        if (dailyOverdue.isNotEmpty && weeklyOverdue.isNotEmpty) ...[
-          Text('Overdue by Loan Type',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(child: _TypeBreakdownCard(
-                title: 'Daily Loans',
-                amount: totalDaily,
-                count: dailyOverdue.length,
-                color: Colors.blue,
-              )),
-              const SizedBox(width: 8),
-              Expanded(child: _TypeBreakdownCard(
-                title: 'Weekly Loans',
-                amount: totalWeekly,
-                count: weeklyOverdue.length,
-                color: Colors.teal,
-              )),
-            ],
-          ),
-          const SizedBox(height: 16),
-        ],
-
-        // Overdue details
-        Text('Overdue Installments',
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        ...entries.map((e) => Card(
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: e.overdueDays > 7
-                      ? Colors.red.withValues(alpha: 0.1)
-                      : Colors.orange.withValues(alpha: 0.1),
-                  child: Text(
-                    '${e.overdueDays}d',
-                    style: TextStyle(
-                      color: e.overdueDays > 7 ? Colors.red : Colors.orange,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-                title: Text(e.customerName),
-                subtitle: Text(
-                  '${e.loanType} loan — Installment #${e.installmentNumber}'
-                  '${e.groupName != null ? ' — ${e.groupName}' : ''}'
-                  '\nDue: ${e.dueDate}'
-                  '${e.phone.isNotEmpty ? '\n${e.phone}' : ''}',
-                ),
-                isThreeLine: true,
-                trailing: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      CurrencyUtils.format(e.amountRemaining),
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, color: Colors.red),
-                    ),
-                    Text(
-                      'of ${CurrencyUtils.format(e.amountDue)}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
-                onTap: () => context.push('/customers/${e.customerId}'),
-              ),
-            )),
+        _BarTrendChart(
+          title: 'New Customers',
+          series1: trends.customers,
+          series1Color: Theme.of(context).colorScheme.primary,
+          series1Label: 'Customers',
+          currencySymbol: currencySymbol,
+          formatCounts: true,
+        ),
+        const SizedBox(height: 16),
+        _BarTrendChart(
+          title: 'New Loans',
+          series1: trends.loans,
+          series1Color: AppTheme.accentColor,
+          series1Label: 'Loans',
+          currencySymbol: currencySymbol,
+          formatCounts: true,
+        ),
       ],
     );
   }
 }
 
-// ── Shared Widgets ──────────────────────────────────────────────────────────
-
-class _TypeBreakdownCard extends StatelessWidget {
-  const _TypeBreakdownCard({
+class _BarTrendChart extends StatelessWidget {
+  const _BarTrendChart({
     required this.title,
-    required this.amount,
-    required this.count,
-    required this.color,
+    required this.series1,
+    this.series2,
+    required this.series1Color,
+    this.series2Color,
+    required this.series1Label,
+    this.series2Label,
+    required this.currencySymbol,
+    this.formatCounts = false,
   });
 
   final String title;
-  final double amount;
-  final int count;
-  final Color color;
+  final List<DashboardTrendPoint> series1;
+  final List<DashboardTrendPoint>? series2;
+  final Color series1Color;
+  final Color? series2Color;
+  final String series1Label;
+  final String? series2Label;
+  final String currencySymbol;
+  final bool formatCounts;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            Text(title, style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text(CurrencyUtils.format(amount),
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                )),
-            const SizedBox(height: 4),
-            Text('$count installment(s)', style: Theme.of(context).textTheme.bodySmall),
-          ],
+    final maxValue = [
+      ...series1.map((e) => e.value),
+      if (series2 != null) ...series2!.map((e) => e.value),
+    ].fold<double>(0, (a, b) => b > a ? b : a);
+
+    final groups = series1.length;
+    final spots = <BarChartGroupData>[];
+    for (var i = 0; i < groups; i++) {
+      final s1 = series1[i];
+      final rods = <BarChartRodData>[
+        BarChartRodData(
+          toY: s1.value,
+          color: series1Color,
+          width: 7,
+          borderRadius: BorderRadius.circular(3),
         ),
-      ),
-    );
-  }
-}
+        if (series2 != null && i < series2!.length)
+          BarChartRodData(
+            toY: series2![i].value,
+            color: series2Color,
+            width: 7,
+            borderRadius: BorderRadius.circular(3),
+          ),
+      ];
+      spots.add(BarChartGroupData(x: i, barRods: rods));
+    }
 
-class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({
-    required this.title,
-    required this.value,
-    required this.icon,
-    required this.color,
-  });
+    String fmt(double v) => formatCounts
+        ? v.toStringAsFixed(0)
+        : CurrencyUtils.format(v, symbol: currencySymbol);
 
-  final String title;
-  final String value;
-  final IconData icon;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            CircleAvatar(
-              backgroundColor: color.withValues(alpha: 0.1),
-              child: Icon(icon, color: color),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: Theme.of(context).textTheme.bodySmall),
-                  const SizedBox(height: 4),
-                  Text(value,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleLarge
-                          ?.copyWith(fontWeight: FontWeight.bold)),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StatusCard extends StatelessWidget {
-  const _StatusCard({
-    required this.label,
-    required this.count,
-    required this.color,
-  });
-
-  final String label;
-  final int count;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            Text(
-              count.toString(),
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineSmall
-                  ?.copyWith(fontWeight: FontWeight.bold, color: color),
-            ),
-            const SizedBox(height: 4),
-            Text(label,
-                style: Theme.of(context).textTheme.bodySmall,
-                textAlign: TextAlign.center),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ComparisonCard extends StatelessWidget {
-  const _ComparisonCard({
-    required this.title,
-    required this.disbursed,
-    required this.collected,
-    required this.outstanding,
-    required this.efficiency,
-    required this.active,
-    required this.completed,
-    required this.overdue,
-  });
-
-  final String title;
-  final double disbursed;
-  final double collected;
-  final double outstanding;
-  final double efficiency;
-  final int active;
-  final int completed;
-  final int overdue;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1111,16 +516,72 @@ class _ComparisonCard extends StatelessWidget {
                 style: Theme.of(context)
                     .textTheme
                     .titleSmall
-                    ?.copyWith(fontWeight: FontWeight.bold)),
-            const Divider(),
-            _DetailRow(label: 'Disbursed', value: CurrencyUtils.format(disbursed)),
-            _DetailRow(label: 'Collected', value: CurrencyUtils.format(collected)),
-            _DetailRow(label: 'Outstanding', value: CurrencyUtils.format(outstanding)),
-            _DetailRow(label: 'Efficiency', value: '${efficiency.toStringAsFixed(1)}%'),
-            const Divider(height: 8),
-            _DetailRow(label: 'Active', value: active.toString()),
-            _DetailRow(label: 'Completed', value: completed.toString()),
-            _DetailRow(label: 'Overdue', value: overdue.toString()),
+                    ?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 180,
+              child: groups == 0
+                  ? const Center(child: Text('No data in this period'))
+                  : BarChart(
+                      BarChartData(
+                        maxY: maxValue <= 0 ? 1 : maxValue * 1.15,
+                        barTouchData: BarTouchData(
+                          touchTooltipData: BarTouchTooltipData(
+                            getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                              return BarTooltipItem(
+                                fmt(rod.toY),
+                                const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600),
+                              );
+                            },
+                          ),
+                        ),
+                        titlesData: FlTitlesData(
+                          leftTitles: const AxisTitles(
+                            sideTitles: SideTitles(showTitles: false),
+                          ),
+                          topTitles: const AxisTitles(
+                            sideTitles: SideTitles(showTitles: false),
+                          ),
+                          rightTitles: const AxisTitles(
+                            sideTitles: SideTitles(showTitles: false),
+                          ),
+                          bottomTitles: AxisTitles(
+                            sideTitles: SideTitles(
+                              showTitles: true,
+                              getTitlesWidget: (value, meta) {
+                                final idx = value.toInt();
+                                if (idx < 0 || idx >= groups) {
+                                  return const SizedBox.shrink();
+                                }
+                                return Padding(
+                                  padding: const EdgeInsets.only(top: 6),
+                                  child: Text(
+                                    series1[idx].label,
+                                    style: const TextStyle(fontSize: 9),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                        gridData: const FlGridData(show: true, drawVerticalLine: false),
+                        borderData: FlBorderData(show: false),
+                        barGroups: spots,
+                      ),
+                    ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                _LegendDot(color: series1Color, label: series1Label),
+                if (series2Label != null) ...[
+                  const SizedBox(width: 16),
+                  _LegendDot(color: series2Color!, label: series2Label!),
+                ],
+              ],
+            ),
           ],
         ),
       ),
@@ -1128,26 +589,164 @@ class _ComparisonCard extends StatelessWidget {
   }
 }
 
-class _DetailRow extends StatelessWidget {
-  const _DetailRow({required this.label, required this.value});
-  final String label;
-  final String value;
+class _LineTrendChart extends StatelessWidget {
+  const _LineTrendChart({
+    required this.title,
+    required this.series1,
+    required this.series2,
+    required this.series1Color,
+    required this.series2Color,
+    required this.series1Label,
+    required this.series2Label,
+    required this.currencySymbol,
+  });
+
+  final String title;
+  final List<DashboardTrendPoint> series1;
+  final List<DashboardTrendPoint> series2;
+  final Color series1Color;
+  final Color series2Color;
+  final String series1Label;
+  final String series2Label;
+  final String currencySymbol;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: Theme.of(context).textTheme.bodyMedium),
-          Text(value,
-              style: Theme.of(context)
-                  .textTheme
-                  .bodyMedium
-                  ?.copyWith(fontWeight: FontWeight.bold)),
-        ],
+    final maxValue = [
+      ...series1.map((e) => e.value),
+      ...series2.map((e) => e.value),
+    ].fold<double>(0, (a, b) => b > a ? b : a);
+
+    FlSpot spot(int i, double v) => FlSpot(i.toDouble(), v);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title,
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 180,
+              child: series1.isEmpty
+                  ? const Center(child: Text('No data in this period'))
+                  : LineChart(
+                      LineChartData(
+                        maxY: maxValue <= 0 ? 1 : maxValue * 1.15,
+                        minY: 0,
+                        lineTouchData: LineTouchData(
+                          touchTooltipData: LineTouchTooltipData(
+                            getTooltipItems: (spots) {
+                              return spots
+                                  .map((spot) => LineTooltipItem(
+                                        CurrencyUtils.format(spot.y,
+                                            symbol: currencySymbol),
+                                        const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w600),
+                                      ))
+                                  .toList();
+                            },
+                          ),
+                        ),
+                        titlesData: FlTitlesData(
+                          leftTitles: const AxisTitles(
+                            sideTitles: SideTitles(showTitles: false),
+                          ),
+                          topTitles: const AxisTitles(
+                            sideTitles: SideTitles(showTitles: false),
+                          ),
+                          rightTitles: const AxisTitles(
+                            sideTitles: SideTitles(showTitles: false),
+                          ),
+                          bottomTitles: AxisTitles(
+                            sideTitles: SideTitles(
+                              showTitles: true,
+                              getTitlesWidget: (value, meta) {
+                                final idx = value.toInt();
+                                if (idx < 0 || idx >= series1.length) {
+                                  return const SizedBox.shrink();
+                                }
+                                return Padding(
+                                  padding: const EdgeInsets.only(top: 6),
+                                  child: Text(
+                                    series1[idx].label,
+                                    style: const TextStyle(fontSize: 9),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                        gridData: const FlGridData(show: true, drawVerticalLine: false),
+                        borderData: FlBorderData(show: false),
+                        lineBarsData: [
+                          LineChartBarData(
+                            spots: [
+                              for (var i = 0; i < series1.length; i++)
+                                spot(i, series1[i].value),
+                            ],
+                            isCurved: true,
+                            color: series1Color,
+                            barWidth: 2.5,
+                            dotData: const FlDotData(show: false),
+                          ),
+                          LineChartBarData(
+                            spots: [
+                              for (var i = 0; i < series2.length; i++)
+                                spot(i, series2[i].value),
+                            ],
+                            isCurved: true,
+                            color: series2Color,
+                            barWidth: 2.5,
+                            dotData: const FlDotData(show: false),
+                          ),
+                        ],
+                      ),
+                    ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                _LegendDot(color: series1Color, label: series1Label),
+                const SizedBox(width: 16),
+                _LegendDot(color: series2Color, label: series2Label),
+              ],
+            ),
+          ],
+        ),
       ),
+    );
+  }
+}
+
+class _LegendDot extends StatelessWidget {
+  const _LegendDot({required this.color, required this.label});
+
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 6),
+        Text(label,
+            style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant)),
+      ],
     );
   }
 }

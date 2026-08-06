@@ -515,6 +515,21 @@ class CloudSyncService {
     final path =
         '${directory.path}${Platform.pathSeparator}${const Uuid().v4()}.enc';
     await File(path).writeAsBytes(bytes, flush: true);
+
+    // On Windows, attempt to restrict file ACLs to the current user so other
+    // local users cannot read the secure document files. This is best-effort
+    // and will be ignored on failure.
+    if (Platform.isWindows) {
+      try {
+        final user = Platform.environment['USERNAME'] ?? '';
+        if (user.isNotEmpty) {
+          await Process.run('icacls', [path, '/inheritance:r', '/grant:r', '$user:R']);
+        }
+      } catch (_) {
+        // Ignore failures; directory security is best-effort.
+      }
+    }
+
     return path;
   }
 

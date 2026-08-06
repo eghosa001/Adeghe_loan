@@ -109,12 +109,6 @@ class AppDrawer extends StatelessWidget {
                     currentRoute: currentRoute,
                   ),
                   _MenuItem(
-                    icon: Icons.warning_amber_rounded,
-                    label: 'Overdue Report',
-                    route: '/overdue-report',
-                    currentRoute: currentRoute,
-                  ),
-                  _MenuItem(
                     icon: Icons.savings_rounded,
                     label: 'Savings',
                     route: '/savings',

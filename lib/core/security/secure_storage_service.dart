@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:math' show Random;
 import 'dart:typed_data' show BytesBuilder, Uint8List;
 import 'package:crypto/crypto.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:uuid/uuid.dart';
 
@@ -9,14 +11,16 @@ import '../constants/app_constants.dart';
 import 'secure_key_value_store.dart';
 
 class SecureStorageService implements SecureKeyValueStore {
-  final _storage = const FlutterSecureStorage(
+  final FlutterSecureStorage _storage;
+
+  SecureStorageService({FlutterSecureStorage? storage}) : _storage = storage ?? const FlutterSecureStorage(
     webOptions: WebOptions(
       dbName: 'AdegheSecureStorage',
       publicKey: 'AdegheSecureStoragePublicKey',
     ),
   );
 
-  static const _pinKey = 'auth_pin_hash';
+  static const _pinKey = AppConstants.keyPinHash;
   static const _recoveryPassKey = 'recovery_pass_hash';
   static const _biometricKey = 'biometric_enabled';
   static const _dbKey = 'db_encryption_key';
@@ -91,6 +95,17 @@ class SecureStorageService implements SecureKeyValueStore {
     return base64Encode(bytes.sublist(0, _pinHashLength));
   }
 
+  /// Runs the CPU-bound PBKDF2 derivation off the main isolate. The recovery
+  /// password path hashes at 600k iterations (twice per save: the stored hash
+  /// plus the derived document key), which on low-end phones can block the UI
+  /// for multiple seconds if computed inline. Isolating keeps the PIN/recovery
+  /// screens responsive and the navigation to the next screen (e.g. the cloud
+  /// gate right after PIN setup) snappy.
+  static Future<String> _pbkdf2HexAsync(
+      String data, String salt, int iterations) {
+    return Isolate.run(() => _pbkdf2Hex(data, salt, iterations));
+  }
+
   static bool _constantTimeEquals(String a, String b) {
     final aBytes = utf8.encode(a);
     final bBytes = utf8.encode(b);
@@ -106,7 +121,8 @@ class SecureStorageService implements SecureKeyValueStore {
   /// `pbkdf2-sha256:<iterations>:<digest hex>`.
   Future<String> _hash(String data, String saltKey, int iterations) async {
     final salt = await _getSalt(saltKey);
-    return 'pbkdf2-sha256:$iterations:${_pbkdf2Hex(data, salt, iterations)}';
+    final digest = await _pbkdf2HexAsync(data, salt, iterations);
+    return 'pbkdf2-sha256:$iterations:$digest';
   }
 
   /// Verifies [data] against [stored]. [saltCandidates] are tried in order so
@@ -119,17 +135,17 @@ class SecureStorageService implements SecureKeyValueStore {
     if (iterations == null || iterations < 1000) return false;
     for (final salt in saltCandidates) {
       if (salt.isEmpty) continue;
-      final expected = _pbkdf2Hex(data, salt, iterations);
+      final expected = await _pbkdf2HexAsync(data, salt, iterations);
       if (_constantTimeEquals(expected, parts[2])) return true;
     }
     return false;
   }
 
-  /// Enforces a strong recovery password: at least 16 characters containing
+  /// Enforces a strong recovery password: at least 12 characters containing
   /// both letters and digits. Returns null when [password] is acceptable.
   static String? recoveryPasswordError(String password) {
-    if (password.length < 16) {
-      return 'Recovery password must be at least 16 characters';
+    if (password.length < 12) {
+      return 'Recovery password must be at least 12 characters';
     }
     if (!RegExp(r'[A-Za-z]').hasMatch(password) ||
         !RegExp(r'[0-9]').hasMatch(password)) {
@@ -205,7 +221,8 @@ class SecureStorageService implements SecureKeyValueStore {
   /// knows the same recovery password derives the same key, which is what lets
   /// cloud-synced encrypted documents open on a second device.
   Future<void> _storeDerivedDocKey(String password) async {
-    final derived = _pbkdf2Hex(password, docDerivationSalt, _docDerivedIterations);
+    final derived =
+        await _pbkdf2HexAsync(password, docDerivationSalt, _docDerivedIterations);
     final existing = await _storage.read(key: _docKeysKey);
     final List<String> keys;
     if (existing == null || existing.isEmpty) {
@@ -256,10 +273,34 @@ class SecureStorageService implements SecureKeyValueStore {
     return value == 'true';
   }
 
+  /// Generates a base64url-encoded 32-byte key using [rnd] or a secure RNG.
+  /// Exposed as a static helper for unit testing.
+  static String generateDatabaseKey({Random? rnd}) {
+    final random = rnd ?? Random.secure();
+    final bytes = List<int>.generate(32, (_) => random.nextInt(256));
+    return base64UrlEncode(Uint8List.fromList(bytes));
+  }
+
+  static const _themeModeKey = 'pref_theme_mode';
+
+  Future<void> setThemeMode(ThemeMode mode) async {
+    await _storage.write(key: _themeModeKey, value: mode.name);
+  }
+
+  Future<ThemeMode> getThemeMode() async {
+    final value = await _storage.read(key: _themeModeKey);
+    return switch (value) {
+      'light' => ThemeMode.light,
+      'dark' => ThemeMode.dark,
+      _ => ThemeMode.system,
+    };
+  }
+
   Future<String> getDatabaseKey() async {
     String? key = await _storage.read(key: _dbKey);
     if (key == null) {
-      key = const Uuid().v4();
+      // Generate and persist the key.
+      key = generateDatabaseKey();
       await _storage.write(key: _dbKey, value: key);
     }
     return key;

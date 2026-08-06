@@ -1,23 +1,30 @@
 ﻿/// Cloud-sync configuration for Supabase.
 ///
-/// For security, do NOT hardcode secrets in source. Build the app with the
-/// Supabase values supplied at build time using Dart defines:
+/// The public (anon) key is safe to ship in the client — the service-role key
+/// must never be compiled in. The values below are the defaults; override them
+/// at build time when needed using Dart defines:
 ///
-///   flutter run --dart-define=SUPABASE_URL=https://<project>.supabase.co \
-///               --dart-define=SUPABASE_ANON_KEY=<anon-key>
+///   flutter run --dart-define=SUPABASE_URL=https://`<project>`.supabase.co \
+///               --dart-define=SUPABASE_ANON_KEY=`<anon-key>`
 ///
-/// Or pass the same defines to `flutter build` / CI. When the defines are not
-/// provided the app remains offline-only and cloud sync is disabled.
+/// The defaults are committed so cloud sync is configured out of the box.
 class SupabaseConfig {
   SupabaseConfig._();
 
-  /// Supply your Supabase project URL at build time with `--dart-define`.
+  /// The Supabase project URL (defaults committed; override via `--dart-define`).
   /// Example: `--dart-define=SUPABASE_URL=https://abcdxyz.supabase.co`
-  static const String supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: '');
+  static const String supabaseUrl = String.fromEnvironment(
+    'SUPABASE_URL',
+    defaultValue: 'https://tpqyilakpsjmevqgdqur.supabase.co',
+  );
 
-  /// Supply your Supabase public (anon) key at build time with `--dart-define`.
+  /// The Supabase public (anon) key (defaults committed; override via `--dart-define`).
   /// Example: `--dart-define=SUPABASE_ANON_KEY=eyJhbGci...`
-  static const String anonKey = String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: '');
+  static const String anonKey = String.fromEnvironment(
+    'SUPABASE_ANON_KEY',
+    defaultValue:
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwcXlpbGFrcHNqbWV2cWdkcXVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2MDk2MzQsImV4cCI6MjEwMTE4NTYzNH0.-OcBMI2cLOyNQTu7w74cPOyzWZiekltDcexxiIsleak',
+  );
 
   /// Storage bucket that holds the encrypted customer documents. Must be
   /// created with the `supabase_schema.sql` script.

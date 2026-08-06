@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:uuid/uuid.dart';
 import 'package:loantrack/core/widgets/app_drawer.dart';
 import 'package:loantrack/core/widgets/debounced_text_field.dart';
+import 'package:path/path.dart' as p;
 
 import '../../../../core/utils/currency_utils.dart';
 import '../../../../core/utils/date_utils.dart';
@@ -61,25 +63,20 @@ class CollectionScreen extends ConsumerWidget {
               if (value == 'excel') {
                 final file = await ExportManager.exportCollectionToExcel(
                     result, selectedDate);
+                final opened = await OpenFilex.open(file.path);
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                        content: Text(
-                            'Excel exported: ${file.path.split('/').last}')),
+                        content: Text(opened.type == ResultType.done
+                            ? 'Excel opened: ${p.basename(file.path)}'
+                            : 'Excel saved to downloads: ${p.basename(file.path)}')),
                   );
                 }
               } else if (value == 'share_excel') {
                 await ExportManager.shareCollectionExcel(result, selectedDate);
               } else if (value == 'pdf') {
-                final path = await ExportManager.saveCollectionPdf(
-                    result, selectedDate,
+                await ExportManager.shareCollectionPdf(result, selectedDate,
                     currencySymbol: currencySymbol);
-                if (context.mounted && path != null) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('PDF saved to Documents')),
-                  );
-                }
               } else if (value == 'share') {
                 await ExportManager.shareCollectionPdf(result, selectedDate,
                     currencySymbol: currencySymbol);
@@ -90,7 +87,7 @@ class CollectionScreen extends ConsumerWidget {
                   value: 'excel', child: Text('Export Excel')),
               const PopupMenuItem(
                   value: 'share_excel', child: Text('Share Excel')),
-              const PopupMenuItem(value: 'pdf', child: Text('Save PDF')),
+              const PopupMenuItem(value: 'pdf', child: Text('Open PDF')),
               const PopupMenuItem(value: 'share', child: Text('Share PDF')),
             ],
           ),

@@ -127,6 +127,8 @@ class AppTheme {
       secondary: secondaryColor,
       error: errorColor,
       brightness: Brightness.dark,
+      surface: const Color(0xFF1E2A3A),
+      onSurface: Colors.white,
     );
 
     return ThemeData(

@@ -125,9 +125,10 @@ class CustomerListScreen extends ConsumerWidget {
                             value: CustomerSortBy.amountOwed,
                             child: Text('Amount Owed')),
                       ],
-                      onChanged: (value) => ref
-                          .read(customerSortByProvider.notifier)
-                          .state = value!,
+                      onChanged: (value) {
+                        ref.read(customerSortByProvider.notifier).state = value!;
+                        ref.read(customerPageProvider.notifier).state = 0;
+                      },
                     ),
                   );
                 }),

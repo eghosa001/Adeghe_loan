@@ -36,8 +36,9 @@ class GlobalSearchRepository {
 
     final customers = await db.rawQuery('''
       SELECT id, full_name, phone FROM customers
-      WHERE full_name LIKE ? OR phone LIKE ? OR bvn LIKE ? OR nin LIKE ?
-          OR residential_address LIKE ? OR id LIKE ?
+      WHERE status != 'archived'
+        AND (full_name LIKE ? OR phone LIKE ? OR bvn LIKE ? OR nin LIKE ?
+            OR residential_address LIKE ? OR id LIKE ?)
       ORDER BY full_name COLLATE NOCASE ASC
       LIMIT 15
     ''', [term, term, term, term, term, term]);

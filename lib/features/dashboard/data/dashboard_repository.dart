@@ -39,7 +39,7 @@ class DashboardRepository {
 
       // Run all independent read queries in parallel.
       final results = await Future.wait([
-        db.rawQuery('SELECT COUNT(*) AS count FROM customers'),
+        db.rawQuery("SELECT COUNT(*) AS count FROM customers WHERE status != 'archived'"),
         db.rawQuery("SELECT COUNT(*) AS count FROM loans WHERE status = 'active'"),
         db.rawQuery("SELECT COUNT(*) AS count FROM loans WHERE status = 'active' AND loan_type = 'daily'"),
         db.rawQuery("SELECT COUNT(*) AS count FROM loans WHERE status = 'active' AND loan_type = 'weekly'"),

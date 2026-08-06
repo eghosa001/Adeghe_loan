@@ -23,7 +23,20 @@ class BiometricService {
     final canAuthenticateWithBiometrics = await _auth.canCheckBiometrics;
     final canAuthenticate =
         canAuthenticateWithBiometrics || await _auth.isDeviceSupported();
-    return canAuthenticate;
+    if (!canAuthenticate) return false;
+    // `canCheckBiometrics`/`isDeviceSupported` only report that the hardware
+    // and API exist — on some platforms they return true even when NO
+    // fingerprint or face is enrolled. Confirm actual enrollment where the
+    // plugin exposes it so a not-enrolled device reports as unavailable
+    // instead of surfacing a confusing "verification failed" dialog.
+    try {
+      final enrolled = await _auth.getAvailableBiometrics();
+      if (enrolled.isEmpty) return false;
+    } catch (_) {
+      // Platform does not expose enrollment (e.g. some desktop builds);
+      // fall back to the hardware/API check above.
+    }
+    return true;
   }
 
   /// Authenticates the user via biometrics.
@@ -34,6 +47,11 @@ class BiometricService {
   /// or [BiometricResult.error] for other failures (e.g. system dialog
   /// cancelled, hardware error).
   Future<BiometricResult> authenticate() async {
+    // Guard up-front: with no biometrics enrolled the platform dialog reports
+    // a generic failure/cancel. Returning `unavailable` here lets callers show
+    // the correct "not enabled / not enrolled" message instead of a misleading
+    // "biometric verification failed".
+    if (!await isBiometricAvailable()) return BiometricResult.unavailable;
     try {
       final authenticated = await _auth.authenticate(
         localizedReason:

@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart'
     show databaseFactoryFfi, sqfliteFfiInit;
 import 'package:sqflite_sqlcipher/sqflite.dart';
@@ -13,15 +15,57 @@ class DatabaseService {
   static const int _databaseVersion = 18;
   final SecureStorageService _secureStorage;
 
-  DatabaseService(this._secureStorage);
+  /// Test-only replacement for [_initDatabase], letting tests exercise the
+  /// memoization and exclusive-access gate without a real SQLCipher open.
+  final Future<Database> Function()? _openOverride;
 
-  Database? _database;
+  DatabaseService(this._secureStorage) : _openOverride = null;
+
+  @visibleForTesting
+  DatabaseService.withOpenOverride(
+      this._secureStorage, Future<Database> Function() open)
+      : _openOverride = open;
+
+  /// Memoized open future. Every caller shares ONE in-flight open, so
+  /// concurrent `await database` calls (many providers at unlock) can never
+  /// double-open the same SQLite file — the M14 double-open race. After
+  /// [close] (e.g. a backup swap) the next access reopens a fresh connection.
+  Future<Database>? _openFuture;
+
+  /// While a backup/restore holds exclusive access this gate makes any
+  /// concurrent [database] caller wait for the close -> swap -> reopen cycle
+  /// to finish instead of opening a half-swapped file (M14).
+  Future<void>? _exclusiveGate;
+
   String? _databasePath;
 
-  Future<Database> get database async {
-    if (_database != null) return _database!;
-    _database = await _initDatabase();
-    return _database!;
+  /// Returns the single app database connection, opening it on first use.
+  /// Concurrent callers share the same in-flight open. If a backup is
+  /// currently closing/reopening the database, callers wait for it to finish.
+  Future<Database> get database {
+    final gate = _exclusiveGate;
+    if (gate != null) {
+      return gate.then((_) => _open());
+    }
+    return _open();
+  }
+
+  Future<Database> _open() {
+    final memo = _openFuture;
+    if (memo != null) return memo;
+    final open = _openOverride ?? _initDatabase;
+    late final Future<Database> future;
+    future = open().then<Database>(
+      (db) => db,
+      onError: (Object error, StackTrace stackTrace) {
+        // A failed open must not poison the memo forever; let the next caller
+        // retry.
+        if (identical(_openFuture, future)) _openFuture = null;
+        Error.throwWithStackTrace(error, stackTrace);
+      },
+    );
+    _openFuture = future;
+    return future;
   }
 
   Future<String> get databasePath async {
@@ -32,9 +76,39 @@ class DatabaseService {
   }
 
   Future<void> close() async {
-    if (_database != null) {
-      await _database!.close();
-      _database = null;
+    final current = _openFuture;
+    _openFuture = null;
+    if (current != null) {
+      try {
+        final db = await current;
+        await db.close();
+      } catch (_) {
+        // Best-effort close: a failed open or already-closed connection must
+        // not block the caller.
+      }
+    }
+  }
+
+  /// Runs [action] with exclusive control of the database file: the connection
+  /// is closed first, [action] runs (e.g. copying the DB file for a backup or
+  /// swapping in a restored file), then the database is reopened before any
+  /// concurrent [database] caller proceeds. [action] must not open the
+  /// database itself — call [database] only from outside.
+  Future<T> withExclusiveAccess<T>(Future<T> Function() action) async {
+    final gate = Completer<void>();
+    _exclusiveGate = gate.future;
+    try {
+      await close();
+      return await action();
+    } finally {
+      // Clear the gate FIRST so new callers use the normal memoized path, then
+      // reopen, then release callers that queued on the gate.
+      _exclusiveGate = null;
+      try {
+        await database;
+      } finally {
+        if (!gate.isCompleted) gate.complete();
+      }
     }
   }
 

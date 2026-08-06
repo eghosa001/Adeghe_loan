@@ -66,6 +66,8 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
     try {
       final repo = await ref.read(customerRepositoryProvider.future);
       await repo.changeStatus(widget.customer.id, status);
+      logAuditAction(ref, 'UPDATE',
+          'Customer ${widget.customer.fullName} (${widget.customer.id}) status changed to ${status.value}');
       ref.invalidate(customerProvider(widget.customer.id));
       ref.invalidate(customerListProvider);
       ref.invalidate(dashboardDataProvider);
@@ -207,7 +209,7 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
                   context.push('/customers/${customer.id}/edit',
                       extra: customer);
                 case MenuAction.archive:
-                  _changeStatus(CustomerStatus.archived);
+                  _delete(context);
                 case MenuAction.blacklist:
                   _changeStatus(CustomerStatus.blacklisted);
                 case MenuAction.activate:
@@ -307,10 +309,15 @@ class _ProfileTab extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Active Loans',
-                      style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  ...loans.map((loan) => _LoanTile(loan: loan)),
+                   Text('Active Loans',
+                       style: Theme.of(context).textTheme.titleMedium),
+                   const SizedBox(height: 8),
+                   ListView.builder(
+                     shrinkWrap: true,
+                     physics: const NeverScrollableScrollPhysics(),
+                     itemCount: loans.length,
+                     itemBuilder: (context, i) => _LoanTile(loan: loans[i]),
+                   ),
                 ],
               ),
             ),

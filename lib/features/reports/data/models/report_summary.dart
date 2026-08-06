@@ -79,6 +79,19 @@ class ReportSummary {
   final int totalCustomers;
   final List<ClientReport> clientReports;
   final List<OverdueEntry> overdueEntries;
+
+  /// Overall collection efficiency across the buckets actually included. When a
+  /// loan-type filter is active the excluded bucket is `empty()` (0 collected /
+  /// 0 expected), so this ratio naturally equals the included type's efficiency
+  /// instead of halving an average of percentages.
+  double get collectionEfficiency {
+    final collected =
+        dailyLoans.amountCollected + weeklyLoans.amountCollected;
+    final expected =
+        dailyLoans.expectedCollections + weeklyLoans.expectedCollections;
+    if (expected <= 0) return 0;
+    return ((collected / expected) * 100).clamp(0.0, 100.0);
+  }
 }
 
 class ClientReport {
@@ -93,6 +106,11 @@ class ClientReport {
     required this.totalPaid,
     required this.loanStatus,
     this.groupName,
+    required this.guarantorName,
+    required this.guarantorPhone,
+    required this.loanDate,
+    required this.interestAmount,
+    required this.savingsAmount,
   });
 
   final String customerId;
@@ -105,6 +123,19 @@ class ClientReport {
   final double totalPaid;
   final String loanStatus;
   final String? groupName;
+  final String guarantorName;
+  final String guarantorPhone;
+  final String loanDate;
+  final double interestAmount;
+  final double savingsAmount;
+
+  /// Expected repayment = principal + interest. Savings overpayments are a
+  /// separate ledger (shown in the savings report) and never inflate a loan's
+  /// expected collections. Identical for both loan types.
+  double get expectedAmount => amountBorrowed + interestAmount;
+
+  double get amountRemaining =>
+      (expectedAmount - totalPaid).clamp(0.0, double.infinity);
 }
 
 class OverdueEntry {
@@ -120,6 +151,8 @@ class OverdueEntry {
     required this.paidAmount,
     required this.overdueDays,
     this.groupName,
+    required this.guarantorName,
+    required this.guarantorPhone,
   });
 
   final String customerId;
@@ -133,6 +166,8 @@ class OverdueEntry {
   final double paidAmount;
   final int overdueDays;
   final String? groupName;
+  final String guarantorName;
+  final String guarantorPhone;
 
   double get amountRemaining => (amountDue - paidAmount).clamp(0.0, double.infinity);
 }

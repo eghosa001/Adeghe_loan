@@ -112,14 +112,18 @@ class _ForgotPinScreenState extends ConsumerState<ForgotPinScreen> {
           });
           return;
         }
+        final remaining = await _lockout?.remainingLockout();
+        if (!mounted) return;
         setState(() {
-          _lockoutUntil = DateTime.now().add(_lockout!.lockoutDuration);
+          _lockoutUntil =
+              DateTime.now().add(remaining ?? _lockout!.lockoutDuration);
           _message = 'Too many failed attempts. Locked out for '
-              '${_lockout!.lockoutDuration.inMinutes} minutes.';
+              '${_lockoutUntil!.difference(DateTime.now()).inMinutes + 1} minutes.';
           _startLockoutTimer();
         });
       } else {
-        final attemptsLeft = _lockout!.maxAttempts;
+        final attemptsLeft = await _lockout?.remainingAttempts() ?? 0;
+        if (!mounted) return;
         setState(() => _message =
             'Recovery password incorrect. $attemptsLeft attempts remaining.');
       }

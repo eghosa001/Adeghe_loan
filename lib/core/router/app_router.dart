@@ -21,6 +21,7 @@ import '../../features/documents/data/models/document_entity.dart';
 import '../../features/documents/presentation/screens/document_list_screen.dart';
 import '../../features/documents/presentation/screens/document_upload_screen.dart';
 import '../../features/documents/presentation/screens/secure_preview_screen.dart';
+import '../../features/loans/data/models/loan_entity.dart';
 import '../../features/loans/presentation/screens/loan_creation_screen.dart';
 import '../../features/loans/presentation/screens/loan_details_screen.dart';
 import '../../features/loans/presentation/screens/loan_list_screen.dart';
@@ -33,6 +34,12 @@ import '../../features/collection/presentation/screens/collection_screen.dart';
 import '../../features/collection/presentation/screens/future_schedule_screen.dart';
 import '../../features/reports/presentation/screens/report_screen.dart';
 import '../../features/reports/presentation/screens/overdue_report_screen.dart';
+import '../../features/reports/presentation/screens/daily_loan_report_screen.dart';
+import '../../features/reports/presentation/screens/weekly_loan_report_screen.dart';
+import '../../features/reports/presentation/screens/customer_report_screen.dart';
+import '../../features/reports/presentation/screens/savings_report_screen.dart';
+import '../../features/reports/presentation/screens/profit_report_screen.dart';
+import '../../features/reports/presentation/screens/collections_report_screen.dart';
 import '../../features/audit_log/presentation/screens/audit_log_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
 import '../../features/settings/presentation/screens/cloud_gate_screen.dart';
@@ -124,6 +131,36 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         GoRoute(
           path: '/reports',
           builder: (context, state) => const ReportScreen(),
+          routes: [
+            GoRoute(
+              path: 'daily-loans',
+              builder: (context, state) => const DailyLoanReportScreen(),
+            ),
+            GoRoute(
+              path: 'weekly-loans',
+              builder: (context, state) => const WeeklyLoanReportScreen(),
+            ),
+            GoRoute(
+              path: 'overdue',
+              builder: (context, state) => const OverdueReportScreen(),
+            ),
+            GoRoute(
+              path: 'customers',
+              builder: (context, state) => const CustomerReportScreen(),
+            ),
+            GoRoute(
+              path: 'savings-report',
+              builder: (context, state) => const SavingsReportScreen(),
+            ),
+            GoRoute(
+              path: 'profit',
+              builder: (context, state) => const ProfitReportScreen(),
+            ),
+            GoRoute(
+              path: 'collections',
+              builder: (context, state) => const CollectionsReportScreen(),
+            ),
+          ],
         ),
         GoRoute(
           path: '/savings',
@@ -193,7 +230,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         GoRoute(
           path: 'edit',
           builder: (context, state) {
-            final loan = state.extra as dynamic;
+            final loan = state.extra as Loan?;
             return LoanCreationScreen(
               customerId: loan?.customerId ?? '',
               existingLoan: loan,
@@ -247,10 +284,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     GoRoute(
       path: '/holidays',
       builder: (context, state) => const HolidayManagementScreen(),
-    ),
-    GoRoute(
-      path: '/overdue-report',
-      builder: (context, state) => const OverdueReportScreen(),
     ),
     GoRoute(
       path: '/audit-log',

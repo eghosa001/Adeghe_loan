@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../../core/utils/currency_utils.dart';
-import '../../../../core/widgets/app_drawer.dart';
+import '../../../../core/utils/date_utils.dart';
 import '../../../business/presentation/providers/business_providers.dart';
 import '../../data/models/report_summary.dart';
 import '../../services/export_manager.dart';
 import '../providers/report_provider.dart';
+import '../widgets/report_ui.dart';
 
+/// Unified Overdue Report. Tabs (All / Daily / Weekly) and each tab's export
+/// only ever contain that tab's filtered rows, so summaries and exports never
+/// diverge from what is on screen.
 class OverdueReportScreen extends ConsumerStatefulWidget {
   const OverdueReportScreen({super.key});
 
@@ -16,415 +19,212 @@ class OverdueReportScreen extends ConsumerStatefulWidget {
   ConsumerState<OverdueReportScreen> createState() => _OverdueReportScreenState();
 }
 
-class _OverdueReportScreenState extends ConsumerState<OverdueReportScreen> {
-  String? _selectedLoanType;
-  int _minDaysOverdue = 0;
+class _OverdueReportScreenState extends ConsumerState<OverdueReportScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
+  static const _tabs = ['All', 'Daily', 'Weekly'];
 
-  List<OverdueEntry> _applyFilters(List<OverdueEntry> entries) {
-    var filtered = entries;
-    if (_selectedLoanType != null) {
-      filtered = filtered.where((e) => e.loanType == _selectedLoanType).toList();
-    }
-    if (_minDaysOverdue > 0) {
-      filtered = filtered.where((e) => e.overdueDays >= _minDaysOverdue).toList();
-    }
-    return filtered;
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: _tabs.length, vsync: this);
   }
 
-  Future<void> _savePdf(List<OverdueEntry> entries) async {
-    final filtered = _applyFilters(entries);
-    try {
-      final path = await ExportManager.saveOverduePdf(filtered, 'Overdue Report',
-          currencySymbol: _currencySymbol);
-      if (!mounted) return;
-      if (path != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('PDF saved to Documents')),
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to save PDF: $e')),
-      );
-    }
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
-  Future<void> _sharePdf(List<OverdueEntry> entries) async {
-    final filtered = _applyFilters(entries);
-    try {
-      await ExportManager.shareOverduePdf(filtered, 'Overdue Report',
-          currencySymbol: _currencySymbol);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to share PDF: $e')),
-      );
+  String? get _loanTypeFilter {
+    switch (_tabController.index) {
+      case 1:
+        return 'daily';
+      case 2:
+        return 'weekly';
+      default:
+        return null;
     }
   }
-
-  String get _currencySymbol =>
-      ref.read(currencySymbolProvider).valueOrNull ??
-      CurrencyUtils.defaultSymbol;
 
   @override
   Widget build(BuildContext context) {
-    final asyncEntries = ref.watch(overdueReportProvider);
-    final theme = Theme.of(context);
+    final overdueAsync = ref.watch(overdueReportProvider);
+    final currencySymbol = ref.watch(currencySymbolProvider).valueOrNull ??
+        CurrencyUtils.defaultSymbol;
 
-    return Scaffold(
-      drawer: const AppDrawer(currentRoute: '/overdue-report'),
-      appBar: AppBar(
-        title: const Text('Overdue Report'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.download),
-            tooltip: 'Save PDF',
-            onPressed: asyncEntries.whenOrNull(
-              data: (entries) => () => _savePdf(entries),
-            ),
+    return ReportScreenShell(
+      title: 'Overdue Report',
+      subtitle: 'Unpaid installments past their due date',
+      children: [
+        overdueAsync.when(
+          loading: () => const Padding(
+            padding: EdgeInsets.all(48),
+            child: Center(child: CircularProgressIndicator()),
           ),
-          IconButton(
-            icon: const Icon(Icons.share),
-            tooltip: 'Share PDF',
-            onPressed: asyncEntries.whenOrNull(
-              data: (entries) => () => _sharePdf(entries),
-            ),
-          ),
-        ],
-      ),
-      body: asyncEntries.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Text('Failed to load overdue report: $e',
-                style: const TextStyle(color: Colors.red)),
-          ),
-        ),
-        data: (allEntries) {
-          final entries = _applyFilters(allEntries);
-          final totalOverdue = entries.fold<double>(0, (s, e) => s + e.amountRemaining);
-          final uniqueCustomers = entries.map((e) => e.customerId).toSet().length;
-          final avgDays = entries.isEmpty
-              ? 0
-              : entries.fold<int>(0, (s, e) => s + e.overdueDays) ~/ entries.length;
-          final dailyCount = entries.where((e) => e.loanType == 'daily').length;
-          final weeklyCount = entries.where((e) => e.loanType == 'weekly').length;
-
-          return RefreshIndicator(
-            onRefresh: () => ref.refresh(overdueReportProvider.future),
-            child: ListView(
+          error: (e, _) => Card(
+            child: Padding(
               padding: const EdgeInsets.all(16),
+              child: Text('Error: $e'),
+            ),
+          ),
+          data: (entries) {
+            final filtered = entries
+                .where((e) =>
+                    _loanTypeFilter == null ||
+                    e.loanType.toLowerCase() == _loanTypeFilter)
+                .toList();
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: _SummaryCard(
-                        title: 'Total Overdue',
-                        value: CurrencyUtils.format(totalOverdue,
-                            symbol: _currencySymbol),
-                        icon: Icons.warning_amber,
-                        color: Colors.red,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _SummaryCard(
-                        title: 'Installments',
-                        value: entries.length.toString(),
-                        icon: Icons.receipt_long,
-                        color: Colors.orange,
-                      ),
-                    ),
+                TabBar(
+                  controller: _tabController,
+                  tabs: const [
+                    Tab(text: 'All'),
+                    Tab(text: 'Daily'),
+                    Tab(text: 'Weekly'),
                   ],
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _SummaryCard(
-                        title: 'Customers',
-                        value: uniqueCustomers.toString(),
-                        icon: Icons.people,
-                        color: Colors.red.shade700,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _SummaryCard(
-                        title: 'Avg Days',
-                        value: avgDays.toString(),
-                        icon: Icons.timer,
-                        color: Colors.orange.shade700,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-
-                FilterChipRow(
-                  label: 'Loan Type',
-                  options: const ['All', 'Daily', 'Weekly'],
-                  selected: _selectedLoanType ?? 'All',
-                  onSelected: (v) {
-                    setState(() => _selectedLoanType = v == 'All' ? null : v.toLowerCase());
-                  },
-                ),
-                const SizedBox(height: 8),
-                FilterChipRow(
-                  label: 'Min Overdue',
-                  options: const ['All', '7+ days', '30+ days'],
-                  selected: _minDaysOverdue == 0
-                      ? 'All'
-                      : _minDaysOverdue == 7
-                          ? '7+ days'
-                          : '30+ days',
-                  onSelected: (v) {
-                    setState(() {
-                      _minDaysOverdue = switch (v) {
-                        '7+ days' => 7,
-                        '30+ days' => 30,
-                        _ => 0,
-                      };
-                    });
-                  },
+                  onTap: (_) => setState(() {}),
+                  labelColor: Theme.of(context).colorScheme.primary,
+                  unselectedLabelColor:
+                      Theme.of(context).colorScheme.onSurfaceVariant,
+                  indicatorColor: Theme.of(context).colorScheme.primary,
                 ),
                 const SizedBox(height: 16),
-
-                if (dailyCount > 0 && weeklyCount > 0) ...[
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _TypeBreakdownCard(
-                          title: 'Daily Loans',
-                          amount: entries
-                              .where((e) => e.loanType == 'daily')
-                              .fold<double>(0, (s, e) => s + e.amountRemaining),
-                          count: dailyCount,
-                          color: Colors.blue,
-                          currencySymbol: _currencySymbol,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _TypeBreakdownCard(
-                          title: 'Weekly Loans',
-                          amount: entries
-                              .where((e) => e.loanType == 'weekly')
-                              .fold<double>(0, (s, e) => s + e.amountRemaining),
-                          count: weeklyCount,
-                          color: Colors.teal,
-                          currencySymbol: _currencySymbol,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                ],
-
-                Text('Overdue Installments',
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-
-                if (entries.isEmpty)
-                  const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(32),
-                      child: Column(
-                        children: [
-                          Icon(Icons.check_circle_outline,
-                              size: 48, color: Colors.green),
-                          SizedBox(height: 12),
-                          Text('No overdue installments',
-                              style: TextStyle(fontSize: 16)),
-                        ],
-                      ),
-                    ),
-                  )
-                else
-                  ...entries.map(
-                    (e) => Card(
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: e.overdueDays > 7
-                              ? Colors.red.withValues(alpha: 0.1)
-                              : Colors.orange.withValues(alpha: 0.1),
-                          child: Text(
-                            '${e.overdueDays}d',
-                            style: TextStyle(
-                              color:
-                                  e.overdueDays > 7 ? Colors.red : Colors.orange,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                        title: Text(e.customerName),
-                        subtitle: Text(
-                          '${e.loanType} loan — Installment #${e.installmentNumber}'
-                          '${e.groupName != null ? ' — ${e.groupName}' : ''}'
-                          '\nDue: ${e.dueDate}'
-                          '${e.phone.isNotEmpty ? '\n${e.phone}' : ''}',
-                        ),
-                        isThreeLine: true,
-                        trailing: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              CurrencyUtils.format(e.amountRemaining,
-                                  symbol: _currencySymbol),
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.red),
-                            ),
-                            Text(
-                              'of ${CurrencyUtils.format(e.amountDue, symbol: _currencySymbol)}',
-                              style: theme.textTheme.bodySmall,
-                            ),
-                          ],
-                        ),
-                        onTap: () => context.push('/customers/${e.customerId}'),
-                      ),
-                    ),
-                  ),
+                _SummaryStrip(entries: filtered, currencySymbol: currencySymbol),
+                const SizedBox(height: 16),
+                ReportDataTable(
+                  columns: const [
+                    'Customer',
+                    'Phone',
+                    'Type',
+                    'Inst #',
+                    'Due Date',
+                    'Amount Due',
+                    'Amount Owed',
+                    'Days'
+                  ],
+                  rightAlignColumns: const [5, 6, 7],
+                  rows: filtered.map((e) => _row(e, currencySymbol)).toList(),
+                  totalsRow: _totalsRow(filtered, currencySymbol),
+                  emptyMessage: 'No overdue installments.',
+                ),
+                const SizedBox(height: 16),
+                ReportExportBar(
+                  enabled: filtered.isNotEmpty,
+                  onSavePdf: () => _export(context, 'pdf', filtered),
+                  onExcel: () => _export(context, 'excel', filtered),
+                  onPrint: () => _export(context, 'print', filtered),
+                ),
               ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({
-    required this.title,
-    required this.value,
-    required this.icon,
-    required this.color,
-  });
-
-  final String title;
-  final String value;
-  final IconData icon;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            CircleAvatar(
-              backgroundColor: color.withValues(alpha: 0.1),
-              child: Icon(icon, color: color),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title,
-                      style: Theme.of(context).textTheme.bodySmall),
-                  const SizedBox(height: 4),
-                  Text(value,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleLarge
-                          ?.copyWith(fontWeight: FontWeight.bold)),
-                ],
-              ),
-            ),
-          ],
+            );
+          },
         ),
-      ),
+      ],
     );
+  }
+
+  List<String> _row(OverdueEntry e, String symbol) => [
+        e.customerName,
+        e.phone,
+        e.loanType,
+        '${e.installmentNumber}',
+        e.dueDate,
+        CurrencyUtils.format(e.amountDue, symbol: symbol),
+        CurrencyUtils.format(e.amountRemaining, symbol: symbol),
+        '${e.overdueDays}',
+      ];
+
+  List<String>? _totalsRow(List<OverdueEntry> entries, String symbol) {
+    if (entries.isEmpty) return null;
+    final totalDue =
+        entries.fold<double>(0, (s, e) => s + e.amountDue);
+    final totalOwed = entries.fold<double>(0, (s, e) => s + e.amountRemaining);
+    return [
+      'Total (${entries.length})',
+      '',
+      '',
+      '',
+      '',
+      CurrencyUtils.format(totalDue, symbol: symbol),
+      CurrencyUtils.format(totalOwed, symbol: symbol),
+      '',
+    ];
+  }
+
+  Future<void> _export(
+      BuildContext context, String action, List<OverdueEntry> filtered) async {
+    final symbol = ref.read(currencySymbolProvider).valueOrNull ??
+        CurrencyUtils.defaultSymbol;
+    final totalOwed =
+        filtered.fold<double>(0, (s, e) => s + e.amountRemaining);
+    final customers = filtered.map((e) => e.customerId).toSet().length;
+    final avgDays = filtered.isEmpty
+        ? 0
+        : filtered.fold<int>(0, (s, e) => s + e.overdueDays) ~/
+            filtered.length;
+
+    final tabLabel = _tabs[_tabController.index];
+    final data = ReportExportData(
+      reportName: 'Overdue Report - $tabLabel',
+      periodLabel: 'As at ${AppDateUtils.formatDate(DateTime.now())}',
+      cards: [
+        ReportCard('Total Overdue', CurrencyUtils.format(totalOwed, symbol: symbol), highlight: true),
+        ReportCard('Installments', '${filtered.length}'),
+        ReportCard('Customers', '$customers'),
+        ReportCard('Avg Days', '$avgDays'),
+      ],
+      headers: const [
+        'Customer',
+        'Phone',
+        'Type',
+        'Inst #',
+        'Due Date',
+        'Amount Due',
+        'Amount Owed',
+        'Days'
+      ],
+      rightAlignColumns: const [5, 6, 7],
+      rows: filtered.map((e) => _row(e, symbol)).toList(),
+      totalsRow: _totalsRow(filtered, symbol),
+    );
+    await runReportExport(context: context, ref: ref, action: action, data: data);
   }
 }
 
-class _TypeBreakdownCard extends StatelessWidget {
-  const _TypeBreakdownCard({
-    required this.title,
-    required this.amount,
-    required this.count,
-    required this.color,
-    this.currencySymbol = CurrencyUtils.defaultSymbol,
-  });
+class _SummaryStrip extends StatelessWidget {
+  const _SummaryStrip({required this.entries, required this.currencySymbol});
 
-  final String title;
-  final double amount;
-  final int count;
-  final Color color;
+  final List<OverdueEntry> entries;
   final String currencySymbol;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            Text(title,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text(CurrencyUtils.format(amount, symbol: currencySymbol),
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: color,
-                    )),
-            const SizedBox(height: 4),
-            Text('$count installment(s)',
-                style: Theme.of(context).textTheme.bodySmall),
-          ],
+    final totalOwed = entries.fold<double>(0, (s, e) => s + e.amountRemaining);
+    final customers = entries.map((e) => e.customerId).toSet().length;
+    final avgDays = entries.isEmpty
+        ? 0
+        : entries.fold<int>(0, (s, e) => s + e.overdueDays) ~/ entries.length;
+    return ReportMetricStrip(
+      cards: [
+        ReportMetricCard(
+          label: 'Total Overdue',
+          value: CurrencyUtils.format(totalOwed, symbol: currencySymbol),
+          icon: Icons.warning_rounded,
+          accent: totalOwed > 0,
         ),
-      ),
-    );
-  }
-}
-
-class FilterChipRow extends StatelessWidget {
-  const FilterChipRow({
-    required this.label,
-    required this.options,
-    required this.selected,
-    required this.onSelected,
-    super.key,
-  });
-
-  final String label;
-  final List<String> options;
-  final String selected;
-  final ValueChanged<String> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label,
-            style: Theme.of(context)
-                .textTheme
-                .labelMedium
-                ?.copyWith(fontWeight: FontWeight.w600)),
-        const SizedBox(height: 6),
-        Wrap(
-          spacing: 8,
-          children: options.map((option) {
-            final isSelected = option == selected;
-            return ChoiceChip(
-              label: Text(option),
-              selected: isSelected,
-              onSelected: (_) => onSelected(option),
-            );
-          }).toList(),
-        ),
+        ReportMetricCard(
+            label: 'Installments',
+            value: '${entries.length}',
+            icon: Icons.event_busy_rounded),
+        ReportMetricCard(
+            label: 'Customers',
+            value: '$customers',
+            icon: Icons.people_alt_rounded),
+        ReportMetricCard(
+            label: 'Avg Days',
+            value: '$avgDays',
+            icon: Icons.timer_rounded),
       ],
     );
   }

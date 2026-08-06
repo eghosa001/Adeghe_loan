@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/di/providers.dart';
+import '../../../collection/presentation/providers/collection_provider.dart';
 import '../../data/models/report_summary.dart';
+import '../../data/models/report_models.dart';
 import '../../data/report_repository.dart';
 
 final reportRepositoryProvider = FutureProvider<ReportRepository>(
@@ -80,6 +82,73 @@ final reportSummaryProvider =
   final result = await repo.getReportSummary(dates.start, dates.end, loanType: dates.loanType);
   return result.when(
     success: (summary) => summary,
+    failure: (f) => throw f,
+  );
+});
+
+/// Customer Report (all customers, no date filter — aggregates are lifetime).
+final customerReportProvider = FutureProvider<List<CustomerReportRow>>((ref) async {
+  final repo = await ref.watch(reportRepositoryProvider.future);
+  final result = await repo.getCustomerReport();
+  return result.when(success: (rows) => rows, failure: (f) => throw f);
+});
+
+/// Savings Report (all savings accounts, no date filter — balances are live).
+final savingsReportProvider = FutureProvider<List<SavingsReportRow>>((ref) async {
+  final repo = await ref.watch(reportRepositoryProvider.future);
+  final result = await repo.getSavingsReport();
+  return result.when(success: (rows) => rows, failure: (f) => throw f);
+});
+
+/// Profit Report per date range + optional loan type filter.
+final profitReportProvider =
+    FutureProvider.family<List<ProfitReportRow>, ReportDateRange>((ref, dates) async {
+  final repo = await ref.watch(reportRepositoryProvider.future);
+  final result = await repo.getProfitReport(
+    startDate: dates.start,
+    endDate: dates.end,
+    loanType: dates.loanType,
+  );
+  return result.when(success: (rows) => rows, failure: (f) => throw f);
+});
+
+/// Dashboard trend series per date range + optional loan type filter.
+final dashboardTrendsProvider =
+    FutureProvider.family<DashboardTrends, ReportDateRange>((ref, dates) async {
+  final repo = await ref.watch(reportRepositoryProvider.future);
+  final result = await repo.getDashboardTrends(
+    startDate: dates.start,
+    endDate: dates.end,
+    loanType: dates.loanType,
+  );
+  return result.when(success: (trends) => trends, failure: (f) => throw f);
+});
+
+/// Collection Report per date range + optional loan type/group filter, built
+/// from the same source as the Collection screen (`getCollectionsByDateRange`)
+/// so the numbers always match.
+final collectionReportProvider =
+    FutureProvider.family<List<CollectionReportRow>, ReportDateRange>((ref, dates) async {
+  final repo = await ref.watch(collectionRepositoryProvider.future);
+  final result = await repo.getCollectionsByDateRange(
+    dates.start,
+    dates.end,
+    loanType: dates.loanType,
+  );
+  return result.when(
+    success: (rows) => rows
+        .map((row) => CollectionReportRow(
+              customerId: row.customerId,
+              customerName: row.customerName,
+              phone: row.phone,
+              loanId: row.loanId,
+              loanType: row.loanType,
+              amountDue: row.amountDue,
+              amountPaid: row.amountPaid,
+              outstandingBalance: row.outstandingBalance,
+              groupName: row.groupName,
+            ))
+        .toList(growable: false),
     failure: (f) => throw f,
   );
 });

@@ -32,6 +32,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
   window.SetQuitOnClose(true);
 
+  // Ensure the window is foreground and has focus on launch.
+  window.Show();
+  SetForegroundWindow(window.GetHandle());
+
   ::MSG msg;
   while (::GetMessage(&msg, nullptr, 0, 0)) {
     ::TranslateMessage(&msg);

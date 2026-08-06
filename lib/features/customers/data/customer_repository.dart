@@ -59,6 +59,9 @@ class CustomerRepository {
 
     _applyGroupFilter(groupId, conditions, args);
 
+    // Archived (soft-deleted) customers are hidden from active lists/search.
+    conditions.add("c.status != 'archived'");
+
     final where = conditions.isEmpty ? '1=1' : conditions.join(' AND ');
 
     final rows = await db.rawQuery('''
@@ -90,6 +93,7 @@ class CustomerRepository {
       args.addAll(List.filled(6, '%$term%'));
     }
     _applyGroupFilter(groupId, conditions, args);
+    conditions.add("c.status != 'archived'");
     final where = conditions.isEmpty ? '1=1' : conditions.join(' AND ');
     final rows = await db.rawQuery(
       'SELECT COUNT(*) AS count FROM customers c WHERE $where',
@@ -121,6 +125,7 @@ class CustomerRepository {
     }
 
     _applyGroupFilter(groupId, conditions, args);
+    conditions.add("c.status != 'archived'");
 
     final where = conditions.isEmpty ? '1=1' : conditions.join(' AND ');
 
@@ -233,7 +238,7 @@ class CustomerRepository {
       final duplicate = await db.query(
         'customers',
         columns: const ['id'],
-        where: '$column = ? AND id != ?',
+        where: "$column = ? AND id != ? AND status != 'archived'",
         whereArgs: [value, customer.id],
         limit: 1,
       );

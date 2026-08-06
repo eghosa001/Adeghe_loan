@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/providers.dart';
+import '../../../../core/utils/date_utils.dart';
 import '../../../../core/utils/input_formatters.dart';
 import '../../data/customer_repository.dart';
 import '../../data/models/customer_entity.dart';
@@ -136,7 +137,7 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
       lastDate: DateTime.now(),
     );
     if (date != null) {
-      _fields['dateOfBirth']!.text = date.toIso8601String().split('T').first;
+      _fields['dateOfBirth']!.text = AppDateUtils.formatForStorage(date);
     }
   }
 
@@ -178,7 +179,7 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
       signaturePath: existing?.signaturePath,
       notes: _optional('notes'),
       dateRegistered:
-          existing?.dateRegistered ?? DateTime.now().toIso8601String(),
+          existing?.dateRegistered ?? AppDateUtils.formatForStorage(DateTime.now()),
       status: _status,
       creditScore: existing?.creditScore ?? 0,
       groupId: _selectedGroupId,
@@ -194,9 +195,11 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
       if (mounted) context.pop();
     } on DuplicateCustomerException catch (error) {
       _showMessage(error.toString());
-    } catch (error, stackTrace) {
-      developer.log('Customer save error', error: error, stackTrace: stackTrace);
-      _showMessage('Unable to save customer: $error');
+    } catch (error) {
+      // Avoid logging the full error or stack trace which may contain PII or
+      // sensitive data. Log only a minimal non-sensitive summary.
+      developer.log('Customer save error: ${error.runtimeType}');
+      _showMessage('Unable to save customer');
     } finally {
       if (mounted) setState(() => _saving = false);
     }

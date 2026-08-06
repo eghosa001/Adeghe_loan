@@ -23,7 +23,9 @@ class AppDateUtils {
   // ---------------------------------------------------------------------
 
   /// e.g. "15 Jul 2026"
-  static String formatDate(DateTime date) => _displayFormat.format(date);
+  static String formatDate(DateTime date, {String? format}) => format != null
+      ? DateFormat(format).format(date)
+      : _displayFormat.format(date);
 
   /// e.g. "2026-07-15" — used for DB storage / sorting.
   static String formatForStorage(DateTime date) => _apiFormat.format(date);

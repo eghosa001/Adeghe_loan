@@ -39,7 +39,15 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen>
     _shakeAnimation = Tween<double>(begin: 0, end: 1).animate(
       CurvedAnimation(parent: _shakeController, curve: Curves.elasticOut),
     );
-    _checkBiometrics();
+    // The biometric prompt must not fire while a route transition (splash ->
+    // PIN, or re-entering after an inactivity/background lock) is still
+    // settling: Android drops the BiometricPrompt when it is triggered on a
+    // not-yet-resumed Activity, which is exactly why the prompt appeared to
+    // never show. Defer until the first frame and the transition have
+    // completed, then check.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(milliseconds: 400), _checkBiometrics);
+    });
     _checkLockout();
   }
 
@@ -54,12 +62,21 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen>
       });
       return;
     }
+    final message = await _lockoutCountdown(lockout);
+    if (!mounted || message == null) return;
+    setState(() => _lockoutMessage = message);
+  }
+
+  /// Formats the ACTUAL remaining lockout (which escalates per cycle: 5, 10,
+  /// 20, 40 min …) instead of a hard-coded base duration. Returns null when
+  /// not locked out.
+  Future<String?> _lockoutCountdown(PinLockoutService lockout) async {
     final remaining = await lockout.remainingLockout();
-    if (!mounted || remaining == null) return;
-    setState(() {
-      _lockoutMessage =
-          'Too many attempts. Try again in ${remaining.inMinutes + 1} min.';
-    });
+    if (remaining == null) return null;
+    final minutes = remaining.inMinutes;
+    if (minutes > 0) return 'Too many attempts. Try again in $minutes min.';
+    final seconds = remaining.inSeconds.clamp(1, 59);
+    return 'Too many attempts. Try again in $seconds sec.';
   }
 
   @override
@@ -70,77 +87,110 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen>
 
   Future<void> _checkBiometrics() async {
     final enabled = await _storage.isBiometricEnabled();
-    if (!enabled) return;
+    if (!enabled || !mounted) return;
     // A permanent lock can only be cleared by the recovery password; never let
     // biometrics bypass it.
     if (await PinLockoutService(_storage).isPermanentlyLocked()) return;
-    final result = await _bio.authenticate();
-    if (!mounted) return;
-    if (result == BiometricResult.success) _unlockApp();
+    // Retry a few times before giving up: at launch the platform can report
+    // biometrics transiently unavailable (enrollment/API not yet settled), and
+    // a silent `unavailable` must not swallow the prompt the user enabled.
+    for (var attempt = 0; attempt < 3 && mounted; attempt++) {
+      final result = await _bio.authenticate();
+      if (!mounted) return;
+      if (result == BiometricResult.success) {
+        _unlockApp();
+        return;
+      }
+      // `failed` means the user actively dismissed a wrong scan — do not nag.
+      if (result == BiometricResult.failed) return;
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
   }
 
   void _unlockApp() {
-    ref.read(authProvider.notifier).unlock();
-    GoRouter.of(context).go('/dashboard');
+    try {
+      ref.read(authProvider.notifier).unlock();
+      GoRouter.of(context).go('/dashboard');
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to unlock. Please try again.')),
+        );
+      }
+    }
   }
 
-  void _onKey(String key) async {
-    if (_isPermanentlyLocked) return;
-    if (_pin.length < AppConstants.maxPinLength) {
-      HapticFeedback.lightImpact();
-      setState(() {
-        _pin += key;
-        _isError = false;
-        _lockoutMessage = null;
-      });
-      if (_pin.length == AppConstants.pinLength) {
-        final pinToVerify = _pin;
-        await Future.delayed(const Duration(milliseconds: 200));
-        if (!mounted) return;
-
-        final lockout = PinLockoutService(_storage);
-        final lockedOut = await lockout.isLockedOut();
-        if (!mounted) return;
-        if (lockedOut) {
-          HapticFeedback.heavyImpact();
-          _shakeController.forward(from: 0);
-          setState(() {
-            _isError = true;
-            _lockoutMessage = 'Too many attempts. Try again in 5 min.';
-            _pin = '';
-          });
-          return;
-        }
-
-        final isValid = await _storage.verifyPin(pinToVerify);
-        if (!mounted) return;
-        if (isValid) {
-          await lockout.reset();
-          HapticFeedback.heavyImpact();
-          _unlockApp();
-        } else {
-          final triggeredLockout = await lockout.registerFailedAttempt();
+  Future<void> _onKey(String key) async {
+    try {
+      if (_isPermanentlyLocked) return;
+      if (_pin.length < AppConstants.maxPinLength) {
+        HapticFeedback.lightImpact();
+        setState(() {
+          _pin += key;
+          _isError = false;
+          _lockoutMessage = null;
+        });
+        if (_pin.length == AppConstants.pinLength) {
+          final pinToVerify = _pin;
+          await Future.delayed(const Duration(milliseconds: 200));
           if (!mounted) return;
-          final permanent = await lockout.isPermanentlyLocked();
+
+          final lockout = PinLockoutService(_storage);
+          final lockedOut = await lockout.isLockedOut();
           if (!mounted) return;
-          HapticFeedback.heavyImpact();
-          _shakeController.forward(from: 0);
-          setState(() {
-            _isError = true;
+          if (lockedOut) {
+            HapticFeedback.heavyImpact();
+            _shakeController.forward(from: 0);
+            final countdown = await _lockoutCountdown(lockout);
+            if (!mounted) return;
+            setState(() {
+              _isError = true;
+              _lockoutMessage = countdown;
+              _pin = '';
+            });
+            return;
+          }
+
+          final isValid = await _storage.verifyPin(pinToVerify);
+          if (!mounted) return;
+          if (isValid) {
+            await lockout.reset();
+            HapticFeedback.heavyImpact();
+            _unlockApp();
+          } else {
+            final triggeredLockout = await lockout.registerFailedAttempt();
+            if (!mounted) return;
+            final permanent = await lockout.isPermanentlyLocked();
+            if (!mounted) return;
+            HapticFeedback.heavyImpact();
+            _shakeController.forward(from: 0);
+            String? lockoutMessage;
             if (permanent) {
-              _isPermanentlyLocked = true;
-              _lockoutMessage = 'Too many failed attempts. This device is '
+              lockoutMessage = 'Too many failed attempts. This device is '
                   'locked. Use "Forgot PIN" and your recovery password to '
                   'reset it.';
             } else {
-              _lockoutMessage = triggeredLockout
-                  ? 'Too many attempts. Try again in 5 min.'
+              lockoutMessage = triggeredLockout
+                  ? await _lockoutCountdown(lockout)
                   : 'Incorrect PIN. Try again.';
             }
-            _pin = '';
-          });
+            if (!mounted) return;
+            setState(() {
+              _isError = true;
+              _isPermanentlyLocked = permanent;
+              _lockoutMessage = lockoutMessage;
+              _pin = '';
+            });
+          }
         }
       }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isError = true;
+        _lockoutMessage = 'An error occurred. Please try again.';
+        _pin = '';
+      });
     }
   }
 

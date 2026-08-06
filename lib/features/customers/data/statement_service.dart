@@ -41,8 +41,17 @@ class StatementService {
     // Fetch loans
     final loanRows = await db.query('loans', where: 'customer_id = ?', whereArgs: [customerId], orderBy: 'loan_date DESC');
 
-    // Fetch payments
-    final paymentRows = await db.query('payments', where: 'customer_id = ?', whereArgs: [customerId], orderBy: 'payment_date DESC');
+    // Fetch payments (money rule: only completed payments count, and the
+    // overpayment surplus credited to savings is never shown as a loan payment).
+    final paymentRows = await db.rawQuery('''
+      SELECT p.receipt_no, p.id, p.payment_date, p.payment_method,
+             (p.amount - COALESCE(st.amount, 0.0)) AS amount
+      FROM payments p
+      LEFT JOIN savings_transactions st
+        ON st.reference_loan_payment_id = p.id AND st.type = 'overpayment'
+      WHERE p.customer_id = ? AND p.status = 'completed'
+      ORDER BY p.payment_date DESC
+    ''', [customerId]);
 
     // Fetch savings balance
     final savingsRows = await db.query('savings_accounts', columns: ['balance'], where: 'customer_id = ?', whereArgs: [customerId], limit: 1);

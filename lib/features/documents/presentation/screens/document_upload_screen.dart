@@ -3,7 +3,9 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as p;
 
 import '../../data/document_repository.dart';
 import '../../data/models/document_entity.dart';
@@ -58,12 +60,13 @@ class _DocumentUploadScreenState extends ConsumerState<DocumentUploadScreen> {
       );
       if (image != null) setState(() => _selectedFile = File(image.path));
     } else {
-      final image = await ImagePicker().pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 90,
-        maxWidth: 1600,
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'png', 'jpg', 'jpeg'],
       );
-      if (image != null) setState(() => _selectedFile = File(image.path));
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.single;
+      if (file.path != null) setState(() => _selectedFile = File(file.path!));
     }
   }
 
@@ -140,7 +143,7 @@ class _DocumentUploadScreenState extends ConsumerState<DocumentUploadScreen> {
                       const SizedBox(height: 12),
                       Text(
                         _selectedFile != null
-                            ? _selectedFile!.path.split(Platform.pathSeparator).last
+                            ? p.basename(_selectedFile!.path)
                             : 'Tap to select a file',
                         style: theme.textTheme.bodyLarge,
                         textAlign: TextAlign.center,

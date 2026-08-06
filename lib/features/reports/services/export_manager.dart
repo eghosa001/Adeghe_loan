@@ -11,8 +11,46 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../core/utils/currency_utils.dart';
 import '../../../core/utils/date_utils.dart';
+import '../../business/data/models/business_profile_entity.dart';
 import '../../collection/data/models/collection_row.dart';
-import '../data/models/report_summary.dart';
+
+/// A summary card shown above the table in generated PDF reports.
+class ReportCard {
+  const ReportCard(this.label, this.value, {this.highlight = false});
+
+  final String label;
+  final String value;
+  final bool highlight;
+}
+
+/// Everything needed to render/export one report. Rows are pre-formatted
+/// display strings (currency formatted by the caller), so the exporter only
+/// lays them out — it can never produce a number different from the screen's
+/// filtered data. This is why exports always contain exactly the current
+/// report's data.
+class ReportExportData {
+  const ReportExportData({
+    required this.reportName,
+    required this.periodLabel,
+    required this.headers,
+    required this.rows,
+    required this.rightAlignColumns,
+    this.cards = const [],
+    this.totalsRow,
+  });
+
+  final String reportName;
+  final String periodLabel;
+  final List<ReportCard> cards;
+  final List<String> headers;
+  final List<List<String>> rows;
+
+  /// Column indexes whose values should be right-aligned (currency, counts).
+  final List<int> rightAlignColumns;
+
+  /// Optional right-aligned totals row rendered after the table.
+  final List<String>? totalsRow;
+}
 
 class ExportManager {
   ExportManager._();
@@ -30,26 +68,6 @@ class ExportManager {
     return _fontBold!;
   }
 
-  static pw.TextStyle _titleStyle(pw.Font bold) => pw.TextStyle(
-        font: bold,
-        fontSize: 20,
-        color: PdfColors.blue900,
-      );
-
-  static pw.TextStyle _sectionStyle(pw.Font bold) => pw.TextStyle(
-        font: bold,
-        fontSize: 13,
-        color: PdfColors.blue900,
-      );
-
-  static pw.BoxDecoration _headerDecoration() => const pw.BoxDecoration(
-        color: PdfColors.blue900,
-        borderRadius: pw.BorderRadius.only(
-          topLeft: pw.Radius.circular(4),
-          topRight: pw.Radius.circular(4),
-        ),
-      );
-
   /// Opens the system "Save to..." dialog (Storage Access Framework on
   /// Android) so the PDF lands in user-visible storage (e.g. Documents).
   /// Returns the destination path, or null if the user canceled.
@@ -64,7 +82,401 @@ class ExportManager {
     );
   }
 
-  // ── Collection PDF ──────────────────────────────────────────────────────────
+  static String _uniqueStamp() {
+    final now = DateTime.now();
+    final d = '${now.year}'
+        '${now.month.toString().padLeft(2, '0')}'
+        '${now.day.toString().padLeft(2, '0')}';
+    final t = '${now.hour.toString().padLeft(2, '0')}'
+        '${now.minute.toString().padLeft(2, '0')}'
+        '${now.second.toString().padLeft(2, '0')}_'
+        '${now.microsecond.toString().padLeft(6, '0')}';
+    return '${d}_$t';
+  }
+
+  static String _pdfFileName(ReportExportData data) =>
+      '${data.reportName.replaceAll(' ', '_')}_${_uniqueStamp()}.pdf';
+
+  static String _xlsxFileName(ReportExportData data) =>
+      '${data.reportName.replaceAll(' ', '_')}_${_uniqueStamp()}.xlsx';
+
+  // ── Generic branded PDF export (all report screens) ────────────────────────
+
+  static Future<Uint8List?> _loadLogo(BusinessProfile? profile) async {
+    if (profile?.logoPath == null) return null;
+    try {
+      final file = File(profile!.logoPath!);
+      if (!await file.exists()) return null;
+      return await file.readAsBytes();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<Uint8List> _buildReportPdfBytes(
+    ReportExportData data,
+    BusinessProfile? profile,
+  ) async {
+    final font = await _getFont();
+    final bold = await _getFontBold();
+    final pdf = pw.Document();
+
+    final companyName = (profile?.name ?? '').trim().isNotEmpty
+        ? profile!.name.trim()
+        : 'Adeghe Professional Services';
+    final companyAddress = (profile?.address ?? '').trim();
+
+    final logoBytes = await _loadLogo(profile);
+
+    final headers = data.headers;
+    final alignments = <pw.Alignment>[];
+    for (var i = 0; i < headers.length; i++) {
+      alignments.add(data.rightAlignColumns.contains(i)
+          ? pw.Alignment.centerRight
+          : pw.Alignment.centerLeft);
+    }
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4.landscape,
+        margin: const pw.EdgeInsets.all(28),
+        build: (context) {
+          final widgets = <pw.Widget>[
+            _buildLetterhead(font, bold, companyName, companyAddress, logoBytes),
+            pw.SizedBox(height: 16),
+            pw.Text(
+              data.reportName,
+              style: pw.TextStyle(font: bold, fontSize: 20, color: PdfColors.blue900),
+            ),
+            pw.SizedBox(height: 2),
+            pw.Text(
+              'Report Period: ${data.periodLabel}',
+              style: pw.TextStyle(font: font, fontSize: 10, color: PdfColors.grey700),
+            ),
+            if (data.cards.isNotEmpty) ...[
+              pw.SizedBox(height: 14),
+              ..._buildCards(font, bold, data.cards),
+            ],
+            pw.SizedBox(height: 16),
+            _buildPdfTable(
+                font, bold, headers, data.rows, alignments),
+            if (data.totalsRow != null) ...[
+              pw.SizedBox(height: 8),
+              _buildTotalsRow(font, bold, data.totalsRow!, alignments),
+            ],
+          ];
+          return widgets;
+        },
+        footer: (context) => pw.Container(
+          alignment: pw.Alignment.centerRight,
+          padding: const pw.EdgeInsets.only(top: 6),
+          child: pw.Text(
+            'Page ${context.pageNumber} of ${context.pagesCount}',
+            style: pw.TextStyle(font: font, fontSize: 8, color: PdfColors.grey600),
+          ),
+        ),
+      ),
+    );
+
+    return pdf.save();
+  }
+
+  static pw.Widget _buildLetterhead(
+    pw.Font font,
+    pw.Font bold,
+    String companyName,
+    String companyAddress,
+    Uint8List? logoBytes,
+  ) {
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.center,
+      children: [
+        if (logoBytes != null) ...[
+          pw.Image(pw.MemoryImage(logoBytes), height: 36, fit: pw.BoxFit.contain),
+          pw.SizedBox(width: 12),
+        ],
+        pw.Expanded(
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(companyName,
+                  style: pw.TextStyle(font: bold, fontSize: 14, color: PdfColors.blue900)),
+              if (companyAddress.isNotEmpty)
+                pw.Text(companyAddress,
+                    style: pw.TextStyle(font: font, fontSize: 8, color: PdfColors.grey700)),
+            ],
+          ),
+        ),
+        pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.end,
+          children: [
+            pw.Text(
+              'Generated: ${AppDateUtils.formatDateTime(DateTime.now())}',
+              style: pw.TextStyle(font: font, fontSize: 8, color: PdfColors.grey700),
+            ),
+            pw.SizedBox(height: 2),
+            pw.Text(
+              'Created by AIGHEWI EGHOSA',
+              style: pw.TextStyle(font: font, fontSize: 8, color: PdfColors.grey600),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  static List<pw.Widget> _buildCards(
+      pw.Font font, pw.Font bold, List<ReportCard> cards) {
+    const perRow = 5;
+    final rows = <List<ReportCard>>[];
+    for (var i = 0; i < cards.length; i += perRow) {
+      rows.add(cards.sublist(i, i + perRow > cards.length ? cards.length : i + perRow));
+    }
+
+    return [
+      for (final row in rows)
+        pw.Padding(
+          padding: const pw.EdgeInsets.only(bottom: 8),
+          child: pw.Row(
+            children: [
+              for (var i = 0; i < row.length; i++) ...[
+                if (i > 0) pw.SizedBox(width: 8),
+                pw.Expanded(child: _buildCard(font, bold, row[i])),
+              ],
+            ],
+          ),
+        ),
+    ];
+  }
+
+  static pw.Widget _buildCard(pw.Font font, pw.Font bold, ReportCard card) {
+    final color = card.highlight ? PdfColors.red700 : PdfColors.blue900;
+    return pw.Container(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: pw.BoxDecoration(
+        color: PdfColors.grey100,
+        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(card.label,
+              maxLines: 1,
+              overflow: pw.TextOverflow.clip,
+              style: pw.TextStyle(font: font, fontSize: 7, color: color)),
+          pw.SizedBox(height: 3),
+          pw.Text(card.value,
+              maxLines: 1,
+              style: pw.TextStyle(font: bold, fontSize: 11, color: PdfColors.black)),
+        ],
+      ),
+    );
+  }
+
+  static pw.Widget _buildPdfTable(
+    pw.Font font,
+    pw.Font bold,
+    List<String> headers,
+    List<List<String>> rows,
+    List<pw.Alignment> alignments,
+  ) {
+    if (rows.isEmpty) {
+      return pw.Text('No records match the current filters.',
+          style: pw.TextStyle(font: font, fontSize: 10, color: PdfColors.grey700));
+    }
+    return pw.TableHelper.fromTextArray(
+      headerStyle: pw.TextStyle(font: bold, fontSize: 8, color: PdfColors.white),
+      headerDecoration: const pw.BoxDecoration(
+        color: PdfColors.blue900,
+        borderRadius: pw.BorderRadius.only(
+          topLeft: pw.Radius.circular(4),
+          topRight: pw.Radius.circular(4),
+        ),
+      ),
+      cellStyle: pw.TextStyle(font: font, fontSize: 7),
+      cellHeight: 20,
+      cellAlignments: {
+        for (var i = 0; i < alignments.length; i++) i: alignments[i],
+      },
+      headers: headers,
+      data: rows,
+    );
+  }
+
+  static pw.Widget _buildTotalsRow(
+    pw.Font font,
+    pw.Font bold,
+    List<String> totals,
+    List<pw.Alignment> alignments,
+  ) {
+    return pw.Container(
+      padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 6),
+      decoration: const pw.BoxDecoration(
+        color: PdfColors.grey200,
+        borderRadius: pw.BorderRadius.all(pw.Radius.circular(4)),
+      ),
+      child: pw.Row(
+        children: [
+          for (var i = 0; i < totals.length; i++)
+            pw.Expanded(
+              child: pw.Container(
+                alignment: alignments[i],
+                child: pw.Text(totals[i],
+                    style: pw.TextStyle(font: bold, fontSize: 8, color: PdfColors.black)),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Saves a branded PDF via the system save dialog. Returns the chosen path
+  /// or null if the user canceled.
+  static Future<String?> saveReportPdf(
+    ReportExportData data, {
+    BusinessProfile? profile,
+  }) async {
+    final bytes = await _buildReportPdfBytes(data, profile);
+    return _savePdfViaPicker(bytes, _pdfFileName(data));
+  }
+
+  /// Writes the branded PDF to the app documents directory and returns the File.
+  static Future<File> exportReportToPdf(
+    ReportExportData data, {
+    BusinessProfile? profile,
+  }) async {
+    final bytes = await _buildReportPdfBytes(data, profile);
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File('${dir.path}/${_pdfFileName(data)}');
+    await file.writeAsBytes(bytes, flush: true);
+    return file;
+  }
+
+  static Future<void> shareReportPdf(
+    ReportExportData data, {
+    BusinessProfile? profile,
+  }) async {
+    final file = await exportReportToPdf(data, profile: profile);
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(file.path, mimeType: 'application/pdf')],
+        subject: data.reportName,
+      ),
+    );
+  }
+
+  /// Prints the same branded landscape layout the PDF export produces.
+  static Future<void> printReportPdf(
+    ReportExportData data, {
+    BusinessProfile? profile,
+  }) async {
+    final bytes = await _buildReportPdfBytes(data, profile);
+    await Printing.layoutPdf(onLayout: (_) async => bytes);
+  }
+
+  // ── Generic Excel export (all report screens) ──────────────────────────────
+
+  static Future<File> exportReportToXlsx(
+    ReportExportData data,
+  ) async {
+    final excel = Excel.createExcel();
+    final sheet = excel['Report'];
+
+    // Title + period
+    _appendStyled(sheet, 0, [data.reportName], bold: true, size: 13);
+    _appendStyled(sheet, 1, ['Period: ${data.periodLabel}']);
+    _appendStyled(sheet, 2, const []);
+
+    var rowIdx = 3;
+    // Summary cards (label / value)
+    for (final card in data.cards) {
+      _appendStyled(sheet, rowIdx, [card.label, card.value], bold: true);
+      rowIdx++;
+    }
+    if (data.cards.isNotEmpty) {
+      _appendStyled(sheet, rowIdx, const []);
+      rowIdx++;
+    }
+
+    // Table header
+    _appendStyled(sheet, rowIdx, data.headers, header: true);
+    rowIdx++;
+    for (final row in data.rows) {
+      _appendStyled(sheet, rowIdx, row);
+      rowIdx++;
+    }
+    if (data.totalsRow != null) {
+      _appendStyled(sheet, rowIdx, const []);
+      rowIdx++;
+      _appendStyled(sheet, rowIdx, data.totalsRow!, bold: true);
+    }
+
+    // Autosize columns from populated cells.
+    final maxCols = data.headers.length;
+    for (var c = 0; c < maxCols; c++) {
+      var maxWidth = 0;
+      for (var r = 0; r < sheet.maxRows; r++) {
+        final cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r));
+        final text = cell.value?.toString() ?? '';
+        if (text.length > maxWidth) maxWidth = text.length;
+      }
+      sheet.setColWidth(c, (maxWidth + 4).clamp(10, 60).toDouble());
+    }
+
+    final List<int>? bytes;
+    try {
+      bytes = excel.encode();
+    } catch (e) {
+      throw Exception('Failed to encode Excel file: $e');
+    }
+    if (bytes == null) {
+      throw Exception('Failed to encode Excel file: encode returned null');
+    }
+
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File('${dir.path}/${_xlsxFileName(data)}');
+    await file.writeAsBytes(bytes, flush: true);
+    return file;
+  }
+
+  static void _appendStyled(
+    Sheet sheet,
+    int rowIndex,
+    List<String> cells, {
+    bool bold = false,
+    bool header = false,
+    int size = 10,
+  }) {
+    sheet.appendRow(cells);
+    for (var c = 0; c < cells.length; c++) {
+      final cell = sheet.cell(
+          CellIndex.indexByColumnRow(columnIndex: c, rowIndex: rowIndex));
+      cell.cellStyle = CellStyle(
+        bold: bold || header,
+        fontSize: header ? 10 : size,
+        backgroundColorHex: header ? 'FFEAF0F7' : 'none',
+        bottomBorder:
+            header ? Border(borderStyle: BorderStyle.Thin) : null,
+      );
+    }
+  }
+
+  static Future<void> shareReportXlsx(ReportExportData data) async {
+    final file = await exportReportToXlsx(data);
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [
+          XFile(file.path,
+              mimeType:
+                  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        ],
+        text: data.reportName,
+        subject: data.reportName,
+      ),
+    );
+  }
+
+  // ── Collection PDF/Excel (preserved public API for the Collection screen) ──
 
   static Future<Uint8List> _buildCollectionPdfBytes(
     List<CollectionRow> rows,
@@ -107,7 +519,7 @@ class ExportManager {
               level: 0,
               child: pw.Text(
                 companyName ?? 'Collection Sheet',
-                style: _titleStyle(bold),
+                style: pw.TextStyle(font: bold, fontSize: 20, color: PdfColors.blue900),
               ),
             ),
             pw.SizedBox(height: 4),
@@ -136,7 +548,8 @@ class ExportManager {
               pw.Container(
                 padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 8),
                 decoration: const pw.BoxDecoration(color: PdfColors.grey200),
-                child: pw.Text('Group: $groupName', style: _sectionStyle(bold)),
+                child: pw.Text('Group: $groupName',
+                    style: pw.TextStyle(font: bold, fontSize: 13, color: PdfColors.blue900)),
               ),
             );
             widgets.add(pw.SizedBox(height: 8));
@@ -200,41 +613,6 @@ class ExportManager {
     return file;
   }
 
-  static String _uniqueStamp() {
-    final now = DateTime.now();
-    final d = '${now.year}'
-        '${now.month.toString().padLeft(2, '0')}'
-        '${now.day.toString().padLeft(2, '0')}';
-    final t = '${now.hour.toString().padLeft(2, '0')}'
-        '${now.minute.toString().padLeft(2, '0')}'
-        '${now.second.toString().padLeft(2, '0')}_'
-        '${now.microsecond.toString().padLeft(6, '0')}';
-    return '${d}_$t';
-  }
-
-  static String _reportPdfFileName(String title) =>
-      '${title.replaceAll(' ', '_')}_${_uniqueStamp()}.pdf';
-
-  static Future<File> exportReportToPdf(
-      ReportSummary summary, String title,
-      {String currencySymbol = CurrencyUtils.defaultSymbol}) async {
-    final bytes = await _buildReportPdfBytes(summary, title,
-        currencySymbol: currencySymbol);
-    final dir = await getApplicationDocumentsDirectory();
-    final fileName = _reportPdfFileName(title);
-    final file = File('${dir.path}/$fileName');
-    await file.writeAsBytes(bytes, flush: true);
-    return file;
-  }
-
-  static Future<String?> saveReportPdf(
-      ReportSummary summary, String title,
-      {String currencySymbol = CurrencyUtils.defaultSymbol}) async {
-    final bytes = await _buildReportPdfBytes(summary, title,
-        currencySymbol: currencySymbol);
-    return _savePdfViaPicker(bytes, _reportPdfFileName(title));
-  }
-
   static Future<String?> saveCollectionPdf(
     List<CollectionRow> rows,
     DateTime date, {
@@ -249,42 +627,6 @@ class ExportManager {
     final fileName =
         'collection_${date.toIso8601String().split('T').first.replaceAll('-', '')}_${_uniqueStamp()}.pdf';
     return _savePdfViaPicker(bytes, fileName);
-  }
-
-  static pw.Widget _buildCollectionTableForPrint(
-      List<CollectionRow> rows,
-      pw.Font font,
-      pw.Font bold,
-      String currencySymbol) {
-    final headers = [
-      'Customer Name',
-      'Amount To Collect',
-      'Paid',
-    ];
-
-    final data = rows
-        .map((r) => [
-              r.customerName,
-              CurrencyUtils.format(r.amountDue, symbol: currencySymbol),
-              '', // Blank for collector to write
-            ])
-        .toList();
-
-    return pw.TableHelper.fromTextArray(
-      headerStyle: pw.TextStyle(font: bold, fontSize: 9, color: PdfColors.white),
-      headerDecoration: _headerDecoration(),
-      headerAlignment: pw.Alignment.centerLeft,
-      cellStyle: pw.TextStyle(font: font, fontSize: 9),
-      cellAlignment: pw.Alignment.centerLeft,
-      cellHeight: 32,
-      cellAlignments: const {
-        0: pw.Alignment.centerLeft,
-        1: pw.Alignment.centerRight,
-        2: pw.Alignment.center,
-      },
-      headers: headers,
-      data: data,
-    );
   }
 
   static Future<void> shareCollectionPdf(
@@ -315,8 +657,6 @@ class ExportManager {
     );
   }
 
-  // ── Collection Excel ────────────────────────────────────────────────────────
-
   static Future<File> exportCollectionToExcel(
       List<CollectionRow> rows, DateTime date) async {
     final excel = Excel.createExcel();
@@ -341,8 +681,6 @@ class ExportManager {
     final allRows = <List<String?>>[];
     final boldRows = <bool>[];
 
-    // Groups are stacked vertically on the left; the ungrouped section is
-    // always last, at the bottom under all grouped customers.
     for (final groupName in sortedGroups) {
       allRows.add([groupName, null, null]);
       boldRows.add(true);
@@ -365,7 +703,6 @@ class ExportManager {
       ]);
     }
 
-    // Style all populated cells.
     final totalRows = sheet.maxRows;
     for (var r = 0; r < totalRows; r++) {
       for (var c = 0; c < totalCols; c++) {
@@ -383,7 +720,6 @@ class ExportManager {
       }
     }
 
-    // Auto column widths.
     for (var c = 0; c < totalCols; c++) {
       var maxWidth = 0;
       for (var r = 0; r < totalRows; r++) {
@@ -419,33 +755,6 @@ class ExportManager {
         value == 'Paid';
   }
 
-  static Future<File> exportOverdueToPdf(
-    List<OverdueEntry> entries,
-    String title, {
-    String currencySymbol = CurrencyUtils.defaultSymbol,
-  }) async {
-    final bytes = await _buildOverduePdfBytes(entries, title,
-        currencySymbol: currencySymbol);
-    final dir = await getApplicationDocumentsDirectory();
-    final fileName =
-        '${title.replaceAll(' ', '_')}_${_uniqueStamp()}.pdf';
-    final file = File('${dir.path}/$fileName');
-    await file.writeAsBytes(bytes, flush: true);
-    return file;
-  }
-
-  static Future<String?> saveOverduePdf(
-    List<OverdueEntry> entries,
-    String title, {
-    String currencySymbol = CurrencyUtils.defaultSymbol,
-  }) async {
-    final bytes = await _buildOverduePdfBytes(entries, title,
-        currencySymbol: currencySymbol);
-    final fileName =
-        '${title.replaceAll(' ', '_')}_${_uniqueStamp()}.pdf';
-    return _savePdfViaPicker(bytes, fileName);
-  }
-
   static List<CollectionRow> _sortedCollectionRows(List<CollectionRow> rows) {
     final daily = rows
         .where((r) => r.loanType.toLowerCase() == 'daily')
@@ -458,9 +767,6 @@ class ExportManager {
     return [...daily, ...weekly];
   }
 
-  /// Builds a list of rows for a single group.
-  /// Each row has exactly 3 entries (Name, Amount, Paid).
-  /// Section headers only populate the first entry; others are null.
   static List<List<String?>> _buildCollectionRows(List<CollectionRow> rows) {
     final result = <List<String?>>[];
 
@@ -470,7 +776,7 @@ class ExportManager {
       result.add(['DAILY LOANS', null, null]);
       result.add(['Name', 'Amount', 'Paid']);
       for (final r in dailyRows) {
-        result.add([r.customerName, r.amountDue.toStringAsFixed(2), '']);
+        result.add([r.customerName, r.amountDue.toStringAsFixed(2), r.amountPaid.toStringAsFixed(2)]);
       }
     }
 
@@ -483,404 +789,52 @@ class ExportManager {
       result.add(['WEEKLY LOANS', null, null]);
       result.add(['Name', 'Amount', 'Paid']);
       for (final r in weeklyRows) {
-        result.add([r.customerName, r.amountDue.toStringAsFixed(2), '']);
+        result.add([r.customerName, r.amountDue.toStringAsFixed(2), r.amountPaid.toStringAsFixed(2)]);
       }
     }
 
     return result;
   }
 
-  // ── Report PDF ──────────────────────────────────────────────────────
-
-  static Future<Uint8List> _buildReportPdfBytes(
-      ReportSummary summary, String title,
-      {String currencySymbol = CurrencyUtils.defaultSymbol}) async {
-    final font = await _getFont();
-    final bold = await _getFontBold();
-    final pdf = pw.Document();
-    String fmt(num v) => CurrencyUtils.format(v, symbol: currencySymbol);
-
-    pdf.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        build: (context) => [
-          pw.Header(
-            level: 0,
-            child: pw.Text(title, style: _titleStyle(bold)),
-          ),
-          pw.SizedBox(height: 4),
-          pw.Text(
-            'Generated: ${AppDateUtils.formatDateTime(DateTime.now())}',
-            style: pw.TextStyle(font: font, fontSize: 9, color: PdfColors.grey600),
-          ),
-          pw.SizedBox(height: 20),
-          pw.Text('Financial Summary', style: _sectionStyle(bold)),
-          pw.SizedBox(height: 8),
-          _buildSummaryRow(font, bold, 'Total Disbursed',
-              fmt(summary.totalDisbursed)),
-          _buildSummaryRow(font, bold, 'Total Collected',
-              fmt(summary.totalCollected)),
-          _buildSummaryRow(font, bold, 'Net Profit',
-              fmt(summary.netProfit)),
-          pw.SizedBox(height: 16),
-          pw.Text('Loan Status', style: _sectionStyle(bold)),
-          pw.SizedBox(height: 8),
-          _buildSummaryRow(font, bold, 'Active Loans', '${summary.activeLoans}'),
-          _buildSummaryRow(
-              font, bold, 'Completed Loans', '${summary.completedLoans}'),
-          _buildSummaryRow(
-              font, bold, 'Defaulted Loans', '${summary.defaultedLoans}'),
-          pw.SizedBox(height: 16),
-          pw.Text('Daily Loan Report', style: _sectionStyle(bold)),
-          pw.SizedBox(height: 8),
-          _buildSummaryRow(font, bold, 'Active', '${summary.dailyLoans.activeLoans}'),
-          _buildSummaryRow(font, bold, 'Completed', '${summary.dailyLoans.completedLoans}'),
-          _buildSummaryRow(font, bold, 'Overdue', '${summary.dailyLoans.overdueLoans}'),
-          _buildSummaryRow(font, bold, 'Disbursed', fmt(summary.dailyLoans.amountDisbursed)),
-          _buildSummaryRow(font, bold, 'Collected', fmt(summary.dailyLoans.amountCollected)),
-          _buildSummaryRow(font, bold, 'Outstanding', fmt(summary.dailyLoans.outstandingBalance)),
-          _buildSummaryRow(font, bold, 'Expected Collections', fmt(summary.dailyLoans.expectedCollections)),
-          _buildSummaryRow(font, bold, 'Collection Efficiency', '${summary.dailyLoans.collectionEfficiency.toStringAsFixed(1)}%'),
-          _buildSummaryRow(font, bold, 'Interest Earned', fmt(summary.dailyLoans.interestEarned)),
-          _buildSummaryRow(font, bold, 'Fees Earned', fmt(summary.dailyLoans.feesEarned)),
-          _buildSummaryRow(font, bold, 'Savings from Overpayments', fmt(summary.dailyLoans.savingsFromOverpayments)),
-          _buildSummaryRow(font, bold, 'Customers', '${summary.dailyLoans.customerCount}'),
-          pw.SizedBox(height: 16),
-          pw.Text('Weekly Loan Report', style: _sectionStyle(bold)),
-          pw.SizedBox(height: 8),
-          _buildSummaryRow(font, bold, 'Active', '${summary.weeklyLoans.activeLoans}'),
-          _buildSummaryRow(font, bold, 'Completed', '${summary.weeklyLoans.completedLoans}'),
-          _buildSummaryRow(font, bold, 'Overdue', '${summary.weeklyLoans.overdueLoans}'),
-          _buildSummaryRow(font, bold, 'Disbursed', fmt(summary.weeklyLoans.amountDisbursed)),
-          _buildSummaryRow(font, bold, 'Collected', fmt(summary.weeklyLoans.amountCollected)),
-          _buildSummaryRow(font, bold, 'Outstanding', fmt(summary.weeklyLoans.outstandingBalance)),
-          _buildSummaryRow(font, bold, 'Expected Collections', fmt(summary.weeklyLoans.expectedCollections)),
-          _buildSummaryRow(font, bold, 'Collection Efficiency', '${summary.weeklyLoans.collectionEfficiency.toStringAsFixed(1)}%'),
-          _buildSummaryRow(font, bold, 'Interest Earned', fmt(summary.weeklyLoans.interestEarned)),
-           _buildSummaryRow(font, bold, 'Fees Earned', fmt(summary.weeklyLoans.feesEarned)),
-           _buildSummaryRow(font, bold, 'Savings from Overpayments', fmt(summary.weeklyLoans.savingsFromOverpayments)),
-           _buildSummaryRow(font, bold, 'Customers', '${summary.weeklyLoans.customerCount}'),
-        ],
-      ),
-    );
-
-    return pdf.save();
-  }
-
-  static pw.Widget _buildSummaryRow(
-      pw.Font font, pw.Font bold, String label, String value) {
-    return pw.Container(
-      padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-      child: pw.Row(
-        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-        children: [
-          pw.Text(label, style: pw.TextStyle(font: font, fontSize: 10)),
-          pw.Text(value,
-              style: pw.TextStyle(font: bold, fontSize: 10)),
-        ],
-      ),
-    );
-  }
-
-  static Future<void> shareReportPdf(
-      ReportSummary summary, String title,
-      {String currencySymbol = CurrencyUtils.defaultSymbol}) async {
-    final file = await exportReportToPdf(summary, title,
-        currencySymbol: currencySymbol);
-    await SharePlus.instance.share(
-      ShareParams(
-        files: [XFile(file.path, mimeType: 'application/pdf')],
-        subject: title,
-      ),
-    );
-  }
-
-  // ── Overdue Report PDF ───────────────────────────────────────────────────────
-
-  static Future<Uint8List> _buildOverduePdfBytes(
-    List<OverdueEntry> entries,
-    String title, {
-    String currencySymbol = CurrencyUtils.defaultSymbol,
-  }) async {
-    final font = await _getFont();
-    final bold = await _getFontBold();
-    final pdf = pw.Document();
-
-    final totalOverdue = entries.fold<double>(0, (s, e) => s + e.amountRemaining);
-    final uniqueCustomers = entries.map((e) => e.customerId).toSet().length;
-    final avgDays = entries.isEmpty
-        ? 0
-        : entries.fold<int>(0, (s, e) => s + e.overdueDays) ~/ entries.length;
-
-    pdf.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(24),
-        build: (context) => [
-          pw.Header(
-            level: 0,
-            child: pw.Text(title, style: _titleStyle(bold)),
-          ),
-          pw.SizedBox(height: 4),
-          pw.Text(
-            'Generated: ${AppDateUtils.formatDateTime(DateTime.now())}',
-            style: pw.TextStyle(font: font, fontSize: 9, color: PdfColors.grey600),
-          ),
-          pw.SizedBox(height: 16),
-          pw.Row(
-            children: [
-              pw.Expanded(child: _buildOverdueSummaryCard(font, bold, 'Total Overdue', CurrencyUtils.format(totalOverdue, symbol: currencySymbol), PdfColors.red)),
-              pw.SizedBox(width: 8),
-              pw.Expanded(child: _buildOverdueSummaryCard(font, bold, 'Installments', '${entries.length}', PdfColors.orange)),
-            ],
-          ),
-          pw.SizedBox(height: 8),
-          pw.Row(
-            children: [
-              pw.Expanded(child: _buildOverdueSummaryCard(font, bold, 'Customers', '$uniqueCustomers', PdfColors.red700)),
-              pw.SizedBox(width: 8),
-              pw.Expanded(child: _buildOverdueSummaryCard(font, bold, 'Avg Days', '$avgDays', PdfColors.orange700)),
-            ],
-          ),
-          pw.SizedBox(height: 20),
-          pw.Text('Overdue Installments',
-              style: pw.TextStyle(font: bold, fontSize: 13, color: PdfColors.blue900)),
-          pw.SizedBox(height: 8),
-          _buildOverdueTable(entries, font, bold, currencySymbol),
-        ],
-      ),
-    );
-
-    return pdf.save();
-  }
-
-  static pw.Widget _buildOverdueSummaryCard(
-    pw.Font font,
-    pw.Font bold,
-    String label,
-    String value,
-    PdfColor color,
-  ) {
-    return pw.Container(
-      padding: const pw.EdgeInsets.all(12),
-      decoration: pw.BoxDecoration(
-        color: PdfColors.grey100,
-        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
-      ),
-      child: pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          pw.Text(label,
-              style: pw.TextStyle(font: font, fontSize: 9, color: color)),
-          pw.SizedBox(height: 4),
-          pw.Text(value,
-              style: pw.TextStyle(
-                  font: bold, fontSize: 16, color: color)),
-        ],
-      ),
-    );
-  }
-
-  static pw.Widget _buildOverdueTable(
-    List<OverdueEntry> entries,
-    pw.Font font,
-    pw.Font bold,
-    String currencySymbol,
-  ) {
+  static pw.Widget _buildCollectionTableForPrint(
+      List<CollectionRow> rows,
+      pw.Font font,
+      pw.Font bold,
+      String currencySymbol) {
     final headers = [
-      'Customer',
-      'Phone',
-      'Type',
-      'Inst #',
-      'Due Date',
-      'Days',
-      'Amount Due',
+      'Customer Name',
+      'Amount To Collect',
       'Paid',
-      'Remaining',
-      'Group',
     ];
 
-    final data = entries.map((e) => [
-          e.customerName,
-          e.phone,
-          e.loanType,
-          '${e.installmentNumber}',
-          e.dueDate,
-          '${e.overdueDays}',
-          CurrencyUtils.format(e.amountDue, symbol: currencySymbol),
-          CurrencyUtils.format(e.paidAmount, symbol: currencySymbol),
-          CurrencyUtils.format(e.amountRemaining, symbol: currencySymbol),
-          e.groupName ?? '',
-        ]).toList();
+    final data = rows
+        .map((r) => [
+              r.customerName,
+              CurrencyUtils.format(r.amountDue, symbol: currencySymbol),
+              CurrencyUtils.format(r.amountPaid, symbol: currencySymbol),
+            ])
+        .toList();
 
     return pw.TableHelper.fromTextArray(
-      headerStyle: pw.TextStyle(font: bold, fontSize: 7, color: PdfColors.white),
-      headerDecoration: const pw.BoxDecoration(
+      headerStyle: pw.TextStyle(font: bold, fontSize: 9, color: PdfColors.white),
+      headerDecoration: pw.BoxDecoration(
         color: PdfColors.blue900,
         borderRadius: pw.BorderRadius.only(
           topLeft: pw.Radius.circular(4),
           topRight: pw.Radius.circular(4),
         ),
       ),
-      cellStyle: pw.TextStyle(font: font, fontSize: 7),
+      headerAlignment: pw.Alignment.centerLeft,
+      cellStyle: pw.TextStyle(font: font, fontSize: 9),
       cellAlignment: pw.Alignment.centerLeft,
-      cellHeight: 24,
+      cellHeight: 32,
       cellAlignments: const {
         0: pw.Alignment.centerLeft,
-        1: pw.Alignment.centerLeft,
+        1: pw.Alignment.centerRight,
         2: pw.Alignment.center,
-        3: pw.Alignment.center,
-        4: pw.Alignment.center,
-        5: pw.Alignment.center,
-        6: pw.Alignment.centerRight,
-        7: pw.Alignment.centerRight,
-        8: pw.Alignment.centerRight,
-        9: pw.Alignment.centerLeft,
       },
       headers: headers,
       data: data,
-    );
-  }
-
-  static Future<void> shareOverduePdf(
-    List<OverdueEntry> entries,
-    String title, {
-    String currencySymbol = CurrencyUtils.defaultSymbol,
-  }) async {
-    final file = await exportOverdueToPdf(entries, title,
-        currencySymbol: currencySymbol);
-    await SharePlus.instance.share(
-      ShareParams(
-        files: [XFile(file.path, mimeType: 'application/pdf')],
-        subject: title,
-      ),
-    );
-  }
-
-  // ── Report CSV ──────────────────────────────────────────────────────────────
-
-  static Future<File> exportReportToCsv(
-      ReportSummary summary, String title) async {
-    final buffer = StringBuffer();
-    buffer.writeln('Metric,Value');
-    buffer.writeln(
-        'Total Disbursed,${summary.totalDisbursed.toStringAsFixed(2)}');
-    buffer.writeln(
-        'Total Collected,${summary.totalCollected.toStringAsFixed(2)}');
-    buffer.writeln('Net Profit,${summary.netProfit.toStringAsFixed(2)}');
-    buffer.writeln('Active Loans,${summary.activeLoans}');
-    buffer.writeln('Completed Loans,${summary.completedLoans}');
-    buffer.writeln('Defaulted Loans,${summary.defaultedLoans}');
-    buffer.writeln('Daily Loan - Active,${summary.dailyLoans.activeLoans}');
-    buffer.writeln('Daily Loan - Completed,${summary.dailyLoans.completedLoans}');
-    buffer.writeln('Daily Loan - Overdue,${summary.dailyLoans.overdueLoans}');
-    buffer.writeln('Daily Loan - Disbursed,${summary.dailyLoans.amountDisbursed.toStringAsFixed(2)}');
-    buffer.writeln('Daily Loan - Collected,${summary.dailyLoans.amountCollected.toStringAsFixed(2)}');
-    buffer.writeln('Daily Loan - Outstanding,${summary.dailyLoans.outstandingBalance.toStringAsFixed(2)}');
-    buffer.writeln('Daily Loan - Expected Collections,${summary.dailyLoans.expectedCollections.toStringAsFixed(2)}');
-    buffer.writeln('Daily Loan - Collection Efficiency,${summary.dailyLoans.collectionEfficiency.toStringAsFixed(1)}%');
-    buffer.writeln('Daily Loan - Interest Earned,${summary.dailyLoans.interestEarned.toStringAsFixed(2)}');
-    buffer.writeln('Daily Loan - Fees Earned,${summary.dailyLoans.feesEarned.toStringAsFixed(2)}');
-    buffer.writeln('Daily Loan - Overpayment Savings,${summary.dailyLoans.savingsFromOverpayments.toStringAsFixed(2)}');
-    buffer.writeln('Daily Loan - Customers,${summary.dailyLoans.customerCount}');
-    buffer.writeln('Weekly Loan - Active,${summary.weeklyLoans.activeLoans}');
-    buffer.writeln('Weekly Loan - Completed,${summary.weeklyLoans.completedLoans}');
-    buffer.writeln('Weekly Loan - Overdue,${summary.weeklyLoans.overdueLoans}');
-    buffer.writeln('Weekly Loan - Disbursed,${summary.weeklyLoans.amountDisbursed.toStringAsFixed(2)}');
-    buffer.writeln('Weekly Loan - Collected,${summary.weeklyLoans.amountCollected.toStringAsFixed(2)}');
-    buffer.writeln('Weekly Loan - Outstanding,${summary.weeklyLoans.outstandingBalance.toStringAsFixed(2)}');
-    buffer.writeln('Weekly Loan - Expected Collections,${summary.weeklyLoans.expectedCollections.toStringAsFixed(2)}');
-    buffer.writeln('Weekly Loan - Collection Efficiency,${summary.weeklyLoans.collectionEfficiency.toStringAsFixed(1)}%');
-    buffer.writeln('Weekly Loan - Interest Earned,${summary.weeklyLoans.interestEarned.toStringAsFixed(2)}');
-    buffer.writeln('Weekly Loan - Fees Earned,${summary.weeklyLoans.feesEarned.toStringAsFixed(2)}');
-    buffer.writeln('Weekly Loan - Overpayment Savings,${summary.weeklyLoans.savingsFromOverpayments.toStringAsFixed(2)}');
-    buffer.writeln('Weekly Loan - Customers,${summary.weeklyLoans.customerCount}');
-
-    final dir = await getApplicationDocumentsDirectory();
-    final fileName =
-        '${title.replaceAll(' ', '_')}_${_uniqueStamp()}.csv';
-    final file = File('${dir.path}/$fileName');
-    await file.writeAsString(buffer.toString(), flush: true);
-    return file;
-  }
-
-  // ── Report Excel ─────────────────────────────────────────────────────────────
-
-  static Future<File> exportReportToXlsx(
-      ReportSummary summary, String title) async {
-    final excel = Excel.createExcel();
-    final sheet = excel['Report'];
-
-    sheet.appendRow(['Metric', 'Value']);
-    sheet.appendRow(['Period', title]);
-    sheet.appendRow([]);
-    sheet.appendRow(['FINANCIAL SUMMARY']);
-    sheet.appendRow(['Total Disbursed', summary.totalDisbursed.toStringAsFixed(2)]);
-    sheet.appendRow(['Total Collected', summary.totalCollected.toStringAsFixed(2)]);
-    sheet.appendRow(['Net Profit', summary.netProfit.toStringAsFixed(2)]);
-    sheet.appendRow(['Expected Collections',
-        (summary.dailyLoans.expectedCollections + summary.weeklyLoans.expectedCollections).toStringAsFixed(2)]);
-    sheet.appendRow([]);
-    sheet.appendRow(['LOAN STATUS']);
-    sheet.appendRow(['Active Loans', summary.activeLoans]);
-    sheet.appendRow(['Completed Loans', summary.completedLoans]);
-    sheet.appendRow(['Defaulted Loans', summary.defaultedLoans]);
-    sheet.appendRow([]);
-    sheet.appendRow(['DAILY LOANS']);
-    sheet.appendRow(['Active', summary.dailyLoans.activeLoans]);
-    sheet.appendRow(['Completed', summary.dailyLoans.completedLoans]);
-    sheet.appendRow(['Defaulted', summary.dailyLoans.defaultedLoans]);
-    sheet.appendRow(['Overdue', summary.dailyLoans.overdueLoans]);
-    sheet.appendRow(['Disbursed', summary.dailyLoans.amountDisbursed.toStringAsFixed(2)]);
-    sheet.appendRow(['Collected', summary.dailyLoans.amountCollected.toStringAsFixed(2)]);
-    sheet.appendRow(['Outstanding', summary.dailyLoans.outstandingBalance.toStringAsFixed(2)]);
-    sheet.appendRow(['Expected Collections', summary.dailyLoans.expectedCollections.toStringAsFixed(2)]);
-    sheet.appendRow(['Collection Efficiency', '${summary.dailyLoans.collectionEfficiency.toStringAsFixed(1)}%']);
-    sheet.appendRow(['Interest Earned', summary.dailyLoans.interestEarned.toStringAsFixed(2)]);
-    sheet.appendRow(['Fees Earned', summary.dailyLoans.feesEarned.toStringAsFixed(2)]);
-    sheet.appendRow([]);
-    sheet.appendRow(['WEEKLY LOANS']);
-    sheet.appendRow(['Active', summary.weeklyLoans.activeLoans]);
-    sheet.appendRow(['Completed', summary.weeklyLoans.completedLoans]);
-    sheet.appendRow(['Defaulted', summary.weeklyLoans.defaultedLoans]);
-    sheet.appendRow(['Overdue', summary.weeklyLoans.overdueLoans]);
-    sheet.appendRow(['Disbursed', summary.weeklyLoans.amountDisbursed.toStringAsFixed(2)]);
-    sheet.appendRow(['Collected', summary.weeklyLoans.amountCollected.toStringAsFixed(2)]);
-    sheet.appendRow(['Outstanding', summary.weeklyLoans.outstandingBalance.toStringAsFixed(2)]);
-    sheet.appendRow(['Expected Collections', summary.weeklyLoans.expectedCollections.toStringAsFixed(2)]);
-    sheet.appendRow(['Collection Efficiency', '${summary.weeklyLoans.collectionEfficiency.toStringAsFixed(1)}%']);
-    sheet.appendRow(['Interest Earned', summary.weeklyLoans.interestEarned.toStringAsFixed(2)]);
-    sheet.appendRow(['Fees Earned', summary.weeklyLoans.feesEarned.toStringAsFixed(2)]);
-
-    final List<int>? bytes;
-    try {
-      bytes = excel.encode();
-    } catch (e) {
-      throw Exception('Failed to encode Excel file: $e');
-    }
-    if (bytes == null) throw Exception('Failed to encode Excel file: encode returned null');
-
-    final dir = await getApplicationDocumentsDirectory();
-    final fileName =
-        '${title.replaceAll(' ', '_')}_${_uniqueStamp()}.xlsx';
-    final file = File('${dir.path}/$fileName');
-    await file.writeAsBytes(bytes, flush: true);
-    return file;
-  }
-
-  static Future<void> shareReportXlsx(
-      ReportSummary summary, String title) async {
-    final file = await exportReportToXlsx(summary, title);
-    await SharePlus.instance.share(
-      ShareParams(
-        files: [
-          XFile(file.path,
-              mimeType:
-                  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        ],
-        text: title,
-        subject: title,
-      ),
     );
   }
 }

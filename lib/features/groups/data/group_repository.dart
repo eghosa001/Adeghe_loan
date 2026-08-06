@@ -71,7 +71,7 @@ class GroupRepository {
     final db = await _database;
     final rows = await db.query(
       'customers',
-      where: 'group_id = ?',
+      where: "group_id = ? AND status != 'archived'",
       whereArgs: [groupId],
       orderBy: 'full_name COLLATE NOCASE ASC',
     );
@@ -105,10 +105,10 @@ class GroupRepository {
   Future<Map<String, dynamic>> getStats(String groupId) async {
     final db = await _database;
     final results = await Future.wait([
-      db.rawQuery('SELECT COUNT(*) AS count FROM customers WHERE group_id = ?', [groupId]),
-      db.rawQuery("SELECT COUNT(*) AS count FROM loans l INNER JOIN customers c ON l.customer_id = c.id WHERE c.group_id = ? AND l.status = 'active'", [groupId]),
-      db.rawQuery("SELECT COALESCE(SUM(l.outstanding_balance), 0.0) AS total FROM loans l INNER JOIN customers c ON l.customer_id = c.id WHERE c.group_id = ? AND l.status = 'active'", [groupId]),
-      db.rawQuery("SELECT COALESCE(SUM(sa.balance), 0.0) AS total FROM savings_accounts sa INNER JOIN customers c ON sa.customer_id = c.id WHERE c.group_id = ?", [groupId]),
+      db.rawQuery("SELECT COUNT(*) AS count FROM customers WHERE group_id = ? AND status != 'archived'", [groupId]),
+      db.rawQuery("SELECT COUNT(*) AS count FROM loans l INNER JOIN customers c ON l.customer_id = c.id WHERE c.group_id = ? AND l.status = 'active' AND c.status != 'archived'", [groupId]),
+      db.rawQuery("SELECT COALESCE(SUM(l.outstanding_balance), 0.0) AS total FROM loans l INNER JOIN customers c ON l.customer_id = c.id WHERE c.group_id = ? AND l.status = 'active' AND c.status != 'archived'", [groupId]),
+      db.rawQuery("SELECT COALESCE(SUM(sa.balance), 0.0) AS total FROM savings_accounts sa INNER JOIN customers c ON sa.customer_id = c.id WHERE c.group_id = ? AND c.status != 'archived'", [groupId]),
     ]);
     return {
       'memberCount': (results[0].first['count'] as int?) ?? 0,

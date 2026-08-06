@@ -272,6 +272,7 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
     result.when(
       success: (_) {
         _ref.invalidate(loanDetailsProvider(existingLoan.id));
+        _ref.invalidate(loanScheduleProvider(existingLoan.id));
         _ref.invalidate(dashboardDataProvider);
         _ref.invalidate(customerListProvider);
         _ref.invalidate(customerProvider(customerId));

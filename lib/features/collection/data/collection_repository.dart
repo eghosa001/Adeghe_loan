@@ -1,6 +1,7 @@
 import 'package:sqflite_sqlcipher/sqflite.dart';
 
 import '../../../core/database/database_service.dart';
+import '../../../core/database/holiday_sql.dart';
 import '../../../core/error/failure.dart';
 import 'models/collection_row.dart';
 
@@ -18,7 +19,7 @@ class CollectionRepository {
       final db = await _database;
       final dateStr = date.toIso8601String().split('T').first;
 
-      final conditions = <String>['DATE(rs.due_date) = ?', "l.status = 'active'"];
+      final conditions = <String>['DATE(rs.due_date) = ?', "l.status = 'active'", notOnEnabledHolidaySql];
       final args = <dynamic>[dateStr];
 
       if (groupId != null && groupId.isNotEmpty) {
@@ -124,6 +125,7 @@ class CollectionRepository {
           COALESCE(
             (SELECT rs.amount FROM repayment_schedule rs
              WHERE rs.loan_id = l.id AND DATE(rs.due_date) BETWEEN ? AND ?
+               AND $notOnEnabledHolidaySql
              ORDER BY rs.due_date ASC LIMIT 1),
             l.daily_payment,
             l.weekly_payment
@@ -134,12 +136,14 @@ class CollectionRepository {
           cg.name AS groupName,
           (SELECT rs.status FROM repayment_schedule rs
            WHERE rs.loan_id = l.id AND DATE(rs.due_date) BETWEEN ? AND ?
+             AND $notOnEnabledHolidaySql
            ORDER BY rs.due_date ASC LIMIT 1) AS scheduleStatus
         FROM loans l
         INNER JOIN customers c ON l.customer_id = c.id
         LEFT JOIN customer_groups cg ON c.group_id = cg.id
         LEFT JOIN repayment_schedule rs
           ON rs.loan_id = l.id AND DATE(rs.due_date) BETWEEN ? AND ?
+            AND $notOnEnabledHolidaySql
         LEFT JOIN payments p ON p.loan_id = l.id
           AND DATE(p.payment_date) BETWEEN ? AND ?
           AND p.status = 'completed'
@@ -211,6 +215,7 @@ class CollectionRepository {
         WHERE DATE(rs.due_date) BETWEEN ? AND ?
           AND l.status = 'active'
           AND rs.status != 'paid'
+          AND $notOnEnabledHolidaySql
         ORDER BY rs.due_date ASC, c.full_name COLLATE NOCASE ASC
       ''', [todayStr, endStr]);
 

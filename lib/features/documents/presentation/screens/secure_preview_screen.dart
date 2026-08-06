@@ -7,6 +7,7 @@ import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
 
+import '../../../../core/constants/app_constants.dart';
 import '../../data/models/document_entity.dart';
 import '../providers/document_providers.dart';
 
@@ -17,21 +18,21 @@ class SecurePreviewScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final bytes = ref.watch(_decryptedDocumentProvider(document));
+    final decrypted = ref.watch(_decryptedDocumentProvider(document));
     return Scaffold(
       appBar: AppBar(
         title: Text(document.type.label),
         actions: [
           IconButton(
-            onPressed: bytes.valueOrNull == null
+            onPressed: decrypted.valueOrNull == null
                 ? null
-                : () => _export(context, bytes.value!),
+                : () => _export(context, decrypted.value!.bytes),
             icon: const Icon(Icons.download),
             tooltip: 'Save decrypted copy',
           ),
         ],
       ),
-      body: bytes.when(
+      body: decrypted.when(
         loading: () => const Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -69,20 +70,35 @@ class SecurePreviewScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildContent(BuildContext context, Uint8List data) {
-    if (document.isPdf) {
+  Widget _buildContent(
+      BuildContext context, ({Uint8List bytes, String mimeType}) data) {
+    // Render with the MIME type detected from the decrypted *content*, never the
+    // stored metadata, so a row whose metadata disagrees with its bytes is not
+    // steered into the wrong parser.
+    if (data.mimeType == 'application/pdf') {
       return PdfPreview(
-        build: (format) async => data,
+        build: (format) async => data.bytes,
         canChangePageFormat: false,
         canChangeOrientation: false,
         allowPrinting: false,
       );
     }
-    if (document.isImage) {
+    if (data.mimeType.startsWith('image/')) {
+      // Decode at, and never wider than, maxDocumentImageDimension so a crafted
+      // image with huge intrinsic dimensions cannot exhaust device memory.
+      // Flutter hoists cacheWidth/cacheHeight into a scaled decode, so the
+      // full-resolution buffer is never materialized.
+      const cap = AppConstants.maxDocumentImageDimension;
       return InteractiveViewer(
         minScale: 0.5,
         maxScale: 4.0,
-        child: Center(child: Image.memory(data)),
+        child: Center(
+            child: Image.memory(
+          data.bytes,
+          cacheWidth: cap,
+          cacheHeight: cap,
+          gaplessPlayback: true,
+        )),
       );
     }
     return const Center(
@@ -150,6 +166,7 @@ class SecurePreviewScreen extends ConsumerWidget {
 }
 
 final _decryptedDocumentProvider =
-    FutureProvider.family<Uint8List, CustomerDocument>((ref, document) {
+    FutureProvider.family<({Uint8List bytes, String mimeType}), CustomerDocument>(
+        (ref, document) {
   return ref.watch(documentRepositoryProvider).decrypt(document);
 });

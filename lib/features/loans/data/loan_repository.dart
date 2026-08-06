@@ -3,6 +3,7 @@ import 'package:loantrack/core/di/providers.dart';
 import 'package:loantrack/core/database/database_service.dart';
 import 'package:loantrack/core/error/failure.dart';
 import 'package:loantrack/core/utils/currency_utils.dart';
+import 'package:loantrack/features/customers/data/models/customer_entity.dart';
 import 'package:loantrack/features/holidays/data/models/holiday_entity.dart';
 import 'package:loantrack/features/loans/data/models/loan_entity.dart';
 import 'package:loantrack/features/loans/data/models/repayment_installment_entity.dart';
@@ -23,7 +24,20 @@ class LoanRepository {
     if (validation != null) return Result.failure(validation);
     try {
       final db = await _database;
-      await db.transaction((txn) async {
+      return await db.transaction((txn) async {
+        // A loan must never be created for an archived (soft-deleted) customer.
+        final customerRows = await txn.query(
+          'customers',
+          columns: const ['id', 'status'],
+          where: 'id = ?',
+          whereArgs: [loan.customerId],
+          limit: 1,
+        );
+        if (customerRows.isEmpty ||
+            customerRows.first['status'] == CustomerStatus.archived.value) {
+          return const Result<void>.failure(ValidationFailure(
+              'Cannot create a loan for an archived customer.'));
+        }
         await txn.insert(
           'loans',
           loan.toMap(),
@@ -39,8 +53,8 @@ class LoanRepository {
           );
         }
         await batch.commit(noResult: true);
+        return const Result.success(null);
       });
-      return const Result.success(null);
     } on DatabaseException catch (e) {
       return Result.failure(DatabaseFailure('Failed to save loan.', cause: e));
     }

@@ -125,10 +125,11 @@ class BackupService {
   }
 
   /// Creates a backup containing the encrypted database AND the encrypted
-  /// customer documents in `secure_documents/` (ZIP container).
+  /// customer documents in `secure_documents/` (ZIP container). The DB is
+  /// closed for the duration and reopened under exclusive access so no other
+  /// caller can grab a half-open connection mid-backup (M14).
   Future<File> createBackup() async {
-    await _databaseService.close();
-    try {
+    return _databaseService.withExclusiveAccess(() async {
       final source = File(await _databaseService.databasePath);
       if (!await source.exists()) {
         throw Exception('Database file not found for backup.');
@@ -136,8 +137,7 @@ class BackupService {
 
       final archive = Archive();
       final dbBytes = await source.readAsBytes();
-      archive.addFile(
-          ArchiveFile(_dbArchiveEntry, dbBytes.length, dbBytes));
+      archive.addFile(ArchiveFile(_dbArchiveEntry, dbBytes.length, dbBytes));
 
       final docsDirectory = await _secureDocumentsDirectory();
       final docFiles = await docsDirectory
@@ -168,10 +168,23 @@ class BackupService {
           '${_uuidV4Short()}.${AppConstants.backupFileExtension}';
       final target = File(join((await backupDirectory).path, backupFileName));
       await target.writeAsBytes(payload, flush: true);
+
+      // On Windows, attempt to restrict the backup file's ACL to the current
+      // user. This is best-effort and will not fail the backup if it cannot be
+      // applied.
+      if (Platform.isWindows) {
+        try {
+          final user = Platform.environment['USERNAME'] ?? '';
+          if (user.isNotEmpty) {
+            await Process.run('icacls', [target.path, '/inheritance:r', '/grant:r', '$user:R']);
+          }
+        } catch (_) {
+          // Ignore failures; backup creation succeeded regardless of ACL.
+        }
+      }
+
       return target;
-    } finally {
-      await _databaseService.database;
-    }
+    });
   }
 
   /// Creates a backup automatically when enabled in settings and none was made
@@ -297,47 +310,46 @@ class BackupService {
     }
 
     // Swap: close the live DB, move the current one aside, move the verified
-    // backup into place. Roll back on any failure.
+    // backup into place. Roll back on any failure. The swap runs under
+    // exclusive access so no concurrent caller can open the DB mid-swap, and
+    // the database is reopened (or the old file rolled back) before any caller
+    // proceeds (M14).
     final rollbackPath = '$targetPath.old';
     final rollbackFile = File(rollbackPath);
     final targetFile = File(targetPath);
-    await _databaseService.close();
-    try {
-      if (await rollbackFile.exists()) await rollbackFile.delete();
-      if (await targetFile.exists()) {
-        await targetFile.rename(rollbackPath);
+    await _databaseService.withExclusiveAccess(() async {
+      try {
+        if (await rollbackFile.exists()) await rollbackFile.delete();
+        if (await targetFile.exists()) {
+          await targetFile.rename(rollbackPath);
+        }
+        await tempFile.rename(targetPath);
+      } catch (_) {
+        if (await rollbackFile.exists() && !await targetFile.exists()) {
+          await rollbackFile.rename(targetPath);
+        }
+        if (await tempFile.exists()) await tempFile.delete();
+        rethrow;
+      } finally {
+        if (await rollbackFile.exists()) await rollbackFile.delete();
       }
-      await tempFile.rename(targetPath);
-    } catch (_) {
-      if (await rollbackFile.exists() && !await targetFile.exists()) {
-        await rollbackFile.rename(targetPath);
-      }
-      if (await tempFile.exists()) await tempFile.delete();
-      rethrow;
-    } finally {
-      if (await rollbackFile.exists()) await rollbackFile.delete();
-    }
+    });
 
-    // Replace the encrypted document files that came with the backup, then
-    // reopen the database.
-    try {
-      if (documentFiles.isNotEmpty) {
-        final docsDirectory = await _secureDocumentsDirectory();
-        final existing = await docsDirectory
-            .list()
-            .where((e) => e is File)
-            .cast<File>()
-            .toList();
-        for (final file in existing) {
-          if (await file.exists()) await file.delete();
-        }
-        for (final entry in documentFiles.entries) {
-          await File(join(docsDirectory.path, entry.key))
-              .writeAsBytes(entry.value, flush: true);
-        }
+    // Replace the encrypted document files that came with the backup.
+    if (documentFiles.isNotEmpty) {
+      final docsDirectory = await _secureDocumentsDirectory();
+      final existing = await docsDirectory
+          .list()
+          .where((e) => e is File)
+          .cast<File>()
+          .toList();
+      for (final file in existing) {
+        if (await file.exists()) await file.delete();
       }
-    } finally {
-      await _databaseService.database;
+      for (final entry in documentFiles.entries) {
+        await File(join(docsDirectory.path, entry.key))
+            .writeAsBytes(entry.value, flush: true);
+      }
     }
   }
 }

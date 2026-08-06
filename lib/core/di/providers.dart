@@ -13,6 +13,23 @@ import '../../features/backup/data/backup_service.dart';
 import '../../features/customers/data/statement_service.dart';
 import '../../features/audit_log/data/audit_log_repository.dart';
 
+class _ThemeModeNotifier extends StateNotifier<ThemeMode> {
+  _ThemeModeNotifier(this._storage) : super(ThemeMode.system) {
+    _load();
+  }
+
+  final SecureStorageService _storage;
+
+  Future<void> _load() async {
+    state = await _storage.getThemeMode();
+  }
+
+  Future<void> setThemeMode(ThemeMode mode) async {
+    await _storage.setThemeMode(mode);
+    state = mode;
+  }
+}
+
 final secureStorageProvider = Provider((ref) => SecureStorageService());
 
 final fileEncryptionProvider = Provider<FileEncryptionService>((ref) {
@@ -70,7 +87,10 @@ final cloudSyncServiceProvider = FutureProvider<CloudSyncService>((ref) async {
   return CloudSyncService(dbService);
 });
 
-final themeModeProvider = StateProvider<ThemeMode>((ref) => ThemeMode.system);
+final themeModeProvider =
+    StateNotifierProvider<_ThemeModeNotifier, ThemeMode>((ref) {
+  return _ThemeModeNotifier(ref.read(secureStorageProvider));
+});
 
 /// Logs an auditable user action. Safe to call — errors are swallowed.
 Future<void> logAuditAction(dynamic ref, String action, String details) async {

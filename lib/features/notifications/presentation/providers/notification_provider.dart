@@ -3,9 +3,8 @@ import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../../core/constants/app_constants.dart';
+import '../../../../core/database/holiday_sql.dart';
 import '../../../../core/di/providers.dart';
-import '../../../../core/security/secure_storage_service.dart';
-import '../../../backup/data/backup_service.dart';
 import '../../data/notification_item.dart';
 
 final notificationProvider = FutureProvider<List<NotificationItem>>((ref) async {
@@ -17,14 +16,18 @@ final notificationProvider = FutureProvider<List<NotificationItem>>((ref) async 
   final uuid = const Uuid();
   final currency = await _getCurrency(db);
 
-  // 1. Overdue loans — past due installments on active loans only
+  // 1. Overdue loans — past due installments on active/defaulted loans only.
+  //    Uses `status != 'paid'` (a partially-paid installment is still overdue)
+  //    to match the Overdue report and collection screens.
   final overdue = await db.rawQuery('''
     SELECT l.id, c.full_name, rs.due_date, rs.amount, rs.paid_amount,
            (rs.amount - rs.paid_amount) AS remaining
     FROM repayment_schedule rs
     INNER JOIN loans l ON rs.loan_id = l.id
     INNER JOIN customers c ON l.customer_id = c.id
-    WHERE rs.status = 'pending' AND rs.due_date < ? AND l.status = 'active'
+    WHERE rs.status != 'paid' AND rs.due_date < ?
+      AND l.status IN ('active', 'defaulted')
+    AND $notOnEnabledHolidaySql
     ORDER BY rs.due_date ASC
     LIMIT 5
   ''', [today.toIso8601String().split('T').first]);
@@ -44,14 +47,16 @@ final notificationProvider = FutureProvider<List<NotificationItem>>((ref) async 
     ));
   }
 
-  // 2. Payment due today
+  // 2. Payment due today (holiday-aware, matching the collection screen)
   final dueToday = await db.rawQuery('''
     SELECT l.id, c.full_name, rs.amount, rs.paid_amount,
            (rs.amount - rs.paid_amount) AS due
     FROM repayment_schedule rs
     INNER JOIN loans l ON rs.loan_id = l.id
     INNER JOIN customers c ON l.customer_id = c.id
-    WHERE rs.status = 'pending' AND rs.due_date = ? AND l.status = 'active'
+    WHERE rs.status != 'paid' AND rs.due_date = ?
+      AND l.status IN ('active', 'defaulted')
+    AND $notOnEnabledHolidaySql
     ORDER BY c.full_name ASC
     LIMIT 5
   ''', [today.toIso8601String().split('T').first]);
@@ -69,7 +74,7 @@ final notificationProvider = FutureProvider<List<NotificationItem>>((ref) async 
     ));
   }
 
-  // 3. Upcoming collections (next 3 days)
+  // 3. Upcoming collections (next 3 days, holiday-aware)
   final upcomingEnd = today.add(const Duration(days: 3));
   final upcomingStart = today.add(const Duration(days: 1));
   final upcoming = await db.rawQuery('''
@@ -77,9 +82,10 @@ final notificationProvider = FutureProvider<List<NotificationItem>>((ref) async 
     FROM repayment_schedule rs
     INNER JOIN loans l ON rs.loan_id = l.id
     INNER JOIN customers c ON l.customer_id = c.id
-    WHERE rs.status = 'pending'
+    WHERE rs.status != 'paid'
       AND rs.due_date >= ? AND rs.due_date <= ?
-      AND l.status = 'active'
+      AND l.status IN ('active', 'defaulted')
+    AND $notOnEnabledHolidaySql
     ORDER BY rs.due_date ASC
     LIMIT 5
   ''', [
@@ -103,8 +109,7 @@ final notificationProvider = FutureProvider<List<NotificationItem>>((ref) async 
 
   // 4. Backup reminder — if no backup in 7+ days
   try {
-    final backupService =
-        BackupService(dbService, SecureStorageService());
+    final backupService = await ref.watch(backupServiceProvider.future);
     final backups = await backupService.listBackups();
     if (backups.isEmpty || backups.first.lastModifiedSync().isBefore(now.subtract(const Duration(days: 7)))) {
       notifications.add(NotificationItem(

@@ -84,6 +84,11 @@ class AppConstants {
   static const int recentItemsLimit = 10;
   static const int maxDocumentSizeBytes = 20 * 1024 * 1024;
 
+  // Image preview safety caps (security: decompression-bomb bounds).
+  // The preview decodes images at, and never wider than, this dimension so a
+  // crafted file with huge intrinsic dimensions cannot exhaust device memory.
+  static const int maxDocumentImageDimension = 2048;
+
   // Backup
   static const String backupFileExtension = '.ltbackup';
   static const String backupFolderName = 'Adeghe_Backups';
