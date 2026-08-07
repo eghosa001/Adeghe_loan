@@ -44,10 +44,27 @@ class _ChangePinScreenState extends ConsumerState<ChangePinScreen> {
       setState(() => _msg = 'PINs do not match');
       return;
     }
+    final lockout = PinLockoutService(_storage);
+    // Guard before verifying: verifying the current PIN while locked out would
+    // fail and registerFailedAttempt() would (re)start the attempt counter,
+    // silently restarting the countdown cycle.
+    if (await lockout.isLockedOut()) {
+      if (!mounted) return;
+      if (await lockout.isPermanentlyLocked()) {
+        setState(() => _msg = 'Too many failed attempts. This device is '
+            'locked. Use "Forgot PIN" and your recovery password to reset it.');
+        return;
+      }
+      final remaining = await lockout.remainingLockout();
+      if (!mounted) return;
+      final minutes = (remaining?.inMinutes ?? 0).clamp(1, 120);
+      setState(() =>
+          _msg = 'Too many failed attempts. Try again in $minutes min.');
+      return;
+    }
     final valid = await _storage.verifyPin(_current.text);
     if (!mounted) return;
     if (!valid) {
-      final lockout = PinLockoutService(_storage);
       final triggered = await lockout.registerFailedAttempt();
       if (!mounted) return;
       if (triggered) {
@@ -68,7 +85,7 @@ class _ChangePinScreenState extends ConsumerState<ChangePinScreen> {
       }
       return;
     }
-    await PinLockoutService(_storage).reset();
+    await lockout.reset();
     await _storage.savePin(newPin);
     if (mounted) GoRouter.of(context).pop();
   }

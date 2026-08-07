@@ -1,19 +1,19 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loantrack/core/database/database_service.dart';
 import 'package:loantrack/core/security/secure_storage_service.dart';
-import 'package:loantrack/features/holidays/data/models/holiday_entity.dart';
-import 'package:loantrack/features/loans/data/loan_repository.dart';
+import 'package:loantrack/features/loans/data/loan_schedule_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart'
     show databaseFactoryFfi, inMemoryDatabasePath, sqfliteFfiInit;
 import 'package:sqflite_sqlcipher/sqflite.dart' show Database;
 
-/// Exercises `regenSchedulesForActiveLoans` against a real (in-memory)
-/// SQLite engine so the holiday honoring is verified against actual stored
-/// `due_date` rows:
-///  * loans with paid installments keep every non-pending row untouched and
-///    only re-date the pending tail, skipping the new holiday
-///  * payment-free loans still get the full regeneration
-///  * fully-paid loans are skipped
+/// Exercises the derived-schedule rebuild (`LoanScheduleService`) against a
+/// real (in-memory) SQLite engine so the holiday honoring and payment
+/// allocation are verified against actual stored rows:
+///  * `rebuildAllSchedules` fully regenerates every loan's schedule as a pure
+///    function of (loan + holidays), shifting due dates past the new holiday
+///  * paid/partial/pending statuses are re-allocated chronologically from the
+///    completed payments, with the overpayment surplus excluded
+///  * `rebuildSchedule` on a missing loan is a no-op that still bumps nothing
 class _FakeDatabaseService extends DatabaseService {
   _FakeDatabaseService(this._db) : super(SecureStorageService());
 
@@ -55,6 +55,31 @@ void main() {
         paid_amount REAL NOT NULL
       )
     ''');
+    await db.execute('''
+      CREATE TABLE holidays (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        date TEXT NOT NULL,
+        is_recurring INTEGER NOT NULL,
+        is_enabled INTEGER NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE payments (
+        id TEXT PRIMARY KEY,
+        loan_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        amount REAL NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE savings_transactions (
+        id TEXT PRIMARY KEY,
+        reference_loan_payment_id TEXT,
+        type TEXT NOT NULL,
+        amount REAL NOT NULL
+      )
+    ''');
     return db;
   }
 
@@ -64,20 +89,87 @@ void main() {
   }
 
   // Monday 2026-08-17 is a holiday.
-  final holiday = Holiday(
-    id: 'H1',
-    name: 'Public Holiday',
-    date: DateTime(2026, 8, 17),
-  );
+  const holidayDate = '2026-08-17';
 
-  test(
-      'partially paid loan keeps paid installments and re-dates only the pending tail',
-      () async {
+  test('rebuildAllSchedules fully regenerates and shifts due dates past a '
+      'new holiday (payment-free loan)', () async {
     final db = await openDb();
     addTearDown(db.close);
 
     await db.insert('loans', {
       'id': 'L1',
+      'customer_id': 'C1',
+      'loan_type': 'daily',
+      'status': 'active',
+      'amount': 3000.0,
+      'interest_rate': 10.0,
+      'duration_days': 3,
+      'start_date': holidayDate,
+      'total_repayment': 3000.0,
+      'outstanding_balance': 3000.0,
+    });
+    await db.insert('holidays', {
+      'id': 'H1',
+      'name': 'Public Holiday',
+      'date': holidayDate,
+      'is_recurring': 0,
+      'is_enabled': 1,
+    });
+    // Stale pre-holiday schedule (as if generated before the holiday existed).
+    await db.insert('repayment_schedule', {
+      'id': 'L1-1',
+      'loan_id': 'L1',
+      'installment_number': 1,
+      'due_date': holidayDate,
+      'amount': 1000.0,
+      'status': 'pending',
+      'paid_amount': 0.0,
+    });
+    await db.insert('repayment_schedule', {
+      'id': 'L1-2',
+      'loan_id': 'L1',
+      'installment_number': 2,
+      'due_date': '2026-08-18',
+      'amount': 1000.0,
+      'status': 'pending',
+      'paid_amount': 0.0,
+    });
+    await db.insert('repayment_schedule', {
+      'id': 'L1-3',
+      'loan_id': 'L1',
+      'installment_number': 3,
+      'due_date': '2026-08-19',
+      'amount': 1000.0,
+      'status': 'pending',
+      'paid_amount': 0.0,
+    });
+
+    final service = LoanScheduleService(
+        _FakeDatabaseService(db), LoanScheduleVersionNotifier());
+    await service.rebuildAllSchedules();
+
+    final schedule = await scheduleRows(db, 'L1');
+    expect(schedule.length, 3);
+    // All pending installments shift past the holiday Monday.
+    expect(schedule[0]['due_date'], '2026-08-18');
+    expect(schedule[1]['due_date'], '2026-08-19');
+    expect(schedule[2]['due_date'], '2026-08-20');
+    // Deterministic ids.
+    expect(schedule.map((s) => s['id']), ['L1-1', 'L1-2', 'L1-3']);
+    expect(schedule.every((s) => s['status'] == 'pending'), isTrue);
+    expect(schedule.every((s) => s['paid_amount'] == 0.0), isTrue);
+  });
+
+  test('rebuild allocates paid/partial/pending from completed payments, '
+      'excluding the overpayment surplus (money rule)', () async {
+    final db = await openDb();
+    addTearDown(db.close);
+
+    // Weekly loan, 4 x 1000 = 4000. Two payments: 1000 fully on installment 1,
+    // then 1500 against installment 2 — 1000 to the loan + 500 overpayment
+    // surplus credited to savings (never applied to the loan).
+    await db.insert('loans', {
+      'id': 'L2',
       'customer_id': 'C1',
       'loan_type': 'weekly',
       'status': 'active',
@@ -86,168 +178,115 @@ void main() {
       'duration_weeks': 4,
       'start_date': '2026-08-03',
       'total_repayment': 4000.0,
-      'outstanding_balance': 2000.0,
+      'outstanding_balance': 2500.0,
     });
-    // Installments 1–2 paid (Aug 3, Aug 10); 3–4 pending (Aug 17, Aug 24).
-    await db.insert('repayment_schedule', {
-      'id': 'S1',
-      'loan_id': 'L1',
-      'installment_number': 1,
-      'due_date': '2026-08-03',
+    await db.insert('payments', {
+      'id': 'P1',
+      'loan_id': 'L2',
+      'status': 'completed',
       'amount': 1000.0,
-      'status': 'paid',
-      'paid_amount': 1000.0,
     });
-    await db.insert('repayment_schedule', {
-      'id': 'S2',
-      'loan_id': 'L1',
-      'installment_number': 2,
-      'due_date': '2026-08-10',
-      'amount': 1000.0,
-      'status': 'paid',
-      'paid_amount': 1000.0,
+    await db.insert('payments', {
+      'id': 'P2',
+      'loan_id': 'L2',
+      'status': 'completed',
+      'amount': 1500.0,
     });
-    await db.insert('repayment_schedule', {
-      'id': 'S3',
-      'loan_id': 'L1',
-      'installment_number': 3,
-      'due_date': '2026-08-17',
-      'amount': 1000.0,
-      'status': 'pending',
-      'paid_amount': 0.0,
-    });
-    await db.insert('repayment_schedule', {
-      'id': 'S4',
-      'loan_id': 'L1',
-      'installment_number': 4,
-      'due_date': '2026-08-24',
-      'amount': 1000.0,
-      'status': 'pending',
-      'paid_amount': 0.0,
+    await db.insert('savings_transactions', {
+      'id': 'ST1',
+      'reference_loan_payment_id': 'P2',
+      'type': 'overpayment',
+      'amount': 500.0,
     });
 
-    final repo = LoanRepository(_FakeDatabaseService(db));
-    final result = await repo.regenSchedulesForActiveLoans([holiday]);
+    final service = LoanScheduleService(
+        _FakeDatabaseService(db), LoanScheduleVersionNotifier());
+    await service.rebuildAllSchedules();
 
-    result.when(
-      success: (count) => expect(count, 1),
-      failure: (f) => fail('regen failed: $f'),
-    );
-
-    final schedule = await scheduleRows(db, 'L1');
+    final schedule = await scheduleRows(db, 'L2');
     expect(schedule.length, 4);
-    // Paid installments preserved exactly.
-    expect(schedule[0]['due_date'], '2026-08-03');
-    expect(schedule[1]['due_date'], '2026-08-10');
+    // 2000 applied to the loan: installment 1 paid, installment 2 fully paid.
     expect(schedule[0]['status'], 'paid');
     expect(schedule[0]['paid_amount'], 1000.0);
-    expect(schedule[0]['amount'], 1000.0);
-    // Pending tail shifted past the holiday, amounts preserved.
-    expect(schedule[2]['due_date'], '2026-08-18'); // Aug 17 holiday → Tue 18
-    expect(schedule[3]['due_date'], '2026-08-25'); // continues from the kept tail
-    expect(schedule[2]['amount'], 1000.0);
-    expect(schedule[3]['amount'], 1000.0);
+    expect(schedule[1]['status'], 'paid');
+    expect(schedule[1]['paid_amount'], 1000.0);
     expect(schedule[2]['status'], 'pending');
+    expect(schedule[2]['paid_amount'], 0.0);
+    expect(schedule[3]['status'], 'pending');
   });
 
-  test('payment-free loans still get the full regeneration', () async {
+  test('rebuild marks installments partial for a fractional application', () async {
     final db = await openDb();
     addTearDown(db.close);
 
-    // Daily loan starting exactly on the holiday Monday.
+    // 3 x 1000 = 3000; one payment of 500 applies only to the first installment.
     await db.insert('loans', {
-      'id': 'L2',
+      'id': 'L3',
       'customer_id': 'C1',
       'loan_type': 'daily',
       'status': 'active',
       'amount': 3000.0,
       'interest_rate': 10.0,
       'duration_days': 3,
-      'start_date': '2026-08-17',
+      'start_date': '2026-08-03',
       'total_repayment': 3000.0,
-      'outstanding_balance': 3000.0,
+      'outstanding_balance': 2500.0,
     });
-    await db.insert('repayment_schedule', {
-      'id': 'S1',
-      'loan_id': 'L2',
-      'installment_number': 1,
-      'due_date': '2026-08-17',
-      'amount': 1000.0,
-      'status': 'pending',
-      'paid_amount': 0.0,
-    });
-    await db.insert('repayment_schedule', {
-      'id': 'S2',
-      'loan_id': 'L2',
-      'installment_number': 2,
-      'due_date': '2026-08-18',
-      'amount': 1000.0,
-      'status': 'pending',
-      'paid_amount': 0.0,
-    });
-    await db.insert('repayment_schedule', {
-      'id': 'S3',
-      'loan_id': 'L2',
-      'installment_number': 3,
-      'due_date': '2026-08-19',
-      'amount': 1000.0,
-      'status': 'pending',
-      'paid_amount': 0.0,
+    await db.insert('payments', {
+      'id': 'P1',
+      'loan_id': 'L3',
+      'status': 'completed',
+      'amount': 500.0,
     });
 
-    final repo = LoanRepository(_FakeDatabaseService(db));
-    final result = await repo.regenSchedulesForActiveLoans([holiday]);
+    final service = LoanScheduleService(
+        _FakeDatabaseService(db), LoanScheduleVersionNotifier());
+    await service.rebuildAllSchedules();
 
-    result.when(
-      success: (count) => expect(count, 1),
-      failure: (f) => fail('regen failed: $f'),
-    );
-
-    final schedule = await scheduleRows(db, 'L2');
-    expect(schedule.length, 3);
-    // All pending installments shift past the holiday Monday.
-    expect(schedule[0]['due_date'], '2026-08-18');
-    expect(schedule[1]['due_date'], '2026-08-19');
-    expect(schedule[2]['due_date'], '2026-08-20');
+    final schedule = await scheduleRows(db, 'L3');
+    expect(schedule[0]['status'], 'partial');
+    expect(schedule[0]['paid_amount'], 500.0);
+    expect(schedule[1]['status'], 'pending');
+    expect(schedule[2]['status'], 'pending');
   });
 
-  test('fully paid loans are skipped', () async {
+  test('rebuildSchedule on a missing loan is a no-op', () async {
+    final db = await openDb();
+    addTearDown(db.close);
+
+    final notifier = LoanScheduleVersionNotifier();
+    final service = LoanScheduleService(_FakeDatabaseService(db), notifier);
+
+    await service.rebuildSchedule('does-not-exist');
+
+    expect(notifier.state, 0);
+    expect(await db.query('repayment_schedule'), isEmpty);
+  });
+
+  test('version notifier bumps after a successful rebuild', () async {
     final db = await openDb();
     addTearDown(db.close);
 
     await db.insert('loans', {
-      'id': 'L3',
+      'id': 'L4',
       'customer_id': 'C1',
       'loan_type': 'daily',
       'status': 'active',
       'amount': 1000.0,
       'interest_rate': 10.0,
       'duration_days': 1,
-      'start_date': '2026-08-14',
+      'start_date': '2026-08-03',
       'total_repayment': 1000.0,
-      'outstanding_balance': 0.0,
-    });
-    await db.insert('repayment_schedule', {
-      'id': 'S1',
-      'loan_id': 'L3',
-      'installment_number': 1,
-      'due_date': '2026-08-14',
-      'amount': 1000.0,
-      'status': 'paid',
-      'paid_amount': 1000.0,
+      'outstanding_balance': 1000.0,
     });
 
-    final repo = LoanRepository(_FakeDatabaseService(db));
-    final result = await repo.regenSchedulesForActiveLoans([holiday]);
+    final notifier = LoanScheduleVersionNotifier();
+    final service = LoanScheduleService(_FakeDatabaseService(db), notifier);
 
-    result.when(
-      success: (count) => expect(count, 0),
-      failure: (f) => fail('regen failed: $f'),
-    );
+    await service.rebuildSchedule('L4');
+    expect(notifier.state, 1);
 
-    final schedule = await scheduleRows(db, 'L3');
-    expect(schedule.length, 1);
-    expect(schedule[0]['due_date'], '2026-08-14');
-    expect(schedule[0]['status'], 'paid');
+    await service.rebuildAllSchedules();
+    expect(notifier.state, 2);
   });
 }

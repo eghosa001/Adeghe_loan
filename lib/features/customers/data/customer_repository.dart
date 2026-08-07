@@ -8,6 +8,9 @@ import 'models/customer_entity.dart';
 /// Sort options for the customer list.
 enum CustomerSortOption { name, group, amountOwed }
 
+/// Filter for customer status in lists.
+enum CustomerStatusFilter { active, archived }
+
 /// Sentinel value for the customer-list group filter meaning "customers that
 /// are not assigned to any group". Group IDs are UUIDs so this cannot collide.
 const String ungroupedGroupFilter = '__ungrouped__';
@@ -42,7 +45,7 @@ class CustomerRepository {
 
   Future<Database> get _database async => _dbService.database;
 
-  Future<List<Customer>> search(String query, {String? groupId}) async {
+  Future<List<Customer>> search(String query, {String? groupId, CustomerStatusFilter statusFilter = CustomerStatusFilter.active}) async {
     final db = await _database;
     final term = query.trim();
 
@@ -59,8 +62,12 @@ class CustomerRepository {
 
     _applyGroupFilter(groupId, conditions, args);
 
-    // Archived (soft-deleted) customers are hidden from active lists/search.
-    conditions.add("c.status != 'archived'");
+    // Status filter
+    if (statusFilter == CustomerStatusFilter.active) {
+      conditions.add("c.status != 'archived'");
+    } else {
+      conditions.add("c.status = 'archived'");
+    }
 
     final where = conditions.isEmpty ? '1=1' : conditions.join(' AND ');
 
@@ -80,7 +87,7 @@ class CustomerRepository {
   }
 
   /// Returns the total count of customers matching [query] and [groupId].
-  Future<int> count(String query, {String? groupId}) async {
+  Future<int> count(String query, {String? groupId, CustomerStatusFilter statusFilter = CustomerStatusFilter.active}) async {
     final db = await _database;
     final term = query.trim();
     final conditions = <String>[];
@@ -93,7 +100,11 @@ class CustomerRepository {
       args.addAll(List.filled(6, '%$term%'));
     }
     _applyGroupFilter(groupId, conditions, args);
-    conditions.add("c.status != 'archived'");
+    if (statusFilter == CustomerStatusFilter.active) {
+      conditions.add("c.status != 'archived'");
+    } else {
+      conditions.add("c.status = 'archived'");
+    }
     final where = conditions.isEmpty ? '1=1' : conditions.join(' AND ');
     final rows = await db.rawQuery(
       'SELECT COUNT(*) AS count FROM customers c WHERE $where',
@@ -109,6 +120,7 @@ class CustomerRepository {
     int limit = AppConstants.defaultPageSize,
     int offset = 0,
     CustomerSortOption sortBy = CustomerSortOption.name,
+    CustomerStatusFilter statusFilter = CustomerStatusFilter.active,
   }) async {
     final db = await _database;
     final term = query.trim();
@@ -125,7 +137,11 @@ class CustomerRepository {
     }
 
     _applyGroupFilter(groupId, conditions, args);
-    conditions.add("c.status != 'archived'");
+    if (statusFilter == CustomerStatusFilter.active) {
+      conditions.add("c.status != 'archived'");
+    } else {
+      conditions.add("c.status = 'archived'");
+    }
 
     final where = conditions.isEmpty ? '1=1' : conditions.join(' AND ');
 
@@ -207,6 +223,31 @@ class CustomerRepository {
     final db = await _database;
     await db.update('customers', {'status': CustomerStatus.archived.value},
         where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Permanently deletes an archived customer and ALL associated data.
+  /// This CASCADE deletes loans, payments, documents, savings accounts,
+  /// and savings transactions. Use with extreme caution.
+  Future<void> hardDelete(String id) async {
+    final db = await _database;
+    // Verify the customer is archived before allowing hard delete
+    final customer = await db.query(
+      'customers',
+      columns: const ['id', 'status'],
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    if (customer.isEmpty) {
+      throw Exception('Customer not found');
+    }
+    if (customer.first['status'] != CustomerStatus.archived.value) {
+      throw Exception('Only archived customers can be permanently deleted');
+    }
+    // The CASCADE DELETE on foreign keys will remove all related data:
+    // loans -> payments, repayment_schedule
+    // documents
+    // savings_accounts -> savings_transactions
+    await db.delete('customers', where: 'id = ?', whereArgs: [id]);
   }
 
   Future<void> changeStatus(String id, CustomerStatus status) async {

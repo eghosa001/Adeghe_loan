@@ -93,6 +93,11 @@ class AppConstants {
   static const String backupFileExtension = '.ltbackup';
   static const String backupFolderName = 'Adeghe_Backups';
 
+  // How long after unlock before the once-per-24h auto-backup may run. Deferred
+  // so a cold start is not slowed by a multi-MB disk write racing the database
+  // providers that are still initializing at unlock.
+  static const Duration autoBackupDelay = Duration(seconds: 15);
+
   // Formats / locale defaults
   static const String dateFormatDisplay = 'dd MMM yyyy';
   static const String dateFormatApi = 'yyyy-MM-dd';

@@ -4,8 +4,8 @@
 /// Holidays behave like weekends everywhere: money is never shown as
 /// collectable on a holiday, and a skipped holiday day never counts toward
 /// overdue — even when a loan's schedule was generated before the holiday was
-/// created (a read-time safety net alongside `regenSchedulesForActiveLoans`,
-/// which re-dates pending installments off the holiday).
+/// created (a read-time safety net alongside `LoanScheduleService`, which
+/// re-derives every schedule off the holidays after any holiday change).
 ///
 /// Requires `repayment_schedule` to be aliased as `rs` in the query.
 const String notOnEnabledHolidaySql = '''

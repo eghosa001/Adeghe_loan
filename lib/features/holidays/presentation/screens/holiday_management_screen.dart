@@ -9,7 +9,7 @@ import 'package:loantrack/features/collection/presentation/providers/collection_
 import 'package:loantrack/features/dashboard/presentation/providers/dashboard_provider.dart';
 import 'package:loantrack/features/holidays/data/models/holiday_entity.dart';
 import 'package:loantrack/features/holidays/presentation/providers/holiday_provider.dart';
-import 'package:loantrack/features/loans/data/loan_repository.dart';
+import 'package:loantrack/features/loans/data/loan_schedule_service.dart';
 import 'package:loantrack/features/reports/presentation/providers/report_provider.dart';
 import 'package:uuid/uuid.dart';
 
@@ -352,14 +352,14 @@ class _HolidayManagementScreenState
     );
   }
 
-  /// After any holiday change, re-derives schedules for active loans that have
-  /// no payments yet and refreshes schedule-dependent screens. Best-effort: a
-  /// failure here never blocks the holiday save itself.
+  /// After any holiday change, fully re-derives every loan's repayment
+  /// schedule from source data (loan + holidays + completed payments) and
+  /// refreshes schedule-dependent screens. Best-effort: a failure here never
+  /// blocks the holiday save itself.
   Future<void> _regenSchedules(WidgetRef ref) async {
     try {
-      final holidays = await ref.read(holidayListProvider.future);
-      final loanRepo = await ref.read(loanRepositoryProvider.future);
-      await loanRepo.regenSchedulesForActiveLoans(holidays);
+      final scheduleService = await ref.read(loanScheduleServiceProvider.future);
+      await scheduleService.rebuildAllSchedules();
       ref.invalidate(collectionListProvider);
       ref.invalidate(dashboardDataProvider);
       ref.invalidate(reportSummaryProvider);

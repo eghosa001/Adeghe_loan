@@ -169,7 +169,9 @@ class _ReportPeriodSelectorState extends State<ReportPeriodSelector> {
       _ => AppDateUtils.startOfDay(now),
     };
     final end = switch (label) {
-      'Today' || 'Yesterday' => AppDateUtils.endOfDay(now),
+      'Today' => AppDateUtils.endOfDay(now),
+      'Yesterday' => AppDateUtils.endOfDay(
+          now.subtract(const Duration(days: 1))),
       'This Week' || 'Last Week' => AppDateUtils.endOfDay(start.add(const Duration(days: 6))),
       'This Month' => AppDateUtils.endOfMonth(now),
       'Last Month' => AppDateUtils.endOfDay(

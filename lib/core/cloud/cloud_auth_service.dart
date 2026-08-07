@@ -133,8 +133,7 @@ class CloudAuthService {
       return ownersFullMessage;
     }
     if (lower.contains('not one of the cloud owners') ||
-        lower.contains('not authorized') ||
-        lower.contains('owner')) {
+        lower.contains('not authorized')) {
       return notOwnerMessage;
     }
     if (lower.contains('invalid login credentials') ||

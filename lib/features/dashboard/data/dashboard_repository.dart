@@ -3,6 +3,7 @@ import 'package:sqflite_sqlcipher/sqflite.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/database/database_service.dart';
 import '../../../core/error/failure.dart';
+import '../../../core/utils/date_utils.dart';
 import 'package:loantrack/features/loans/data/models/loan_entity.dart';
 import 'package:loantrack/features/payments/data/models/payment_entity.dart';
 import 'models/dashboard_data.dart';
@@ -30,12 +31,9 @@ class DashboardRepository {
       // locally-stored `payment_date` strings.
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
-      final todayStr = today.toIso8601String().split('T').first;
-      final weekStartStr = today
-          .subtract(const Duration(days: 6))
-          .toIso8601String()
-          .split('T')
-          .first;
+      final todayStr = AppDateUtils.formatForStorage(today);
+      final weekStartStr =
+          AppDateUtils.formatForStorage(today.subtract(const Duration(days: 6)));
 
       // Run all independent read queries in parallel.
       final results = await Future.wait([

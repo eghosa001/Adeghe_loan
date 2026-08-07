@@ -178,6 +178,19 @@ void main() {
         'Invalid email or password.',
       );
     });
+
+    test('keeps the misconfiguration message distinct from the owner message',
+        () {
+      // The misconfig StateError text contains the word "owner" ("two-owner
+      // policy"); the broad owner match must not swallow it.
+      expect(
+        CloudAuthService.friendlySignInError(StateError(
+            'Cloud is misconfigured: run the updated supabase_schema.sql '
+            '(two-owner policy) on your Supabase project, then sign in again.')),
+        'Cloud setup is outdated. Run the updated supabase_schema.sql on '
+            'your Supabase project, then try again.',
+      );
+    });
   });
 
   group('sanitizeCloudPathPart', () {

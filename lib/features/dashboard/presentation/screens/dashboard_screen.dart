@@ -141,7 +141,7 @@ class DashboardScreen extends ConsumerWidget {
                         ),
                         title: Text(txn.customerName),
                         subtitle: Text(
-                          '${txn.isCredit ? 'Deposit' : 'Withdrawal'} — ${txn.createdAt.split('T').first}',
+                          '${txn.typeLabel} — ${txn.createdAt.split('T').first}',
                         ),
                         trailing: Text(
                           CurrencyUtils.format(txn.amount),
@@ -368,8 +368,13 @@ class _QuickActionsSection extends StatelessWidget {
         ),
         _QuickAction(
           icon: Icons.account_balance_wallet_outlined,
-          label: 'Collection\nList',
+          label: 'Daily\nCollection',
           onTap: () => context.go('/collections'),
+        ),
+        _QuickAction(
+          icon: Icons.calendar_view_week_outlined,
+          label: 'Weekly\nCollection',
+          onTap: () => context.go('/collections/weekly'),
         ),
       ],
     );

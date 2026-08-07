@@ -8,6 +8,7 @@ class AppNumpad extends StatelessWidget {
     super.key,
     required this.onKeyPressed,
     required this.onDelete,
+    this.enabled = true,
     this.keyColor = Colors.white,
     this.keyAlpha = 0.08,
     this.borderColor,
@@ -16,6 +17,10 @@ class AppNumpad extends StatelessWidget {
 
   final ValueChanged<String> onKeyPressed;
   final VoidCallback onDelete;
+
+  /// When false the keys are visually dimmed and taps are ignored (e.g. while
+  /// the PIN is locked out).
+  final bool enabled;
 
   /// Color of the key text and delete icon.
   final Color keyColor;
@@ -32,6 +37,13 @@ class AppNumpad extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final effectiveBorder = borderColor ?? textColor.withValues(alpha: 0.12);
+    final dimmed = !enabled;
+    final effectiveTextColor = dimmed ? textColor.withValues(alpha: 0.3) : textColor;
+    final effectiveKeyColor = dimmed ? keyColor.withValues(alpha: keyAlpha) : keyColor;
+
+    void invoke(VoidCallback callback) {
+      if (enabled) callback();
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 48),
@@ -51,12 +63,12 @@ class AppNumpad extends StatelessWidget {
                           label: k,
                           onTap: () {
                             HapticFeedback.lightImpact();
-                            onKeyPressed(k);
+                            invoke(() => onKeyPressed(k));
                           },
-                          keyColor: keyColor,
+                          keyColor: effectiveKeyColor,
                           keyAlpha: keyAlpha,
                           borderColor: effectiveBorder,
-                          textColor: textColor,
+                          textColor: effectiveTextColor,
                         ))
                     .toList(),
               ),
@@ -71,30 +83,36 @@ class AppNumpad extends StatelessWidget {
                   label: '0',
                   onTap: () {
                     HapticFeedback.lightImpact();
-                    onKeyPressed('0');
+                    invoke(() => onKeyPressed('0'));
                   },
-                  keyColor: keyColor,
+                  keyColor: effectiveKeyColor,
                   keyAlpha: keyAlpha,
                   borderColor: effectiveBorder,
-                  textColor: textColor,
+                  textColor: effectiveTextColor,
                 ),
-                GestureDetector(
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    onDelete();
-                  },
-                  child: Container(
-                    width: 64,
-                    height: 64,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: textColor.withValues(alpha: 0.05),
-                    ),
-                    child: Center(
-                      child: Icon(
-                        Icons.backspace_outlined,
-                        color: textColor.withValues(alpha: 0.6),
-                        size: 22,
+                Semantics(
+                  button: true,
+                  label: 'Delete',
+                  onTap: () => invoke(onDelete),
+                  excludeSemantics: true,
+                  child: GestureDetector(
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      invoke(onDelete);
+                    },
+                    child: Container(
+                      width: 64,
+                      height: 64,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: effectiveTextColor.withValues(alpha: 0.05),
+                      ),
+                      child: Center(
+                        child: Icon(
+                          Icons.backspace_outlined,
+                          color: effectiveTextColor.withValues(alpha: 0.6),
+                          size: 22,
+                        ),
                       ),
                     ),
                   ),
@@ -127,23 +145,29 @@ class _Key extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Semantics(
+      button: true,
+      label: label,
       onTap: onTap,
-      child: Container(
-        width: 68,
-        height: 68,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: keyColor.withValues(alpha: keyAlpha),
-          border: Border.all(color: borderColor),
-        ),
-        child: Center(
-          child: Text(
-            label,
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 24,
-              fontWeight: FontWeight.w600,
-              color: textColor,
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 68,
+          height: 68,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: keyColor.withValues(alpha: keyAlpha),
+            border: Border.all(color: borderColor),
+          ),
+          child: Center(
+            child: Text(
+              label,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 24,
+                fontWeight: FontWeight.w600,
+                color: textColor,
+              ),
             ),
           ),
         ),

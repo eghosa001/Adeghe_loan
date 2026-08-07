@@ -23,7 +23,7 @@ class _LoanStatementScreenState extends ConsumerState<LoanStatementScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final customersAsync = ref.watch(customerListProvider);
+    final customersAsync = ref.watch(allCustomersProvider);
 
     return Scaffold(
       appBar: AppBar(

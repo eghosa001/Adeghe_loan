@@ -21,6 +21,7 @@ class CustomerListScreen extends ConsumerWidget {
     final groupsAsync = ref.watch(groupListProvider);
     final currentPage = ref.watch(customerPageProvider);
     final countAsync = ref.watch(customerCountProvider);
+    final statusFilter = ref.watch(customerStatusFilterProvider);
 
     final totalCount = countAsync.valueOrNull ?? 0;
     final hasMore = (currentPage + 1) * AppConstants.defaultPageSize < totalCount;
@@ -28,11 +29,13 @@ class CustomerListScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Customers')),
       drawer: const AppDrawer(currentRoute: '/customers'),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push('/customers/new'),
-        icon: const Icon(Icons.person_add),
-        label: const Text('Add customer'),
-      ),
+      floatingActionButton: statusFilter == CustomerStatusFilter.active
+          ? FloatingActionButton.extended(
+              onPressed: () => context.push('/customers/new'),
+              icon: const Icon(Icons.person_add),
+              label: const Text('Add customer'),
+            )
+          : null,
       body: Column(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
@@ -46,6 +49,28 @@ class CustomerListScreen extends ConsumerWidget {
               hintText: 'Name, ID, phone, BVN, NIN or address',
               prefixIcon: Icon(Icons.search),
             ),
+          ),
+        ),
+        // Status filter (Active / Archived)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: SegmentedButton<CustomerStatusFilter>(
+            segments: const [
+              ButtonSegment(
+                  value: CustomerStatusFilter.active,
+                  label: Text('Active'),
+                  icon: Icon(Icons.people)),
+              ButtonSegment(
+                  value: CustomerStatusFilter.archived,
+                  label: Text('Archived'),
+                  icon: Icon(Icons.archive)),
+            ],
+            selected: {statusFilter},
+            onSelectionChanged: (Set<CustomerStatusFilter> newSelection) {
+              ref.read(customerStatusFilterProvider.notifier).state =
+                  newSelection.first;
+              ref.read(customerPageProvider.notifier).state = 0;
+            },
           ),
         ),
         // Group filter chips
@@ -144,18 +169,36 @@ class CustomerListScreen extends ConsumerWidget {
                 Center(child: Text('Unable to load customers: $error')),
             data: (items) {
               if (items.isEmpty && currentPage == 0) {
-                return const EmptyState(
-                  icon: Icons.people_outline,
-                  title: 'No customers found',
-                  subtitle: 'Add your first customer to get started.',
+                return EmptyState(
+                  icon: statusFilter == CustomerStatusFilter.active
+                      ? Icons.people_outline
+                      : Icons.archive_outlined,
+                  title: statusFilter == CustomerStatusFilter.active
+                      ? 'No customers found'
+                      : 'No archived customers',
+                  subtitle: statusFilter == CustomerStatusFilter.active
+                      ? 'Add your first customer to get started.'
+                      : 'Archived customers will appear here.',
                 );
               }
               if (items.isEmpty && currentPage > 0) {
-                ref.read(customerPageProvider.notifier).state = 0;
-                return const EmptyState(
-                  icon: Icons.people_outline,
-                  title: 'No customers found',
-                  subtitle: 'Add your first customer to get started.',
+                // Defer the reset: mutating provider state during build throws
+                // "Cannot modify provider while the widget tree is building".
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  ref
+                      .read(customerPageProvider.notifier)
+                      .state = 0;
+                });
+                return EmptyState(
+                  icon: statusFilter == CustomerStatusFilter.active
+                      ? Icons.people_outline
+                      : Icons.archive_outlined,
+                  title: statusFilter == CustomerStatusFilter.active
+                      ? 'No customers found'
+                      : 'No archived customers',
+                  subtitle: statusFilter == CustomerStatusFilter.active
+                      ? 'Add your first customer to get started.'
+                      : 'Archived customers will appear here.',
                 );
               }
               return RefreshIndicator(
@@ -193,12 +236,37 @@ class _CustomerTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isArchived = customer.status == CustomerStatus.archived;
     return ListTile(
       leading: CircleAvatar(
           child: Text(customer.fullName.isEmpty
               ? '?'
               : customer.fullName[0].toUpperCase())),
-      title: Text(customer.fullName),
+      title: Row(
+        children: [
+          Expanded(child: Text(customer.fullName)),
+          if (isArchived)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade200,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                'Archived',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Colors.grey.shade700,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+        ],
+      ),
+      subtitle: isArchived
+          ? Text('Tap to unarchive or delete permanently',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600))
+          : null,
       onTap: () => context.push('/customers/${customer.id}'),
     );
   }

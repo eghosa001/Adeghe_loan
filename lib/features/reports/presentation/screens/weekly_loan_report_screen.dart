@@ -238,7 +238,9 @@ class _WeeklyLoanReportScreenState
             start: _period.start, end: _period.end, loanType: 'weekly')))
         .valueOrNull;
     if (summary == null) return;
-    final reports = summary.weeklyLoans.clientReports;
+    final reports = summary.weeklyLoans.clientReports
+        .where((r) => _statusFilter == null || r.loanStatus == _statusFilter)
+        .toList();
     final symbol = ref.read(currencySymbolProvider).valueOrNull ??
         CurrencyUtils.defaultSymbol;
     final d = summary.weeklyLoans;

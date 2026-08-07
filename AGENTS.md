@@ -18,10 +18,9 @@ flutter test                       # Run all tests
 flutter test test/widget_test.dart # Run a single test file
 flutter analyze                    # Static analysis
 flutter build apk                  # Android release build
-dart run build_runner build --delete-conflicting-outputs  # Codegen (currently unused — see below)
 ```
 
-No Makefile, scripts, or CI workflows exist. No custom lint rules beyond default `flutter_lints`.
+No Makefile, scripts, or CI workflows exist. No custom lint rules beyond default `flutter_lints`. No codegen (build_runner/freezed/json_serializable are NOT in `pubspec.yaml` — see below).
 
 ## Architecture
 
@@ -32,7 +31,7 @@ lib/
   main.dart                        # Entry point: ProviderScope -> MyApp
   core/
     constant/app_constants.dart
-    database/database_service.dart  # Encrypted SQLite (sqflite_sqlcipher), 9 tables, migrations v1-v16
+    database/database_service.dart  # Encrypted SQLite (sqflite_sqlcipher), 9 tables, migrations v1-v21
     di/providers.dart               # Central Riverpod providers
     router/app_router.dart          # GoRouter config; some screens defined inline
     security/                       # Biometric, file encryption, secure storage
@@ -53,7 +52,7 @@ lib/
 
 **State management:** Riverpod v2 — `Provider`, `FutureProvider`, `StateProvider`, `StateNotifierProvider`. Screens use `ConsumerWidget`/`ConsumerStatefulWidget`.
 
-**Database:** `sqflite_sqlcipher` — encrypted SQLite. DB file: `loantrack.db`. Key stored in FlutterSecureStorage. Schema version 16 with manual ALTER TABLE + table-recreate migrations in `migrations.dart` (`database_service.dart` holds the fresh-install CREATE SQL and the version constant — keep both in sync). **Note:** `PRAGMA foreign_keys = ON` is enforced.
+**Database:** `sqflite_sqlcipher` — encrypted SQLite. DB file: `loantrack.db`. Key stored in FlutterSecureStorage. Schema version 21 with manual ALTER TABLE + table-recreate migrations in `migrations.dart` (`database_service.dart` holds the fresh-install CREATE SQL and the version constant — keep both in sync). **Note:** `PRAGMA foreign_keys = ON` is enforced.
 
 **Auth:** Local-only. PIN (salted PBKDF2-HMAC-SHA256, 120k iterations, stored as `pbkdf2-sha256:<iterations>:<base64>`) + optional biometrics. 5-minute auto-lock via `InactivityWrapper` (pointer events + hardware keyboard). `databaseServiceProvider` polls `authProvider` until unlocked before initializing DB.
 
@@ -70,11 +69,11 @@ lib/
 
 ## Code generation
 
-`build_runner`, `freezed`, `json_serializable` are declared in `pubspec.yaml` but **completely unused**. No `.g.dart` or `.freezed.dart` files exist. No `build.yaml`. All serialization is manual.
+No codegen. `build_runner`, `freezed`, and `json_serializable` were removed from `pubspec.yaml` — do not re-add them. No `.g.dart` or `.freezed.dart` files exist. No `build.yaml`. All serialization is manual (`toMap()`/`fromMap()`).
 
 ## Testing
 
-Tests in `test/`. Uses `flutter_test`. `mocktail` is a dev dependency but unused.
+Tests in `test/`. Uses `flutter_test`. `mocktail` is used only in `test/cloud/cloud_auth_service_test.dart`.
 
 ```bash
 flutter test                                     # Full suite
@@ -151,6 +150,7 @@ Verified fixed (Phase 0, 2026-07-31 — all items from the audit have been addre
 - **M18/M19** loan form state resets after save; `saveLoan`/`updateLoan` surface `Result.failure`.
 - **M20/M21** "Share statement" produces a PDF via `StatementService.buildCustomerStatementPdf` + `SharePlus`; statements include non-active loans (`loan_statement_screen.dart`).
 - **M22** customer delete is a soft archive (`customers.status = 'archived'`); loans/payments/documents/history are preserved (`customer_repository.dart`).
+- **M23 (v21, 2026-08-07)** archived customers could not re-register (DB column UNIQUE on `phone`/`nin`/`bvn` blocked it). Fixed via table-recreate migration v21: dropped column-level UNIQUE, created partial unique indexes `idx_customers_phone_unique/nin_unique/bvn_unique` with `WHERE status != 'archived'`. Fresh install DDL + indexes updated; `supabase_schema.sql` mirrored (phone partial index; nin/bvn dropped from cloud). Regression test: `test/database/migration_v21_customers_unique_test.dart`.
 - **L1** export filenames get a unique timestamp suffix — same-day exports no longer overwrite (`export_manager.dart`, `excel_export_service.dart`).
 - **L2** group-delete undo restores the recreated group's membership (`group_repository.dart` returns member ids; `group_management_screen.dart` reassigns them).
 - **L3/L4** holiday date parse falls back to epoch (not `DateTime.now()`); duplicate dates (same day + recurring flag) are rejected; holiday changes regenerate schedules for active loans without payments (`holiday_repository.dart`, `loan_repository.dart` `regenSchedulesForActiveLoans`).
@@ -207,6 +207,10 @@ Optional offline-first replication (2026-08-01). The encrypted local SQLite DB s
 - **LWW merge:** push snapshots changed rows then sets `last_pushed_at` (watermark captured AFTER the snapshot so concurrent writes are re-picked next cycle). Pull deletes parents-first (local FK cascades clean children), then upserts rows where remote `updated_at` > local (or local missing and no newer local tombstone).
 - **Documents:** metadata rows replicate like any table (cloud `file_path` is `''`); the encrypted file bytes live in the `documents` storage bucket at `<customer_id>/<document_id>.enc` and are downloaded into `secure_documents/` on pull.
 - **Remote schema:** `supabase_schema.sql` must mirror the local schema (column types + FKs). Any local schema change (new table/column) must be added there AND to `_syncTables`/`_tablePrimaryKeys` in `cloud_sync_service.dart` AND the v17/`createSyncSchema` trigger list if it needs change tracking.
+
+### **Derived cache removal (2026-08-06)**
+- **Repayment schedule cache (v19):** The `repayment_schedule` table is a derived cache recomputed from source data (loan + holidays + completed payments) after every payment/reverse/save/holiday change and after a cloud pull. The table is never replicated — it was removed from `_syncTables` and `_tablePrimaryKeys` in `cloud_sync_service.dart` and `migrations.dart`, and dropped from `supabase_schema.sql`. The derived schedule is the enabler for treating it as disposable: deterministic ids (`<loanId>-<installmentNumber>`), pure function of source data, and rebuilt via `LoanScheduleService` on every relevant event.
+- **Sync workflow:** when a pull completes (`onPullComplete`), the service calls `LoanScheduleService.rebuildAllSchedules()` to regenerate the local cache. No more `repayment_schedule` rows leave or enter the cloud — they are local-only derived rows.
 - **Security hardening (2026-08-04, full-auth audit; two-owner model 2026-08-04):**
   - **Owner-scoped RLS (C-1):** every cloud table + the `documents` storage bucket is RLS-locked to the rows in `app_owner` (max TWO owner uids; see `supabase_schema.sql`). Owner slots are gated on an operator-maintained email allow-list: `claim_owner` (SECURITY DEFINER RPC, NO parameters, id derived from `auth.uid()` server-side; the old `claim_owner(text)` signature that let the caller nominate an owner is dropped) only grants a slot when `auth.email()` is in the `authorized_owners` table that the operator populates via the dashboard SQL editor FIRST — first-come-first-served owner capture is impossible even if email signups are left ON. `CloudAuthService.signIn` calls `claim_owner` after a successful sign-in (checking the `email_not_authorized` / `full` responses), then verifies with `is_owner()` and signs a non-owner back out. All policies read `auth.uid() in (select id from app_owner)`; `claim_owner` uses a `pg_advisory_xact_lock` + a BEFORE-INSERT trigger (`trg_app_owner_max_two`) so the "at most two owners" invariant cannot be raced. `authorized_owners` has RLS on with NO policies (operator-only, never replicated, not exposed via any RPC). SETUP ORDER IS CRITICAL (API-2, 2026-08-04): turn OFF "Allow new users to sign up" in the dashboard (Settings → Authentication → Providers → Email) FIRST, create BOTH owner accounts (Authentication → Users → Add user) SECOND, and ONLY THEN allow-list their emails in `authorized_owners`. Allow-listing an email before its account exists re-opens the API-2 race — a stranger who self-registered that email while signups were ON gets `claim_owner` → 'ok' and full access to all financial data on the next sync.
   - **Owner-gated sync:** `CloudSyncService.fullSync` calls `is_owner()` before pushing/pulling and refuses to start (returns a result error) for a non-owner — silent RLS failures can no longer masquerade as "Sync complete".
@@ -236,6 +240,32 @@ Optional offline-first replication (2026-08-01). The encrypted local SQLite DB s
 - **M3/M4** backup filename appends 8 random hex chars (`adeghe_backup_<ts>_<rand>.ltbackup`) so same-instant exports cannot collide; backup container now encrypted (`LTBK1` AES-GCM, key = `sha256(db_key)`), legacy read kept.
 - **Accepted risks (2026-08-04), documented not fixed:** **M2** no certificate pinning for the Supabase host — TLS is already enforced end-to-end, and pinning against Supabase's CDN CA is rotation-fragile in Flutter/supabase_flutter (a mis-pin bricks all sync for both owners). **L1** exported Excel/PDF are intentionally plaintext share artifacts via `share_plus`; encrypting them would defeat their purpose. Do not add these without a product decision.
 
+Desktop/UX hardening (2026-08-06):
+- **Physical-keyboard PIN entry (desktop):** `PinLoginScreen` and `PinSetupScreen` wrap their body in a `Focus(autofocus: true, onKeyEvent: _handleKeyEvent)`; the handler maps top-row/numpad digit characters (`0x30`–`0x39`, incl. `event.character` from `numpad0`–`numpad9`) to `_onKey` and `LogicalKeyboardKey.backspace` to `_onDelete`, returning `KeyEventResult.handled` only for `KeyDownEvent` (so each press registers once). `flutter/services.dart` is imported for `KeyEvent`/`KeyEventResult`/`LogicalKeyboardKey`. `ChangePinScreen`/`ForgotPinScreen` already use real text fields.
+- **Fingerprint/Windows Hello on PC (biometricOnly):** `BiometricService` gained `_isDesktop` (`!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)`). `authenticate()` passes `biometricOnly: !_isDesktop` — `local_auth_windows` 2.x throws `UnsupportedError("Windows doesn't support the biometricOnly parameter.")` for `biometricOnly: true`, which was silently swallowed by the generic `catch` so the Windows Hello prompt never appeared. `isBiometricAvailable()` returns true on desktop without requiring enrolled biometrics (the OS dialog picks fingerprint/face/PIN). `authenticate()` also handles `LocalAuthException` (local_auth 3.x, thrown for `noBiometricsEnrolled`/`noBiometricHardware`/lockouts/cancel) mapping cancel/timeout/fallback → `error` and everything else → `unavailable` (fall back to PIN). Uses `dart:io` — fine on the Windows/mobile targets; keep the `dart:io` guard (`show Platform`) if a web target is ever added.
+- **Android fingerprint (FragmentActivity):** `local_auth_android` silently refuses to show the BiometricPrompt unless the host activity is a `FragmentActivity` (`LocalAuthPlugin.java` returns `NOT_FRAGMENT_ACTIVITY` → `uiUnavailable` otherwise). `android/app/src/main/kotlin/.../MainActivity.kt` now extends `FlutterFragmentActivity` (was `FlutterActivity`), so the fingerprint prompt can actually appear on Android. `_checkBiometrics` in `pin_login_screen.dart` retries only on `BiometricResult.unavailable` (transient) — `failed`/`error` (wrong scan / user cancelled the dialog) never re-prompt.
+- **Collection sheet exports (blank paid):** in `export_manager.dart`, the "Paid" cell in the collection-sheet PDF table (`_buildCollectionTableForPrint`) and Excel (`_collectionPaidText`) is blank when `amountPaid == 0` instead of rendering `₦0.00` / `0.00` — a blank reads as "nothing collected", not a zero, and stays free for handwritten amounts.
+- **Collection sheet Excel layout (two-column group layout, 2026-08-06):** `ExportManager.buildCollectionExcelBytes` (`@visibleForTesting` bytes builder behind `exportCollectionToExcel`) lays groups out in PAIRS side by side instead of stacking them vertically. Each group is a 3-column slot (Name | Amount | Paid; cols A–C left, E–G right, D blank spacer); daily/weekly loans stay separated inside each group with their own `DAILY LOANS` / `WEEKLY LOANS` + `Name/Amount/Paid` sub-headers. Pair height = the taller of the two blocks, so mixed-size groups never overlap; the next pair starts at `maxHeight + 1` blank row. Ungrouped customers render as an "Ungrouped" group, last (group order stays alphabetical, Ungrouped last). The sheet rolls onto `Collections 2`, `Collections 3`, … after `_collectionMaxRowsPerSheet` (1000) rows. Layout tests: `test/reports/collection_excel_layout_test.dart`. Do not reintroduce `appendRow`-based vertical stacking — the pairing algorithm (`_buildCollectionGroupBlock` + `_writeCollectionBlock`) computes row positions dynamically.
+- **Auto-sync cadence:** `CloudSyncService._minAutoSyncInterval` lowered 5 → 2 minutes. `main.dart` now also runs a 2-minute `Timer.periodic` (`_periodicSyncTimer`/`_startPeriodicSync`/`_stopPeriodicSync`) started on `AuthState.unlocked` and stopped on lock — `_syncInBackground()` calls `syncIfSignedIn` (which no-ops when not signed in/configured) every 2 minutes while the app is open AND unlocked. Sync only runs while the app is open; a fully killed/closed app never syncs. The Cloud Sync screen copy states the "every 2 minutes while it is open" cadence.
+- **Collections Report removed (2026-08-06):** deleted `lib/features/reports/presentation/screens/collections_report_screen.dart`; removed its GoRoute (`reports/collections`) + import from `app_router.dart` and the nav tile from `report_screen.dart`. No references remain in `lib/`.
+- **Sync scope note (verified, not changed):** `repayment_schedule` and `payments` were ALREADY in `_syncTables`/`_tablePrimaryKeys` (parent-before-child order) — the empty loan-details-on-other-device symptom is a pull-timing issue (data arrives on the next 2-min sync), not a missing sync-table wiring. `supabase_schema.sql` mirrors them.
+
+## Audit fixes (2026-08-07)
+- **Reports/dashboard perf:** `includeDetail` flag in `ReportRepository._getLoanTypeSummary` skips heavy client-report/overdue queries for dashboard summary; `getDashboardTrends` builds all bucket queries up front and runs in ONE `Future.wait` batch (was 186+ serial round trips).
+- **Report export filter mismatch:** `daily_loan_report_screen.dart` and `weekly_loan_report_screen.dart` exports now honor `_statusFilter` (was exporting all statuses).
+- **Future schedule totals:** Header "Total Expected", per-day totals, and trailing amounts now use remaining-due `(amountDue - amountPaid).clamp(0, ∞)` instead of full `amountDue` (partially-paid installments were overstating).
+- **Dashboard recent-savings labels:** `isCredit` now true for `overpayment` type; new `typeLabel` getter ("Deposit"/"Overpayment"/"Withdrawal"); screen uses `txn.typeLabel`.
+- **Customers v21 (CRITICAL):** Archived customers couldn't re-register due to DB column UNIQUE vs repo check excluding archived. Migration v21: table-recreate drops column UNIQUE, creates partial unique indexes `idx_customers_phone_unique/nin_unique/bvn_unique` (`WHERE status != 'archived'`). Fresh DDL + indexes updated; supabase_schema.sql mirrored (phone partial index; nin/bvn dropped from cloud). Regression test added.
+- **Statement pickers:** Switched from paginated `customerListProvider` (25 limit) to `allCustomersProvider` (unpaginated) so all customers selectable.
+- **Customer count invalidation:** `customerCountProvider` now invalidated after save/archive/group change.
+- **Migration test crash fix:** `DatabaseMigrations.run` now honors `newVersion` param so v17/v19 tests don't run v20/v21 against minimal fixtures.
+- **DB connection leak:** `databaseServiceProvider` closes SQLCipher connection on dispose (lock), so unlock cycles don't accumulate open handles (`ref.onDispose` + `unawaited(service.close())`).
+- **Global error handlers:** Added `FlutterError.onError` and `PlatformDispatcher.instance.onError` (debug keeps red screen; release logs + keeps app alive).
+- **Notification refresh:** Provider now watches `loanScheduleVersionProvider` so overdue/due-today badge clears immediately after collections.
+- **Audit log UX:** `details` field now displayed in list (was searchable but invisible).
+- **Dead code removed:** Unused `AuditLogRepository.getByDateRange` and `getRecent` methods.
+- **Tests:** Full suite 205 passing; analyzer clean.
+
 ## Windows desktop build (packaged with Inno Setup)
 
 First-class desktop port added 2026-08-02. Same encrypted SQLite + PIN/biometric auth as mobile; the DB file lives in the user's Documents folder (`getApplicationDocumentsDirectory()`), key in Windows DPAPI via `flutter_secure_storage`.
@@ -246,7 +276,7 @@ First-class desktop port added 2026-08-02. Same encrypted SQLite + PIN/biometric
 - **Installer:** `windows/installer/setup.iss` (Inno Setup 6). Output `build/installer/AdegheProfessionalServices-Setup-<ver>.exe`, per-user install (`PrivilegesRequired=lowest`), sources from `build/windows/x64/runner/Release`.
 - **Prereqs (host, not committed):** Visual Studio 2022 with the "Desktop development with C++" workload, Windows Developer Mode ON (needed for plugin symlinks), and Inno Setup 6 (`ISCC.exe`). Without them `flutter build windows` and the .iss compile both fail.
 - **Build steps:** `flutter build windows --release` → open `windows/installer/setup.iss` in Inno Setup Studio and Build (or `ISCC.exe windows\installer\setup.iss` from repo root).
-- **No iOS directory:** Only `android/` + `windows/` platform files exist.
+- **No iOS directory (unsupported target):** Only `android/` + `windows/` platform files exist; iOS builds are not configured or supported.
 
 ## Other notes
 - **Backup format:** `.ltbackup` files are now `LTBK1`-encrypted ZIP containers (AES-GCM keyed with `sha256(db_key)` — hides the enclosed filenames/sizes). `BackupService` takes `(DatabaseService, SecureStorageService)`. Restore still accepts the legacy raw-SQLite file and the legacy unencrypted ZIP. An encrypted backup from a device with a different DB key cannot be restored (`_decryptContainer` returns null → clear error). `archive: ^3.6.1` is a direct dependency.

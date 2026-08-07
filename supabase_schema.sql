@@ -153,6 +153,15 @@ $$;
 -- The old single-owner signature accepted a caller-supplied owner_id and is a
 -- privilege-escalation vector; drop it so stale clients can never call it.
 drop function if exists claim_owner(text);
+-- The app only calls these owner RPCs with an authenticated session
+-- (CloudAuthService.signIn / CloudSyncService). SECURITY DEFINER functions that
+-- remain PUBLIC-executable are flagged by the platform security advisor
+-- (anon_security_definer_function_executable): Supabase grants EXECUTE to `anon`
+-- explicitly on function creation, so BOTH the PUBLIC pseudo-role AND `anon`
+-- must be revoked (a `revoke ... from public` alone does NOT clear the explicit
+-- anon grant).
+revoke all on function claim_owner() from public;
+revoke all on function claim_owner() from anon;
 grant execute on function claim_owner() to authenticated;
 grant execute on function is_owner() to authenticated;
 
@@ -184,6 +193,8 @@ begin
   return 'ok';
 end;
 $$;
+revoke all on function remove_owner(text) from public;
+revoke all on function remove_owner(text) from anon;
 grant execute on function remove_owner(text) to authenticated;
 
 -- Stale/legacy functions from earlier schema versions. They are not used by the
@@ -241,7 +252,7 @@ create table if not exists customers (
   full_name text not null,
   gender text,
   dob text,
-  phone text unique not null,
+  phone text not null,
   alt_phone text,
   email text,
   residential_address text,
@@ -275,6 +286,12 @@ create table if not exists customers (
 create index if not exists idx_customers_name on customers(full_name);
 create index if not exists idx_customers_phone on customers(phone);
 create index if not exists idx_customers_group on customers(group_id);
+-- Dedupe is PARTIAL (mirrors the local v21 change): archived customers must not
+-- block re-registration of the same person. Drop the old column-level UNIQUE
+-- constraint and enforce uniqueness only on non-archived rows.
+alter table customers drop constraint if exists customers_phone_key;
+create unique index if not exists idx_customers_phone_unique
+  on customers(phone) where status <> 'archived';
 -- Regulated identifiers (BVN/NIN) are NEVER replicated to the cloud: they are
 -- stripped from pushed rows in cloud_sync_service.dart (`cloudSensitiveColumns`)
 -- and preserved from the local row on pull. Drop the legacy plaintext columns
@@ -326,24 +343,12 @@ create policy "loans all" on loans
   using (auth.uid() in (select id from app_owner))
   with check (auth.uid() in (select id from app_owner));
 
--- ── Repayment schedule ──────────────────────────────────────────────────────
-create table if not exists repayment_schedule (
-  id text primary key,
-  loan_id text not null references loans(id) on delete cascade,
-  installment_number integer not null,
-  due_date text not null,
-  amount double precision not null,
-  status text not null default 'pending',
-  paid_amount double precision not null default 0.0,
-  updated_at text
-);
-create index if not exists idx_repayment_schedule_loan on repayment_schedule(loan_id);
-alter table repayment_schedule enable row level security;
-drop policy if exists "repayment_schedule all" on repayment_schedule;
-create policy "repayment_schedule all" on repayment_schedule
-  for all to authenticated
-  using (auth.uid() in (select id from app_owner))
-  with check (auth.uid() in (select id from app_owner));
+-- ── Repayment schedule (DECOMMISSIONED) ─────────────────────────────────────
+-- The repayment schedule is a DERIVED cache recomputed on every device from the
+-- synced source data (loans + payments + savings + holidays), so its rows are
+-- never replicated. Existing cloud copies are dropped; the app no longer pushes
+-- or pulls this table (see `_tables` in cloud_sync_service.dart).
+drop table if exists repayment_schedule cascade;
 
 -- ── Payments ────────────────────────────────────────────────────────────────
 create table if not exists payments (
@@ -585,7 +590,6 @@ alter table documents add column if not exists original_name text not null defau
 alter table documents add column if not exists mime_type text not null default 'application/octet-stream';
 alter table documents add column if not exists updated_at text;
 
-alter table repayment_schedule add column if not exists updated_at text;
 alter table savings_accounts add column if not exists updated_at text;
 alter table savings_transactions add column if not exists updated_at text;
 alter table business_profile add column if not exists updated_at text;
@@ -645,11 +649,6 @@ select add_check_if_not_exists('loans', 'ck_loans_fees_nonneg',
   '(daily_payment is null or daily_payment >= 0) and '
   '(weekly_payment is null or weekly_payment >= 0) and '
   '(custom_collection_amount is null or custom_collection_amount >= 0)');
-
-select add_check_if_not_exists('repayment_schedule', 'ck_repayment_amounts_nonneg',
-  'amount >= 0 and paid_amount >= 0');
-select add_check_if_not_exists('repayment_schedule', 'ck_repayment_status',
-  'status in (''pending'',''paid'',''partial'',''missed'')');
 
 select add_check_if_not_exists('payments', 'ck_payments_amount_nonneg',
   'amount >= 0');

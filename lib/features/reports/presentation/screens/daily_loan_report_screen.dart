@@ -232,7 +232,9 @@ class _DailyLoanReportScreenState extends ConsumerState<DailyLoanReportScreen> {
         ReportDateRange(
             start: _period.start, end: _period.end, loanType: 'daily'))).valueOrNull;
     if (summary == null) return;
-    final reports = summary.dailyLoans.clientReports;
+    final reports = summary.dailyLoans.clientReports
+        .where((r) => _statusFilter == null || r.loanStatus == _statusFilter)
+        .toList();
     final symbol = ref.read(currencySymbolProvider).valueOrNull ??
         CurrencyUtils.defaultSymbol;
     final d = summary.dailyLoans;

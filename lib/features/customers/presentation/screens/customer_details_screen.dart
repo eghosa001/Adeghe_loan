@@ -70,6 +70,7 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
           'Customer ${widget.customer.fullName} (${widget.customer.id}) status changed to ${status.value}');
       ref.invalidate(customerProvider(widget.customer.id));
       ref.invalidate(customerListProvider);
+      ref.invalidate(customerCountProvider);
       ref.invalidate(dashboardDataProvider);
       ref.invalidate(collectionListProvider);
       ref.invalidate(reportSummaryProvider);
@@ -96,6 +97,46 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
   }
 
   Future<void> _delete(BuildContext context) async {
+    final customer = widget.customer;
+    final isArchived = customer.status == CustomerStatus.archived;
+
+    if (isArchived) {
+      // For archived customers, offer permanent deletion
+      final action = await showDialog<int>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Delete permanently?'),
+          content: const Text(
+              'This will PERMANENTLY delete the customer and ALL their data '
+              '(loans, payments, savings, documents). This cannot be undone.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context, 0),
+                child: const Text('Cancel')),
+            TextButton(
+                onPressed: () => Navigator.pop(context, 1),
+                child: const Text('Unarchive instead')),
+            FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: () => Navigator.pop(context, 2),
+                child: const Text('Delete permanently')),
+          ],
+        ),
+      );
+
+      if (action == 0 || action == null) return;
+      if (action == 1) {
+        // Unarchive
+        await _changeStatus(CustomerStatus.active);
+        return;
+      }
+      // action == 2: permanent delete
+      if (!mounted) return;
+      _hardDelete();
+      return;
+    }
+
+    // For non-archived customers, offer archive
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -116,11 +157,11 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
     if (confirmed != true) return;
     try {
       final repo = await ref.read(customerRepositoryProvider.future);
-      final customer = widget.customer;
       await repo.delete(customer.id);
       logAuditAction(ref, 'DELETE',
           'Customer ${customer.fullName} (${customer.id}) archived');
       ref.invalidate(customerListProvider);
+      ref.invalidate(customerCountProvider);
       ref.invalidate(dashboardDataProvider);
       ref.invalidate(collectionListProvider);
       ref.invalidate(reportSummaryProvider);
@@ -144,12 +185,45 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
     }
   }
 
+  Future<void> _hardDelete() async {
+    final customer = widget.customer;
+    try {
+      final repo = await ref.read(customerRepositoryProvider.future);
+      await repo.hardDelete(customer.id);
+      logAuditAction(ref, 'DELETE',
+          'Customer ${customer.fullName} (${customer.id}) permanently deleted');
+      ref.invalidate(customerListProvider);
+      ref.invalidate(customerCountProvider);
+      ref.invalidate(dashboardDataProvider);
+      ref.invalidate(collectionListProvider);
+      ref.invalidate(reportSummaryProvider);
+      ref.invalidate(savingsBalanceProvider(customer.id));
+      ref.invalidate(savingsTransactionsProvider(customer.id));
+      ref.invalidate(allSavingsAccountsProvider);
+      ref.invalidate(allAccountsWithNamesProvider);
+      if (!mounted) return;
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${customer.fullName} permanently deleted')),
+        );
+        context.go('/customers');
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to delete customer: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _changeGroup(CustomerGroup? group) async {
     try {
       final repo = await ref.read(customerRepositoryProvider.future);
       await repo.changeGroup(widget.customer.id, group?.id);
       ref.invalidate(customerProvider(widget.customer.id));
       ref.invalidate(customerListProvider);
+      ref.invalidate(customerCountProvider);
       ref.invalidate(collectionListProvider);
     } catch (e) {
       if (mounted) {
@@ -218,6 +292,8 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
                       extra: customer);
                 case MenuAction.archive:
                   _delete(context);
+                case MenuAction.hardDelete:
+                  _delete(context); // _delete now handles both archive and hard delete
                 case MenuAction.blacklist:
                   _changeStatus(CustomerStatus.blacklisted);
                 case MenuAction.activate:
@@ -226,34 +302,39 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
                   _showGroupDialog();
                 case MenuAction.printStatement:
                   _printStatement();
-                case MenuAction.delete:
-                  _delete(context);
               }
             },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                  value: MenuAction.edit, child: Text('Edit customer')),
-              const PopupMenuItem(
-                  value: MenuAction.switchGroup,
-                  child: Text('Switch group')),
-              const PopupMenuItem(
-                  value: MenuAction.printStatement,
-                  child: Text('Print statement')),
-              const PopupMenuDivider(),
-              const PopupMenuItem(
-                  value: MenuAction.archive,
-                  child: Text('Archive customer')),
-              const PopupMenuItem(
-                  value: MenuAction.blacklist,
-                  child: Text('Blacklist customer')),
-              const PopupMenuItem(
-                  value: MenuAction.activate, child: Text('Mark active')),
-              const PopupMenuDivider(),
-              const PopupMenuItem(
-                  value: MenuAction.delete,
-                  child: Text('Archive customer',
-                      style: TextStyle(color: Colors.redAccent))),
-            ],
+            itemBuilder: (context) {
+              final isArchived = customer.status == CustomerStatus.archived;
+              return [
+                const PopupMenuItem(
+                    value: MenuAction.edit, child: Text('Edit customer')),
+                const PopupMenuItem(
+                    value: MenuAction.switchGroup,
+                    child: Text('Switch group')),
+                const PopupMenuItem(
+                    value: MenuAction.printStatement,
+                    child: Text('Print statement')),
+                const PopupMenuDivider(),
+                if (isArchived) ...[
+                  const PopupMenuItem(
+                      value: MenuAction.hardDelete,
+                      child: Text('Delete permanently',
+                          style: TextStyle(color: Colors.red))),
+                  const PopupMenuItem(
+                      value: MenuAction.activate, child: Text('Unarchive')),
+                ] else ...[
+                  const PopupMenuItem(
+                      value: MenuAction.archive,
+                      child: Text('Archive customer')),
+                  const PopupMenuItem(
+                      value: MenuAction.blacklist,
+                      child: Text('Blacklist customer')),
+                  const PopupMenuItem(
+                      value: MenuAction.activate, child: Text('Mark active')),
+                ],
+              ];
+            },
           ),
         ],
       ),
@@ -648,7 +729,7 @@ enum MenuAction {
   switchGroup,
   printStatement,
   archive,
+  hardDelete,
   blacklist,
   activate,
-  delete,
 }

@@ -22,16 +22,18 @@ import '../../../payments/presentation/providers/payment_providers.dart';
 import '../../../payments/data/models/payment_entity.dart';
 import '../../../../core/di/providers.dart';
 import '../providers/collection_provider.dart';
+import '../widgets/collection_type_toggle.dart';
 
-class CollectionScreen extends ConsumerWidget {
-  const CollectionScreen({super.key});
+/// Daily Collection screen — daily loans only, viewable by date or date range
+/// and by group. Weekly loans live in their own WeeklyCollectionScreen.
+class DailyCollectionScreen extends ConsumerWidget {
+  const DailyCollectionScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final collectionAsync = ref.watch(collectionListProvider);
     final selectedDate = ref.watch(collectionDateFilterProvider);
     final selectedGroup = ref.watch(collectionGroupFilterProvider);
-    final selectedLoanType = ref.watch(collectionLoanTypeFilterProvider);
     final groupsAsync = ref.watch(groupListProvider);
     final isRangeMode = ref.watch(collectionDateRangeModeProvider);
     final rangeStart = ref.watch(collectionRangeStartProvider);
@@ -39,7 +41,7 @@ class CollectionScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Collections'),
+        title: const Text('Daily Collection'),
         leading: Builder(
           builder: (context) => IconButton(
             icon: const Icon(Icons.menu),
@@ -115,6 +117,7 @@ class CollectionScreen extends ConsumerWidget {
       drawer: const AppDrawer(currentRoute: '/collections'),
       body: Column(
         children: [
+          const CollectionTypeToggle(isWeekly: false),
           // Date mode toggle
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -152,21 +155,6 @@ class CollectionScreen extends ConsumerWidget {
                 ref.read(collectionRangeEndProvider.notifier).state = date;
               },
             ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: '', label: Text('All')),
-                ButtonSegment(value: 'daily', label: Text('Daily')),
-                ButtonSegment(value: 'weekly', label: Text('Weekly')),
-              ],
-              selected: {selectedLoanType ?? ''},
-              onSelectionChanged: (selection) {
-                ref.read(collectionLoanTypeFilterProvider.notifier).state =
-                    selection.first.isEmpty ? null : selection.first;
-              },
-            ),
-          ),
           groupsAsync.when(
             loading: () => const SizedBox.shrink(),
             error: (_, _) => const SizedBox.shrink(),
@@ -258,12 +246,10 @@ class CollectionScreen extends ConsumerWidget {
               data: (rows) {
                 if (rows.isEmpty) {
                   return Center(
-                    child: Text(
-                      'No ${selectedLoanType != null ? '$selectedLoanType ' : ''}collections for this date.',
-                    ),
+                    child: Text('No daily collections for this date.'),
                   );
                 }
-                return _buildSummaryAndList(context, ref, rows);
+                return _buildSummaryAndList(context, ref, rows, isRangeMode);
               },
             ),
           ),
@@ -273,7 +259,8 @@ class CollectionScreen extends ConsumerWidget {
   }
 
   Widget _buildSummaryAndList(
-      BuildContext context, WidgetRef ref, List<CollectionRow> rows) {
+      BuildContext context, WidgetRef ref, List<CollectionRow> rows,
+      [bool isRangeMode = false]) {
     double totalDue = 0;
     double totalPaid = 0;
     for (final row in rows) {
@@ -307,7 +294,14 @@ class CollectionScreen extends ConsumerWidget {
             separatorBuilder: (_, _) => const Divider(height: 1),
             itemBuilder: (context, index) {
               final row = rows[index];
-              final installmentDue = row.installmentAmount - row.amountPaid;
+              // In range mode the payment cap is the first unpaid installment's
+              // remaining amount (amountPaid already aggregates the whole range),
+              // not that amount minus the range's already-paid total — that
+              // double-subtraction would leave an artificially small cap and
+              // push legitimate payment into savings.
+              final installmentDue = isRangeMode
+                  ? row.installmentAmount
+                  : row.installmentAmount - row.amountPaid;
               return _CollectionRowTile(
                 row: row,
                 installmentDue: installmentDue > 0 ? installmentDue : 0,
@@ -379,6 +373,9 @@ class _CollectionRowTile extends ConsumerWidget {
     final currency =
         ref.read(currencySymbolProvider).valueOrNull ?? CurrencyUtils.defaultSymbol;
     final amountCtrl = TextEditingController(text: amount.toStringAsFixed(0));
+    // Stable id for THIS payment action: reused if the confirm is retried so a
+    // timeout/retry can never double-record the same logical payment (F3).
+    final requestId = const Uuid().v4();
 
     showDialog(
       context: context,
@@ -430,7 +427,7 @@ class _CollectionRowTile extends ConsumerWidget {
               final entered = double.tryParse(amountCtrl.text) ?? 0;
               if (!entered.isFinite || entered <= 0) return;
               Navigator.pop(ctx);
-              _recordQuickPayment(context, ref, entered);
+              _recordQuickPayment(context, ref, entered, requestId);
             },
             child: const Text('Confirm'),
           ),
@@ -439,8 +436,8 @@ class _CollectionRowTile extends ConsumerWidget {
     );
   }
 
-  Future<void> _recordQuickPayment(
-      BuildContext context, WidgetRef ref, double amount) async {
+  Future<void> _recordQuickPayment(BuildContext context, WidgetRef ref,
+      double amount, String requestId) async {
     try {
       final repo = await ref.read(paymentRepositoryProvider.future);
       final profileAsync = ref.read(businessProfileProvider);
@@ -452,7 +449,7 @@ class _CollectionRowTile extends ConsumerWidget {
         method: PaymentMethod.cash,
         collector: collectorName,
         installmentDue: installmentDue > 0 ? installmentDue : null,
-        clientRequestId: const Uuid().v4(),
+        clientRequestId: requestId,
       );
       logAuditAction(ref, 'UPDATE',
           'Payment ${CurrencyUtils.format(amount)} recorded for ${row.customerName} (loan ${row.loanId})');
@@ -469,6 +466,7 @@ class _CollectionRowTile extends ConsumerWidget {
       ref.invalidate(loanScheduleProvider(row.loanId));
       ref.invalidate(paymentsForLoanProvider(row.loanId));
       ref.invalidate(activeLoansForCustomerProvider(row.customerId));
+      ref.invalidate(allLoansProvider);
 
       final effectiveInstallment = installmentDue > 0 ? installmentDue : row.outstandingBalance;
       final surplus = amount - effectiveInstallment;
@@ -576,11 +574,17 @@ class _DateRangePickerTile extends StatelessWidget {
           '${AppDateUtils.formatDate(startDate)} — ${AppDateUtils.formatDate(endDate)}'),
       subtitle: Text('${endDate.difference(startDate).inDays + 1} days'),
       onTap: () async {
+        // Cap the start at the current end date so a range can never be
+        // inverted (picking a start after the end would leave start > end if
+        // the end picker is then cancelled).
+        final startUpperBound =
+            endDate.isAfter(startDate) ? endDate : startDate;
+        final lastAllowed = DateTime(now.year + 5, now.month, now.day);
         final pickedStart = await showDatePicker(
           context: context,
           initialDate: startDate,
           firstDate: DateTime(2020),
-          lastDate: DateTime(now.year + 5, now.month, now.day),
+          lastDate: startUpperBound.isAfter(lastAllowed) ? lastAllowed : startUpperBound,
         );
         if (pickedStart != null) {
           onStartPicked(pickedStart);

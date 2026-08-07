@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -25,7 +26,9 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen>
   final _bio = BiometricService();
   bool _isError = false;
   bool _isPermanentlyLocked = false;
+  bool _isLockedOut = false;
   String? _lockoutMessage;
+  Timer? _lockoutTimer;
   late AnimationController _shakeController;
   late Animation<double> _shakeAnimation;
 
@@ -54,17 +57,36 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen>
   Future<void> _checkLockout() async {
     final lockout = PinLockoutService(_storage);
     if (await lockout.isPermanentlyLocked()) {
+      _lockoutTimer?.cancel();
       if (!mounted) return;
       setState(() {
         _isPermanentlyLocked = true;
+        _isLockedOut = false;
+        _isError = true;
         _lockoutMessage = 'Too many failed attempts. This device is locked. '
             'Use "Forgot PIN" and your recovery password to reset it.';
       });
       return;
     }
     final message = await _lockoutCountdown(lockout);
-    if (!mounted || message == null) return;
-    setState(() => _lockoutMessage = message);
+    if (!mounted) return;
+    final lockedOut = message != null;
+    setState(() {
+      _isLockedOut = lockedOut;
+      // The message must be rendered: the error block is the only widget that
+      // shows _lockoutMessage, so a lockout with _isError == false was silently
+      // swallowed and the numpad stayed live.
+      _isError = lockedOut;
+      _lockoutMessage = message;
+    });
+    _lockoutTimer?.cancel();
+    if (lockedOut) {
+      // Refresh the countdown so the remaining time stays honest while the
+      // user waits on this screen.
+      _lockoutTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        _checkLockout();
+      });
+    }
   }
 
   /// Formats the ACTUAL remaining lockout (which escalates per cycle: 5, 10,
@@ -81,6 +103,7 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen>
 
   @override
   void dispose() {
+    _lockoutTimer?.cancel();
     _shakeController.dispose();
     super.dispose();
   }
@@ -101,8 +124,11 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen>
         _unlockApp();
         return;
       }
-      // `failed` means the user actively dismissed a wrong scan — do not nag.
-      if (result == BiometricResult.failed) return;
+      // `failed` (wrong scan) and `error` (user dismissed/cancelled the system
+      // dialog, e.g. tapping "Cancel" on Android) are deliberate user actions —
+      // never nag by re-prompting. Only `unavailable` is transient enough to
+      // warrant a retry.
+      if (result != BiometricResult.unavailable) return;
       await Future.delayed(const Duration(milliseconds: 500));
     }
   }
@@ -122,7 +148,7 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen>
 
   Future<void> _onKey(String key) async {
     try {
-      if (_isPermanentlyLocked) return;
+      if (_isPermanentlyLocked || _isLockedOut) return;
       if (_pin.length < AppConstants.maxPinLength) {
         HapticFeedback.lightImpact();
         setState(() {
@@ -195,6 +221,7 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen>
   }
 
   void _onDelete() {
+    if (_isPermanentlyLocked || _isLockedOut) return;
     if (_pin.isNotEmpty) {
       HapticFeedback.selectionClick();
       setState(() {
@@ -204,10 +231,33 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen>
     }
   }
 
+  /// Physical-keyboard entry (desktop: there is no touch numpad). Digits
+  /// (top row or numpad) append to the PIN, Backspace deletes. Only handles
+  /// [KeyDownEvent] so each press registers once.
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final character = event.character;
+    if (character != null &&
+        character.length == 1 &&
+        character.codeUnitAt(0) >= 0x30 &&
+        character.codeUnitAt(0) <= 0x39) {
+      _onKey(character);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.backspace) {
+      _onDelete();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
+      body: Focus(
+        autofocus: true,
+        onKeyEvent: _handleKeyEvent,
+        child: Container(
         width: double.infinity,
         height: double.infinity,
         decoration: const BoxDecoration(
@@ -278,6 +328,7 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen>
                 ),
               const Spacer(flex: 1),
               AppNumpad(
+                enabled: !_isPermanentlyLocked && !_isLockedOut,
                 onKeyPressed: _onKey,
                 onDelete: _onDelete,
               ),
@@ -296,6 +347,7 @@ class _PinLoginScreenState extends ConsumerState<PinLoginScreen>
             ],
           ),
         ),
+      ),
       ),
     );
   }

@@ -60,8 +60,21 @@ class DashboardSavingsTransaction {
   final double amount;
   final String createdAt;
 
-  bool get isCredit => type == 'deposit';
+  bool get isCredit => type == 'deposit' || type == 'overpayment';
   bool get isDebit => type == 'withdrawal';
+
+  String get typeLabel {
+    switch (type) {
+      case 'deposit':
+        return 'Deposit';
+      case 'overpayment':
+        return 'Overpayment';
+      case 'withdrawal':
+        return 'Withdrawal';
+      default:
+        return type;
+    }
+  }
 
   factory DashboardSavingsTransaction.fromMap(Map<String, dynamic> row) {
     return DashboardSavingsTransaction(

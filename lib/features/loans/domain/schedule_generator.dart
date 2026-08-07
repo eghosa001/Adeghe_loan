@@ -2,16 +2,27 @@ import 'package:loantrack/core/utils/date_utils.dart';
 import 'package:loantrack/features/holidays/data/models/holiday_entity.dart';
 import 'package:loantrack/features/loans/data/models/loan_entity.dart';
 import 'package:loantrack/features/loans/data/models/repayment_installment_entity.dart';
-import 'package:uuid/uuid.dart';
 
 /// A pure-logic service that generates a list of due dates for a loan,
 /// automatically skipping weekends and user-defined holidays.
+///
+/// This is a **pure function of the loan's source data**: the same loan
+/// (start date, type, duration) plus the same holiday set produces the same
+/// due dates on every device. Installment ids are deterministic
+/// (`<loanId>-<installmentNumber>`) so a regenerated schedule is byte-for-byte
+/// identical across devices — which is what lets the app treat the stored
+/// `repayment_schedule` table as a disposable derived cache instead of a
+/// synchronized source of truth.
 class ScheduleGenerator {
   ScheduleGenerator._();
 
   /// Generates a full repayment schedule for a given loan's parameters.
   /// - Daily loans count forward [duration] working days.
-  /// - Weekly loans advance week-by-week, shifting non-working days forward.
+  /// - Weekly loans advance week-by-week. The anchor weekday is the
+  ///   [startDate] weekday; an installment that lands on a non-working day
+  ///   (weekend or enabled holiday) is shifted forward to the next working
+  ///   day, but **only that installment** — the following installment resumes
+  ///   the anchor weekday.
   ///
   /// [amounts] holds the per-installment amount for each of the [duration]
   /// installments (usually produced by `CurrencyUtils.splitEvenly` so their
@@ -39,30 +50,6 @@ class ScheduleGenerator {
     );
   }
 
-  /// Generates [count] due dates continuing after [afterDate] (the last kept
-  /// installment's due date) for a loan that already has paid installments:
-  /// daily loans advance to the next working day, weekly loans advance a full
-  /// week then shift forward past any non-working day. Used by holiday-driven
-  /// schedule regeneration so only the pending tail of a partially-paid loan
-  /// is re-dated while paid installments stay untouched.
-  static List<DateTime> generateContinuationDueDates({
-    required LoanType loanType,
-    required DateTime afterDate,
-    required int count,
-    required List<Holiday> holidays,
-  }) {
-    final dates = <DateTime>[];
-    var current = AppDateUtils.stripTime(afterDate);
-    for (var i = 0; i < count; i++) {
-      current = loanType == LoanType.weekly
-          ? current.add(const Duration(days: 7))
-          : current.add(const Duration(days: 1));
-      current = _findNextWorkingDay(current, holidays);
-      dates.add(current);
-    }
-    return dates;
-  }
-
   static List<RepaymentInstallment> _generateDaily({
     required String loanId,
     required DateTime startDate,
@@ -78,7 +65,7 @@ class ScheduleGenerator {
       currentDate = _findNextWorkingDay(currentDate, holidays);
       schedule.add(
         RepaymentInstallment(
-          id: const Uuid().v4(),
+          id: '$loanId-${installmentsAdded + 1}',
           loanId: loanId,
           installmentNumber: installmentsAdded + 1,
           dueDate: currentDate,
@@ -100,18 +87,21 @@ class ScheduleGenerator {
   }) {
     final schedule = <RepaymentInstallment>[];
     var currentDate = AppDateUtils.stripTime(startDate);
+    
     for (var i = 1; i <= amounts.length; i++) {
-      final dueDate = _findNextWorkingDay(currentDate, holidays);
+      // Find the next working day starting from the anchor weekday
+      var dueDate = _findNextWorkingDay(currentDate, holidays);
       schedule.add(
         RepaymentInstallment(
-          id: const Uuid().v4(),
+          id: '$loanId-$i',
           loanId: loanId,
           installmentNumber: i,
           dueDate: dueDate,
           amount: amounts[i - 1],
         ),
       );
-      // Move to the next week for the following installment
+      // Move to the next anchor weekday for the following installment
+      // Add 7 days from the CURRENT anchor date (not the shifted due date)
       currentDate = currentDate.add(const Duration(days: 7));
     }
     return schedule;

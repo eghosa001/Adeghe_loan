@@ -1,8 +1,10 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:excel/excel.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -13,6 +15,7 @@ import '../../../core/utils/currency_utils.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../business/data/models/business_profile_entity.dart';
 import '../../collection/data/models/collection_row.dart';
+import '../../collection/data/models/weekly_collection_row.dart';
 
 /// A summary card shown above the table in generated PDF reports.
 class ReportCard {
@@ -644,86 +647,7 @@ class ExportManager {
 
   static Future<File> exportCollectionToExcel(
       List<CollectionRow> rows, DateTime date) async {
-    final excel = Excel.createExcel();
-    final defaultSheet = excel.getDefaultSheet();
-
-    final Map<String, List<CollectionRow>> groupedRows = {};
-    for (final r in rows) {
-      final g = (r.groupName != null && r.groupName!.trim().isNotEmpty)
-          ? r.groupName!.trim()
-          : 'Ungrouped';
-      groupedRows.putIfAbsent(g, () => []).add(r);
-    }
-
-    final sortedGroups = groupedRows.keys.toList()
-      ..sort((a, b) {
-        if (a == 'Ungrouped') return 1;
-        if (b == 'Ungrouped') return -1;
-        return a.compareTo(b);
-      });
-
-    const totalCols = 3;
-    final allRows = <List<String?>>[];
-    final boldRows = <bool>[];
-
-    for (final groupName in sortedGroups) {
-      allRows.add([groupName, null, null]);
-      boldRows.add(true);
-      final block = _buildCollectionRows(
-          _sortedCollectionRows(groupedRows[groupName]!));
-      for (final r in block) {
-        allRows.add(r);
-        boldRows.add(false);
-      }
-      allRows.add([null, null, null]);
-      boldRows.add(false);
-    }
-
-    final sheet = excel[defaultSheet ?? 'Collections'];
-    for (final row in allRows) {
-      sheet.appendRow([
-        row[0] ?? '',
-        row[1] ?? '',
-        row[2] ?? '',
-      ]);
-    }
-
-    final totalRows = sheet.maxRows;
-    for (var r = 0; r < totalRows; r++) {
-      for (var c = 0; c < totalCols; c++) {
-        final cell = sheet.cell(
-            CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r));
-        final value = cell.value?.toString() ?? '';
-        cell.cellStyle = CellStyle(
-          bold: boldRows[r] || _isCollectionHeaderValue(value),
-          horizontalAlign: HorizontalAlign.Left,
-          bottomBorder: Border(borderStyle: BorderStyle.Thin),
-          topBorder: Border(borderStyle: BorderStyle.Thin),
-          leftBorder: Border(borderStyle: BorderStyle.Thin),
-          rightBorder: Border(borderStyle: BorderStyle.Thin),
-        );
-      }
-    }
-
-    for (var c = 0; c < totalCols; c++) {
-      var maxWidth = 0;
-      for (var r = 0; r < totalRows; r++) {
-        final cell = sheet.cell(
-            CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r));
-        final text = cell.value?.toString() ?? '';
-        if (text.length > maxWidth) maxWidth = text.length;
-      }
-      sheet.setColWidth(c, (maxWidth + 3).toDouble());
-    }
-
-    final List<int>? bytes;
-    try {
-      bytes = excel.encode();
-    } catch (e) {
-      throw Exception('Failed to encode Excel file: $e');
-    }
-    if (bytes == null) throw Exception('Failed to encode Excel file: encode returned null');
-
+    final bytes = buildCollectionExcelBytes(rows, date);
     final dir = await getApplicationDocumentsDirectory();
     final fileName =
         'collection_${date.toIso8601String().split('T').first.replaceAll('-', '')}_${_uniqueStamp()}.xlsx';
@@ -732,54 +656,215 @@ class ExportManager {
     return file;
   }
 
-  static bool _isCollectionHeaderValue(String value) {
-    return value == 'DAILY LOANS' ||
-        value == 'WEEKLY LOANS' ||
-        value == 'Name' ||
-        value == 'Amount' ||
-        value == 'Paid';
-  }
+  // ── Collection-sheet Excel layout (two-column group layout) ────────────────
+  //
+  // Each customer group is rendered in a 3-column slot: Name | Amount | Paid.
+  // Groups are placed side by side (left slot = cols A–C, right slot = cols
+  // E–G, D stays blank as a spacer) and stacked in pairs. Each new pair starts
+  // below the taller of the two blocks, so groups with different customer
+  // counts never overlap. Ungrouped customers render as their own "Ungrouped"
+  // group, last. If the sheet would grow past the row cap the layout continues
+  // on a new worksheet with the same columns.
 
-  static List<CollectionRow> _sortedCollectionRows(List<CollectionRow> rows) {
-    final daily = rows
-        .where((r) => r.loanType.toLowerCase() == 'daily')
-        .toList()
-      ..sort((a, b) => a.customerName.compareTo(b.customerName));
-    final weekly = rows
-        .where((r) => r.loanType.toLowerCase() == 'weekly')
-        .toList()
-      ..sort((a, b) => a.customerName.compareTo(b.customerName));
-    return [...daily, ...weekly];
-  }
+  static const int _collectionGroupCols = 3;
+  static const int _collectionSpacerCols = 1;
+  static const int _collectionRightSlotCol =
+      _collectionGroupCols + _collectionSpacerCols;
+  static const int _collectionTotalCols =
+      _collectionRightSlotCol + _collectionGroupCols;
+  static const int _collectionPairGapRows = 1;
+  static const int _collectionMaxRowsPerSheet = 1000;
 
-  static List<List<String?>> _buildCollectionRows(List<CollectionRow> rows) {
-    final result = <List<String?>>[];
+  /// Builds the collection-sheet workbook bytes (two-column group layout).
+  /// Split out from [exportCollectionToExcel] so the layout algorithm is
+  /// testable without the file system.
+  @visibleForTesting
+  static List<int> buildCollectionExcelBytes(
+      List<CollectionRow> rows, DateTime date) {
+    final excel = Excel.createExcel();
+    final defaultSheet = excel.getDefaultSheet();
+    final groupedRows = _groupCollectionRows(rows);
+    final groupNames = _sortedCollectionGroupNames(groupedRows);
 
-    final dailyRows =
-        rows.where((r) => r.loanType.toLowerCase() == 'daily').toList();
-    if (dailyRows.isNotEmpty) {
-      result.add(['DAILY LOANS', null, null]);
-      result.add(['Name', 'Amount', 'Paid']);
-      for (final r in dailyRows) {
-        result.add([r.customerName, r.amountDue.toStringAsFixed(2), r.amountPaid.toStringAsFixed(2)]);
+    final sheets = <Sheet>[];
+    var sheet = excel[defaultSheet ?? 'Collections'];
+    sheets.add(sheet);
+    var nextRow = 0;
+    var sheetIndex = 1;
+    final colWidths = List<int>.filled(_collectionTotalCols, 0);
+
+    if (groupNames.isEmpty) {
+      final message = 'No collections for ${AppDateUtils.formatDate(date)}.';
+      final cell = sheet.cell(
+          CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0));
+      cell.value = message;
+      colWidths[0] = message.length;
+    } else {
+      for (var i = 0; i < groupNames.length; i += 2) {
+        final leftName = groupNames[i];
+        final rightName = i + 1 < groupNames.length ? groupNames[i + 1] : null;
+        final (leftLines, leftBold) =
+            _buildCollectionGroupBlock(leftName, groupedRows[leftName]!);
+        final (rightLines, rightBold) = rightName != null
+            ? _buildCollectionGroupBlock(rightName, groupedRows[rightName]!)
+            : (<List<String?>>[], <bool>[]);
+        final blockHeight = math.max(leftLines.length, rightLines.length);
+
+        if (nextRow + blockHeight > _collectionMaxRowsPerSheet) {
+          sheetIndex++;
+          sheet = excel['Collections $sheetIndex'];
+          sheets.add(sheet);
+          nextRow = 0;
+        }
+
+        _writeCollectionBlock(
+            sheet, leftLines, leftBold, nextRow, 0, colWidths);
+        if (rightLines.isNotEmpty) {
+          _writeCollectionBlock(sheet, rightLines, rightBold, nextRow,
+              _collectionRightSlotCol, colWidths);
+        }
+
+        nextRow += blockHeight + _collectionPairGapRows;
       }
     }
 
-    final weeklyRows =
-        rows.where((r) => r.loanType.toLowerCase() == 'weekly').toList();
-    if (weeklyRows.isNotEmpty) {
-      if (dailyRows.isNotEmpty) {
-        result.add(['', null, null]);
-      }
-      result.add(['WEEKLY LOANS', null, null]);
-      result.add(['Name', 'Amount', 'Paid']);
-      for (final r in weeklyRows) {
-        result.add([r.customerName, r.amountDue.toStringAsFixed(2), r.amountPaid.toStringAsFixed(2)]);
+    for (var c = 0; c < _collectionTotalCols; c++) {
+      final width = (colWidths[c] + 3).toDouble();
+      for (final s in sheets) {
+        s.setColWidth(c, width);
       }
     }
 
-    return result;
+    final List<int>? bytes;
+    try {
+      bytes = excel.encode();
+    } catch (e) {
+      throw Exception('Failed to encode Excel file: $e');
+    }
+    if (bytes == null) {
+      throw Exception('Failed to encode Excel file: encode returned null');
+    }
+    return bytes;
   }
+
+  static Map<String, List<CollectionRow>> _groupCollectionRows(
+      List<CollectionRow> rows) {
+    final grouped = <String, List<CollectionRow>>{};
+    for (final r in rows) {
+      final g = (r.groupName != null && r.groupName!.trim().isNotEmpty)
+          ? r.groupName!.trim()
+          : 'Ungrouped';
+      grouped.putIfAbsent(g, () => []).add(r);
+    }
+    return grouped;
+  }
+
+  static List<String> _sortedCollectionGroupNames(
+      Map<String, List<CollectionRow>> grouped) {
+    final names = grouped.keys.toList()
+      ..sort((a, b) {
+        if (a == 'Ungrouped') return 1;
+        if (b == 'Ungrouped') return -1;
+        return a.compareTo(b);
+      });
+    return names;
+  }
+
+  /// Builds the vertical lines of one group block. Each line holds the 3 cells
+  /// (name, amount, paid) rendered in that group's column slot. Daily loans are
+  /// separated from weekly loans with their own sub-headers, exactly as before.
+  static (List<List<String?>>, List<bool>) _buildCollectionGroupBlock(
+      String groupName, List<CollectionRow> rows) {
+    final lines = <List<String?>>[];
+    final bold = <bool>[];
+
+    lines.add([groupName, null, null]);
+    bold.add(true);
+
+    final daily =
+        rows.where((r) => r.loanType.toLowerCase() == 'daily').toList()
+          ..sort((a, b) => a.customerName.compareTo(b.customerName));
+    final weekly =
+        rows.where((r) => r.loanType.toLowerCase() == 'weekly').toList()
+          ..sort((a, b) => a.customerName.compareTo(b.customerName));
+
+    if (daily.isNotEmpty) {
+      lines.add(['DAILY LOANS', null, null]);
+      bold.add(true);
+      lines.add(['Name', 'Amount', 'Paid']);
+      bold.add(true);
+      for (final r in daily) {
+        lines.add([
+          r.customerName,
+          _collectionAmountText(r.amountDue),
+          _collectionPaidText(r.amountPaid),
+        ]);
+        bold.add(false);
+      }
+    }
+
+    if (weekly.isNotEmpty) {
+      lines.add(['WEEKLY LOANS', null, null]);
+      bold.add(true);
+      lines.add(['Name', 'Amount', 'Paid']);
+      bold.add(true);
+      for (final r in weekly) {
+        lines.add([
+          r.customerName,
+          _collectionAmountText(r.amountDue),
+          _collectionPaidText(r.amountPaid),
+        ]);
+        bold.add(false);
+      }
+    }
+
+    return (lines, bold);
+  }
+
+  static String _collectionAmountText(double amount) =>
+      amount.toStringAsFixed(2);
+
+  /// Unpaid rows leave the Paid cell empty — a blank reads as "nothing
+  /// collected", not a zero, and stays free for handwritten amounts.
+  static String _collectionPaidText(double amount) =>
+      amount > 0 ? amount.toStringAsFixed(2) : '';
+
+  /// Writes one group block into its 3-column slot starting at [startRow].
+  /// Empty cells are still written (as '') so the Paid column keeps its borders
+  /// for manual writing. The spacer column is never touched.
+  static void _writeCollectionBlock(
+    Sheet sheet,
+    List<List<String?>> lines,
+    List<bool> boldFlags,
+    int startRow,
+    int colBase,
+    List<int> colWidths,
+  ) {
+    for (var r = 0; r < lines.length; r++) {
+      final line = lines[r];
+      final bold = boldFlags[r];
+      for (var c = 0; c < _collectionGroupCols; c++) {
+        final value = c < line.length ? (line[c] ?? '') : '';
+        final cell = sheet.cell(
+            CellIndex.indexByColumnRow(
+                columnIndex: colBase + c, rowIndex: startRow + r));
+        cell.value = value;
+        cell.cellStyle = _collectionCellStyle(bold);
+        if (value.length > colWidths[colBase + c]) {
+          colWidths[colBase + c] = value.length;
+        }
+      }
+    }
+  }
+
+  static CellStyle _collectionCellStyle(bool bold) => CellStyle(
+        bold: bold,
+        horizontalAlign: HorizontalAlign.Left,
+        bottomBorder: Border(borderStyle: BorderStyle.Thin),
+        topBorder: Border(borderStyle: BorderStyle.Thin),
+        leftBorder: Border(borderStyle: BorderStyle.Thin),
+        rightBorder: Border(borderStyle: BorderStyle.Thin),
+      );
 
   static pw.Widget _buildCollectionTableForPrint(
       List<CollectionRow> rows,
@@ -796,7 +881,11 @@ class ExportManager {
         .map((r) => [
               r.customerName,
               CurrencyUtils.format(r.amountDue, symbol: currencySymbol),
-              CurrencyUtils.format(r.amountPaid, symbol: currencySymbol),
+              // Unpaid installments show a blank cell instead of ₦0.00 — a
+              // blank reads as "nothing collected yet", not a zero.
+              r.amountPaid > 0
+                  ? CurrencyUtils.format(r.amountPaid, symbol: currencySymbol)
+                  : '',
             ])
         .toList();
 
@@ -820,6 +909,272 @@ class ExportManager {
       },
       headers: headers,
       data: data,
+    );
+  }
+
+  // ── Weekly Collection export ───────────────────────────────────────────────
+
+  static const List<String> _weeklyCollectionHeaders = [
+    'Customer Name',
+    'Phone',
+    'Guarantor Name',
+    'Guarantor Phone',
+    'Payment Day',
+    'Disbursement Date',
+    'Amount Disbursed',
+    'Expected Amount',
+    'Collected',
+    'Amount Paid',
+    'Remaining Balance',
+  ];
+
+  /// Builds the weekly collection workbook bytes. All amounts come from the
+  /// caller-supplied [WeeklyCollectionRow]s, which the repository derives from
+  /// loan terms and completed repayments — exports can never disagree with the
+  /// on-screen list. Testable without the file system.
+  ///
+  /// "Expected Amount" is the fixed weekly installment (e.g. ₦10,000 for a
+  /// ₦100,000 loan over 12 weeks at 20%). "Collected" shows the amount paid
+  /// for the current installment (this week) — blank if nothing collected yet.
+  /// "Amount Paid" is the lifetime loan-applied total. "Remaining Balance" is
+  /// the true loan remainder (total repayment − amount paid).
+  @visibleForTesting
+  static List<int> buildWeeklyCollectionExcelBytes(
+      List<WeeklyCollectionRow> rows, DateTime date) {
+    final excel = Excel.createExcel();
+    final sheet = excel.getDefaultSheet() ?? 'WeeklyCollection';
+    final ws = excel[sheet];
+
+    // Title + date
+    _appendStyled(ws, 0, ['Weekly Collection'], bold: true, size: 13);
+    _appendStyled(ws, 1, ['Date: ${AppDateUtils.formatDate(date)} (${AppDateUtils.formatRelative(date)})']);
+    _appendStyled(ws, 2, const []);
+
+    var rowIdx = 3;
+    // Table header
+    _appendStyled(ws, rowIdx, _weeklyCollectionHeaders, header: true);
+    rowIdx++;
+    for (final row in rows) {
+      final values = [
+        row.customerName,
+        row.phone,
+        row.guarantorName,
+        row.guarantorPhone,
+        row.paymentDay,
+        row.loanDate,
+        row.amountDisbursed.toStringAsFixed(2),
+        row.weeklyInstallment.toStringAsFixed(2),
+        // Collected this period — blank if nothing collected for current installment
+        row.collectedThisPeriod > 0 ? row.collectedThisPeriod.toStringAsFixed(2) : '',
+        // Amount Paid is lifetime loan-applied total
+        row.amountPaid > 0 ? row.amountPaid.toStringAsFixed(2) : '',
+        row.remainingBalance.toStringAsFixed(2),
+      ];
+      _appendStyled(ws, rowIdx, values);
+      rowIdx++;
+    }
+    // Totals row
+    var totalDisbursed = 0.0;
+    var totalExpected = 0.0;
+    var totalCollected = 0.0;
+    var totalPaid = 0.0;
+    var totalRemaining = 0.0;
+    for (final row in rows) {
+      totalDisbursed += row.amountDisbursed;
+      totalExpected += row.weeklyInstallment;
+      totalCollected += row.collectedThisPeriod;
+      totalPaid += row.amountPaid;
+      totalRemaining += row.remainingBalance;
+    }
+    _appendStyled(ws, rowIdx, const []);
+    rowIdx++;
+    final totalValues = [
+      'TOTAL',
+      '',
+      '',
+      '',
+      '',
+      '',
+      totalDisbursed.toStringAsFixed(2),
+      totalExpected.toStringAsFixed(2),
+      totalCollected > 0 ? totalCollected.toStringAsFixed(2) : '',
+      totalPaid > 0 ? totalPaid.toStringAsFixed(2) : '',
+      totalRemaining.toStringAsFixed(2),
+    ];
+    _appendStyled(ws, rowIdx, totalValues, bold: true);
+
+    // Autosize columns from populated cells.
+    final maxCols = _weeklyCollectionHeaders.length;
+    for (var c = 0; c < maxCols; c++) {
+      var maxWidth = 0;
+      for (var r = 0; r < ws.maxRows; r++) {
+        final cell = ws.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r));
+        final text = cell.value?.toString() ?? '';
+        if (text.length > maxWidth) maxWidth = text.length;
+      }
+      ws.setColWidth(c, (maxWidth + 4).clamp(10, 60).toDouble());
+    }
+
+    final List<int>? bytes;
+    try {
+      bytes = excel.encode();
+    } catch (e) {
+      throw Exception('Failed to encode Excel file: $e');
+    }
+    if (bytes == null) {
+      throw Exception('Failed to encode Excel file: encode returned null');
+    }
+    return bytes;
+  }
+
+  static Future<File> exportWeeklyCollectionToExcel(
+      List<WeeklyCollectionRow> rows, DateTime date) async {
+    final bytes = buildWeeklyCollectionExcelBytes(rows, date);
+    final dir = await getApplicationDocumentsDirectory();
+    final fileName =
+        'weekly_collection_${date.toIso8601String().split('T').first.replaceAll('-', '')}_${_uniqueStamp()}.xlsx';
+    final file = File('${dir.path}/$fileName');
+    await file.writeAsBytes(bytes, flush: true);
+    return file;
+  }
+
+  static Future<void> shareWeeklyCollectionExcel(
+      List<WeeklyCollectionRow> rows, DateTime date) async {
+    final file = await exportWeeklyCollectionToExcel(rows, date);
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(file.path, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')],
+        subject: 'Weekly Collection ${AppDateUtils.formatDate(date)}',
+      ),
+    );
+  }
+
+  static Future<Uint8List> _buildWeeklyCollectionPdfBytes(
+    List<WeeklyCollectionRow> rows,
+    DateTime date, {
+    String? companyName,
+    String currencySymbol = CurrencyUtils.defaultSymbol,
+  }) async {
+    final font = await _getFont();
+    final bold = await _getFontBold();
+    final pdf = pw.Document();
+
+    var totalExpected = 0.0;
+    var totalCollected = 0.0;
+    var totalPaid = 0.0;
+    var totalDisbursed = 0.0;
+    var totalRemaining = 0.0;
+    for (final r in rows) {
+      totalExpected += r.weeklyInstallment;
+      totalCollected += r.collectedThisPeriod;
+      totalPaid += r.amountPaid;
+      totalDisbursed += r.amountDisbursed;
+      totalRemaining += r.remainingBalance;
+    }
+
+    final data = rows
+        .map((r) => [
+              r.customerName,
+              r.phone,
+              r.guarantorName,
+              r.guarantorPhone,
+              r.paymentDay,
+              r.loanDate,
+              CurrencyUtils.format(r.amountDisbursed, symbol: currencySymbol),
+              // Expected is the fixed weekly installment.
+              CurrencyUtils.format(r.weeklyInstallment, symbol: currencySymbol),
+              // Collected this period — blank if nothing collected for current installment
+              r.collectedThisPeriod > 0
+                  ? CurrencyUtils.format(r.collectedThisPeriod, symbol: currencySymbol)
+                  : '',
+              // Amount Paid is lifetime loan-applied total
+              r.amountPaid > 0
+                  ? CurrencyUtils.format(r.amountPaid, symbol: currencySymbol)
+                  : '',
+              CurrencyUtils.format(r.remainingBalance, symbol: currencySymbol),
+            ])
+        .toList();
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4.landscape,
+        margin: const pw.EdgeInsets.all(24),
+        build: (context) => [
+          pw.Header(
+            level: 0,
+            child: pw.Text(
+              companyName ?? 'Weekly Collection',
+              style:
+                  pw.TextStyle(font: bold, fontSize: 18, color: PdfColors.blue900),
+            ),
+          ),
+          pw.SizedBox(height: 4),
+          pw.Text(
+            'Date: ${AppDateUtils.formatDate(date)} (${AppDateUtils.formatRelative(date)})',
+            style:
+                pw.TextStyle(font: font, fontSize: 10, color: PdfColors.grey700),
+          ),
+          pw.Text(
+            'Total Customers: ${rows.length}   |   Total Disbursed: ${CurrencyUtils.format(totalDisbursed, symbol: currencySymbol)}'
+            '   |   Expected This Week: ${CurrencyUtils.format(totalExpected, symbol: currencySymbol)}'
+            '   |   Collected This Week: ${CurrencyUtils.format(totalCollected, symbol: currencySymbol)}'
+            '   |   Paid: ${CurrencyUtils.format(totalPaid, symbol: currencySymbol)}'
+            '   |   Remaining: ${CurrencyUtils.format(totalRemaining, symbol: currencySymbol)}',
+            style:
+                pw.TextStyle(font: font, fontSize: 10, color: PdfColors.grey700),
+          ),
+          pw.SizedBox(height: 16),
+          pw.TableHelper.fromTextArray(
+            headerStyle:
+                pw.TextStyle(font: bold, fontSize: 7, color: PdfColors.white),
+            headerDecoration: pw.BoxDecoration(
+              color: PdfColors.blue900,
+              borderRadius: pw.BorderRadius.only(
+                topLeft: pw.Radius.circular(4),
+                topRight: pw.Radius.circular(4),
+              ),
+            ),
+            headerAlignment: pw.Alignment.centerLeft,
+            cellStyle: pw.TextStyle(font: font, fontSize: 7),
+            cellAlignment: pw.Alignment.centerLeft,
+            cellHeight: 20,
+            headers: _weeklyCollectionHeaders,
+            data: data,
+          ),
+        ],
+      ),
+    );
+
+    return pdf.save();
+  }
+
+  static Future<File> exportWeeklyCollectionToPdf(
+    List<WeeklyCollectionRow> rows, DateTime date, {
+    String? companyName,
+    String currencySymbol = CurrencyUtils.defaultSymbol,
+  }) async {
+    final bytes = await _buildWeeklyCollectionPdfBytes(rows, date,
+        companyName: companyName, currencySymbol: currencySymbol);
+    final dir = await getApplicationDocumentsDirectory();
+    final fileName =
+        'weekly_collection_${date.toIso8601String().split('T').first.replaceAll('-', '')}_${_uniqueStamp()}.pdf';
+    final file = File('${dir.path}/$fileName');
+    await file.writeAsBytes(bytes, flush: true);
+    return file;
+  }
+
+  static Future<void> shareWeeklyCollectionPdf(
+    List<WeeklyCollectionRow> rows, DateTime date, {
+    String? companyName,
+    String currencySymbol = CurrencyUtils.defaultSymbol,
+  }) async {
+    final file = await exportWeeklyCollectionToPdf(rows, date,
+        companyName: companyName, currencySymbol: currencySymbol);
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(file.path, mimeType: 'application/pdf')],
+        subject: 'Weekly Collection ${AppDateUtils.formatDate(date)}',
+      ),
     );
   }
 }

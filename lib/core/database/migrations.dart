@@ -7,35 +7,157 @@ class DatabaseMigrations {
   DatabaseMigrations._();
 
   static Future<void> run(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 2) await _v2(db);
-    if (oldVersion < 3) await _v3(db);
-    if (oldVersion < 4) await _v4(db);
-    if (oldVersion < 5) await _v5(db);
-    if (oldVersion < 6) await _v6(db);
-    if (oldVersion < 7) await _v7(db);
-    if (oldVersion < 8) await _v8(db);
-    if (oldVersion < 9) await _v9(db);
-    if (oldVersion < 10) await _v10(db);
-    if (oldVersion < 11) await _v11(db);
-    if (oldVersion < 12) await _v12(db);
-    if (oldVersion < 13) await _v13(db);
-    if (oldVersion < 14) await _v14(db);
-    if (oldVersion < 15) await _v15(db);
-    if (oldVersion < 16) await _v16(db);
-    if (oldVersion < 17) await _v17(db);
-    if (oldVersion < 18) await _v18(db);
+    // Each migration runs only when the installed schema predates it AND the
+    // upgrade target includes it. Production passes newVersion = the latest
+    // version so every pending migration runs; tests can migrate to an
+    // intermediate version without executing later, heavier migrations.
+    bool pending(int n) => oldVersion < n && n <= newVersion;
+    if (pending(2)) await _v2(db);
+    if (pending(3)) await _v3(db);
+    if (pending(4)) await _v4(db);
+    if (pending(5)) await _v5(db);
+    if (pending(6)) await _v6(db);
+    if (pending(7)) await _v7(db);
+    if (pending(8)) await _v8(db);
+    if (pending(9)) await _v9(db);
+    if (pending(10)) await _v10(db);
+    if (pending(11)) await _v11(db);
+    if (pending(12)) await _v12(db);
+    if (pending(13)) await _v13(db);
+    if (pending(14)) await _v14(db);
+    if (pending(15)) await _v15(db);
+    if (pending(16)) await _v16(db);
+    if (pending(17)) await _v17(db);
+    if (pending(18)) await _v18(db);
+    if (pending(19)) await _v19(db);
+    if (pending(20)) await _v20(db);
+    if (pending(21)) await _v21(db);
   }
 
-  /// Tables that are replicated to Supabase for cloud sync, in parent-before-
-  /// child dependency order (so FK constraints hold when rows are written back
-  /// during a pull). The `settings` table has a `key` primary key; every other
-  /// sync table uses `id`.
+  /// v20 — indexes backing the money-rule join and common date-range filters.
+  /// The money rule's `LEFT JOIN savings_transactions st ON
+  /// st.reference_loan_payment_id = p.id AND st.type = 'overpayment'` runs in
+  /// every payment aggregate (dashboard, reports, collection, statements);
+  /// without an index it full-scans savings_transactions per payment row. The
+  /// other indexes serve per-customer payment history, global date-range
+  /// filters, the holiday `NOT EXISTS` subquery, and the documents loan
+  /// cascade. Fresh installs get these from `_createIndexes`.
+  static Future<void> _v20(Database db) async {
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_savings_txns_ref_payment ON savings_transactions(reference_loan_payment_id)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_payments_customer ON payments(customer_id)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(payment_date)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_savings_txns_created ON savings_transactions(created_at)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_holidays_date ON holidays(date)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_documents_loan ON documents(loan_id)');
+  }
+
+  /// v21 — drop the `customers` column-level UNIQUE constraints and replace
+  /// them with PARTIAL unique indexes that only apply to non-archived rows.
+  /// `phone`/`nin`/`bvn` were `TEXT UNIQUE` in the table DDL, so archiving a
+  /// customer permanently blocked re-registering that person (the repository
+  /// check already excludes archived rows, but the DB constraint still fired
+  /// `UNIQUE constraint failed` → generic "Unable to save customer"). SQLite
+  /// cannot drop a column UNIQUE via ALTER, so the table is recreated (same
+  /// pattern as v16). Existing rows cannot violate the partial indexes because
+  /// the old UNIQUE constraints already forced all non-null values unique.
+  static Future<void> _v21(Database db) async {
+    await db.execute('''
+      CREATE TABLE customers_new (
+        id TEXT PRIMARY KEY,
+        passport_path TEXT,
+        full_name TEXT NOT NULL,
+        gender TEXT,
+        dob TEXT,
+        phone TEXT NOT NULL,
+        alt_phone TEXT,
+        email TEXT,
+        residential_address TEXT,
+        business_address TEXT,
+        occupation TEXT,
+        employer TEXT,
+        marital_status TEXT,
+        nationality TEXT,
+        state TEXT,
+        lga TEXT,
+        next_of_kin TEXT,
+        next_of_kin_relation TEXT,
+        next_of_kin_phone TEXT,
+        guarantor_1_name TEXT,
+        guarantor_1_phone TEXT,
+        guarantor_1_address TEXT,
+        guarantor_2_name TEXT,
+        guarantor_2_phone TEXT,
+        guarantor_2_address TEXT,
+        guarantor_passport_path TEXT,
+        nin TEXT,
+        bvn TEXT,
+        id_type TEXT,
+        id_number TEXT,
+        signature_path TEXT,
+        date_registered TEXT NOT NULL,
+        notes TEXT,
+        status TEXT NOT NULL,
+        credit_score REAL DEFAULT 0.0,
+        group_id TEXT REFERENCES customer_groups(id) ON DELETE SET NULL,
+        updated_at TEXT
+      )
+    ''');
+    await db.execute('''
+      INSERT INTO customers_new (
+        id, passport_path, full_name, gender, dob, phone, alt_phone, email,
+        residential_address, business_address, occupation, employer,
+        marital_status, nationality, state, lga, next_of_kin,
+        next_of_kin_relation, next_of_kin_phone, guarantor_1_name,
+        guarantor_1_phone, guarantor_1_address, guarantor_2_name,
+        guarantor_2_phone, guarantor_2_address, guarantor_passport_path, nin,
+        bvn, id_type, id_number, signature_path, date_registered, notes,
+        status, credit_score, group_id, updated_at
+      )
+      SELECT
+        id, passport_path, full_name, gender, dob, phone, alt_phone, email,
+        residential_address, business_address, occupation, employer,
+        marital_status, nationality, state, lga, next_of_kin,
+        next_of_kin_relation, next_of_kin_phone, guarantor_1_name,
+        guarantor_1_phone, guarantor_1_address, guarantor_2_name,
+        guarantor_2_phone, guarantor_2_address, guarantor_passport_path, nin,
+        bvn, id_type, id_number, signature_path, date_registered, notes,
+        status, credit_score, group_id, updated_at
+      FROM customers
+    ''');
+    await db.execute('DROP TABLE customers');
+    await db.execute('ALTER TABLE customers_new RENAME TO customers');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(full_name)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_customers_group ON customers(group_id)');
+    await db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_phone_unique ON customers(phone) WHERE status != 'archived'");
+    await db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_nin_unique ON customers(nin) WHERE status != 'archived'");
+    await db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_bvn_unique ON customers(bvn) WHERE status != 'archived'");
+  }
+
+  /// Tables that get cloud-sync change tracking (updated_at stamping +
+  /// tombstone triggers), in parent-before-child dependency order. NOTE: this
+  /// list drives `createSyncSchema` ONLY; the sync service keeps its own
+  /// replication list (`_tables` in `cloud_sync_service.dart`) which is a
+  /// strict subset (audit_logs/settings are tracked locally but never pushed,
+  /// and `repayment_schedule` is a derived cache — tracked in v17, dropped in
+  /// v19 — and never replicated).
   static const List<String> _syncTables = [
     'business_profile',
     'customer_groups',
     'customers',
     'loans',
-    'repayment_schedule',
     'payments',
     'savings_accounts',
     'savings_transactions',
@@ -50,7 +172,6 @@ class DatabaseMigrations {
     'customer_groups': 'id',
     'customers': 'id',
     'loans': 'id',
-    'repayment_schedule': 'id',
     'payments': 'id',
     'savings_accounts': 'id',
     'savings_transactions': 'id',
@@ -59,6 +180,21 @@ class DatabaseMigrations {
     'audit_logs': 'id',
     'settings': 'key',
   };
+
+  /// v19 — stop change-tracking `repayment_schedule`. The schedule is a derived
+  /// cache recomputed on every device from synced source data (loans +
+  /// payments + savings + holidays), so its rows are never replicated. Drop its
+  /// stamp/tombstone triggers (created in v17) and purge its stale tombstones.
+  /// The `updated_at` column itself is left in place (harmless, and dropping
+  /// it would require a table recreate).
+  static Future<void> _v19(Database db) async {
+    for (final name in const ['ins', 'upd', 'del']) {
+      await db.execute('DROP TRIGGER IF EXISTS trg_repayment_schedule_$name');
+    }
+    await db.execute(
+        'DELETE FROM sync_tombstones WHERE deleted_table = ?',
+        ['repayment_schedule']);
+  }
 
   /// v18 — add a client-side idempotency key to payments so a retried/double
   /// submission of the same logical payment cannot create a duplicate.

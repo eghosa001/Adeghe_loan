@@ -43,38 +43,4 @@ class AuditLogRepository {
           DatabaseFailure('Failed to load audit logs.', cause: e));
     }
   }
-
-  Future<Result<List<AuditLog>>> getByDateRange(
-      DateTime start, DateTime end) async {
-    try {
-      final db = await _database;
-      final rows = await db.query(
-        'audit_logs',
-        where: 'timestamp BETWEEN ? AND ?',
-        whereArgs: [start.toIso8601String(), end.toIso8601String()],
-        orderBy: 'timestamp DESC',
-      );
-      final logs = rows.map(AuditLog.fromMap).toList(growable: false);
-      return Result.success(logs);
-    } on DatabaseException catch (e) {
-      return Result.failure(
-          DatabaseFailure('Failed to load audit logs by date range.', cause: e));
-    }
-  }
-
-  Future<Result<List<AuditLog>>> getRecent(int limit) async {
-    try {
-      final db = await _database;
-      final rows = await db.query(
-        'audit_logs',
-        orderBy: 'timestamp DESC',
-        limit: limit,
-      );
-      final logs = rows.map(AuditLog.fromMap).toList(growable: false);
-      return Result.success(logs);
-    } on DatabaseException catch (e) {
-      return Result.failure(
-          DatabaseFailure('Failed to load recent audit logs.', cause: e));
-    }
-  }
 }

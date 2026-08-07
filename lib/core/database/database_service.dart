@@ -12,7 +12,7 @@ import '../security/secure_storage_service.dart';
 import 'migrations.dart';
 
 class DatabaseService {
-  static const int _databaseVersion = 18;
+  static const int _databaseVersion = 21;
   final SecureStorageService _secureStorage;
 
   /// Test-only replacement for [_initDatabase], letting tests exercise the
@@ -36,6 +36,12 @@ class DatabaseService {
   /// concurrent [database] caller wait for the close -> swap -> reopen cycle
   /// to finish instead of opening a half-swapped file (M14).
   Future<void>? _exclusiveGate;
+
+  /// Serialization chain for [withExclusiveAccess]. A second exclusive block
+  /// (e.g. an auto-backup racing a manual restore) awaits the previous block's
+  /// completion before it starts, so close -> swap -> reopen cycles can never
+  /// interleave and corrupt the live DB file.
+  Future<void>? _exclusiveTail;
 
   String? _databasePath;
 
@@ -94,20 +100,46 @@ class DatabaseService {
   /// swapping in a restored file), then the database is reopened before any
   /// concurrent [database] caller proceeds. [action] must not open the
   /// database itself — call [database] only from outside.
+  ///
+  /// Concurrent calls are serialized through [_exclusiveTail], so two
+  /// overlapping backup/restore operations (e.g. the post-unlock auto-backup
+  /// racing a manual restore) run one after the other instead of interleaving
+  /// their close/swap/reopen cycles.
   Future<T> withExclusiveAccess<T>(Future<T> Function() action) async {
+    final previous = _exclusiveTail;
+    final done = Completer<void>();
+    _exclusiveTail = done.future;
+    if (previous != null) {
+      try {
+        await previous;
+      } catch (_) {
+        // A previous exclusive block that failed must not poison the chain.
+      }
+    }
     final gate = Completer<void>();
     _exclusiveGate = gate.future;
+    Object? actionError;
     try {
       await close();
       return await action();
+    } catch (error) {
+      actionError = error;
+      rethrow;
     } finally {
       // Clear the gate FIRST so new callers use the normal memoized path, then
       // reopen, then release callers that queued on the gate.
       _exclusiveGate = null;
       try {
         await database;
+      } catch (reopenError) {
+        // Never mask the action's own failure with a reopen failure; only
+        // surface the reopen problem when the action itself succeeded.
+        if (actionError == null) {
+          Error.throwWithStackTrace(reopenError, StackTrace.current);
+        }
       } finally {
         if (!gate.isCompleted) gate.complete();
+        if (!done.isCompleted) done.complete();
       }
     }
   }
@@ -126,7 +158,10 @@ class DatabaseService {
             password: encryptionKey, readOnly: true);
       }
       final version = await db.getVersion();
-      return version >= 1;
+      // A candidate from a NEWER app version (higher schema) must not be
+      // swapped in — this app has no downgrade path and would run against a
+      // schema it doesn't fully know.
+      return version >= 1 && version <= _databaseVersion;
     } catch (_) {
       return false;
     } finally {
@@ -248,7 +283,7 @@ class DatabaseService {
         full_name TEXT NOT NULL,
         gender TEXT,
         dob TEXT,
-        phone TEXT UNIQUE NOT NULL,
+        phone TEXT NOT NULL,
         alt_phone TEXT,
         email TEXT,
         residential_address TEXT,
@@ -269,8 +304,8 @@ class DatabaseService {
         guarantor_2_phone TEXT,
         guarantor_2_address TEXT,
         guarantor_passport_path TEXT,
-        nin TEXT UNIQUE,
-        bvn TEXT UNIQUE,
+        nin TEXT,
+        bvn TEXT,
         id_type TEXT,
         id_number TEXT,
         signature_path TEXT,
@@ -436,6 +471,16 @@ class DatabaseService {
         'CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(full_name)');
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)');
+    // Partial unique indexes (v21): dedupe applies only to NON-archived
+    // customers, so a customer can be re-registered after archiving (the repo
+    // check already excludes archived rows; these replace the former column
+    // UNIQUE constraints that contradicted it and blocked re-registration).
+    await db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_phone_unique ON customers(phone) WHERE status != 'archived'");
+    await db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_nin_unique ON customers(nin) WHERE status != 'archived'");
+    await db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_bvn_unique ON customers(bvn) WHERE status != 'archived'");
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_customers_group ON customers(group_id)');
     await db.execute(
@@ -463,5 +508,21 @@ class DatabaseService {
         'CREATE INDEX IF NOT EXISTS idx_loans_type_status ON loans(loan_type, status)');
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_loans_type_date ON loans(loan_type, loan_date)');
+    // Indexes backing the money-rule join and the most common date/range
+    // filters (v20). The money rule's
+    // `LEFT JOIN savings_transactions st ON st.reference_loan_payment_id = p.id`
+    // otherwise full-scans savings_transactions for every payment aggregate.
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_savings_txns_ref_payment ON savings_transactions(reference_loan_payment_id)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_payments_customer ON payments(customer_id)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(payment_date)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_savings_txns_created ON savings_transactions(created_at)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_holidays_date ON holidays(date)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_documents_loan ON documents(loan_id)');
   }
 }

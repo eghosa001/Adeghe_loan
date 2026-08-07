@@ -4,12 +4,14 @@ import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/database/database_service.dart';
+import '../../loans/data/loan_schedule_service.dart';
 import 'models/payment_entity.dart';
 import 'payment_logic.dart';
 
 class PaymentRepository {
-  PaymentRepository(this._dbService);
+  PaymentRepository(this._dbService, {this._scheduleService});
   final DatabaseService _dbService;
+  final LoanScheduleService? _scheduleService;
 
   Future<Database> get _db async => _dbService.database;
 
@@ -194,7 +196,7 @@ class PaymentRepository {
       throw Exception('Invalid payment amount. Please enter a valid amount.');
     }
     final db = await _db;
-    return await db.transaction((txn) async {
+    final payment = await db.transaction((txn) async {
       // Idempotency: if the caller supplied a client-side request key that was
       // already recorded, return the existing payment instead of applying the
       // payment a second time. This stops a double-tap or a retry of the same
@@ -285,6 +287,14 @@ class PaymentRepository {
 
       return payment;
     });
+    // Best-effort derived rebuild so the stored schedule matches what another
+    // device derives from the same source data (payments + savings surplus).
+    try {
+      await _scheduleService?.rebuildSchedule(loanId);
+    } catch (_) {
+      // The transaction already marked the schedule paid.
+    }
+    return payment;
   }
 
   Future<void> updatePaymentNotes(String paymentId, String? remarks) async {
@@ -299,6 +309,7 @@ class PaymentRepository {
 
   Future<void> reversePayment(String paymentId) async {
     final db = await _db;
+    late String capturedLoanId;
     await db.transaction((txn) async {
       final rows = await txn
           .query('payments', where: 'id = ?', whereArgs: [paymentId]);
@@ -306,7 +317,7 @@ class PaymentRepository {
 
       final payment = rows.first;
       final amount = (payment['amount'] as num).toDouble();
-      final loanId = payment['loan_id'] as String;
+      capturedLoanId = payment['loan_id'] as String;
       final customerId = payment['customer_id'] as String;
       final status = payment['status'] as String;
 
@@ -345,15 +356,17 @@ class PaymentRepository {
         whereArgs: [paymentId],
       );
 
-      final loanRows = await txn.query('loans', columns: ['status'], where: 'id = ?', whereArgs: [loanId]);
       final storedPriorStatus = payment['prior_loan_status'] as String?;
       // Restore the exact pre-payment status (e.g. 'defaulted') recorded when
-      // the payment was created; fall back to 'active' if not present.
-      final previousStatus = storedPriorStatus ?? (loanRows.isNotEmpty ? loanRows.first['status'] as String : 'active');
+      // the payment was created. For legacy rows without the column, fall back
+      // to 'active' — NEVER the loan's current status: after a full payment the
+      // current status is 'completed', and restoring that would leave the loan
+      // stuck as "completed" with a freshly-restored positive balance.
+      final previousStatus = storedPriorStatus ?? 'active';
       await txn.rawUpdate(
         'UPDATE loans SET outstanding_balance = outstanding_balance + ?, '
         'status = ? WHERE id = ?',
-        [appliedToLoan, previousStatus, loanId],
+        [appliedToLoan, previousStatus, capturedLoanId],
       );
 
       if (overpaymentSurplus > 0) {
@@ -384,7 +397,7 @@ class PaymentRepository {
             'type': 'withdrawal',
             'amount': toDeduct,
             'reference_loan_payment_id': paymentId,
-            'note': 'Overpayment reversal — Loan: $loanId',
+            'note': 'Overpayment reversal — Loan: $capturedLoanId',
             'created_at': DateTime.now().toIso8601String(),
           });
         }
@@ -417,14 +430,23 @@ class PaymentRepository {
             'type': 'deposit',
             'amount': savingsToRefund,
             'reference_loan_payment_id': paymentId,
-            'note': 'Savings-cleared payment reversal — Loan: $loanId',
+            'note': 'Savings-cleared payment reversal — Loan: $capturedLoanId',
             'created_at': DateTime.now().toIso8601String(),
           });
         }
       }
 
-      await _recalculateScheduleFromPayments(txn, loanId);
+      await _recalculateScheduleFromPayments(txn, capturedLoanId);
+      // Return capturedLoanId for the post-transaction rebuild
+      return capturedLoanId;
     });
+    // Best-effort derived rebuild after the reversal so the stored schedule
+    // matches the derived one from the remaining completed payments.
+    try {
+      await _scheduleService?.rebuildSchedule(capturedLoanId);
+    } catch (_) {
+      // The transaction already recalculated the schedule.
+    }
   }
 
   Future<List<Payment>> getPaymentsForLoan(String loanId) async {
@@ -486,8 +508,9 @@ class PaymentRepository {
       );
 
       final receiptNumber = await _generateReceiptNumber(txn);
+      final paymentId = const Uuid().v4();
       final payment = Payment(
-        id: const Uuid().v4(),
+        id: paymentId,
         loanId: loanId,
         customerId: customerId,
         amount: outstanding,
@@ -512,7 +535,7 @@ class PaymentRepository {
         'savings_account_id': accountId,
         'type': 'withdrawal',
         'amount': outstanding,
-        'reference_loan_payment_id': payment.id,
+        'reference_loan_payment_id': paymentId,
         'note': 'Loan cleared with savings — Loan: $loanId',
         'created_at': DateTime.now().toIso8601String(),
       });
@@ -530,5 +553,13 @@ class PaymentRepository {
         whereArgs: [loanId],
       );
     });
+    // Best-effort derived rebuild so the stored schedule reflects the savings
+    // clear (all installments paid). The rebuild excludes the linked savings
+    // withdrawal from the applied total — a savings clear is fully loan-applied.
+    try {
+      await _scheduleService?.rebuildSchedule(loanId);
+    } catch (_) {
+      // The transaction already marked the schedule paid.
+    }
   }
 }

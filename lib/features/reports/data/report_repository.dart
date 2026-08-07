@@ -28,15 +28,20 @@ class ReportRepository {
       final db = await _database;
       final startStr = AppDateUtils.formatForStorage(startDate);
       final endStr = AppDateUtils.formatForStorage(endDate);
-      final endDateTime = '$endStr 23:59:59';
 
       // When a specific loan type is requested, only that type is queried and
       // the other bucket is returned empty so combined totals are not skewed.
+      // The heavy client-report/overdue detail queries are only needed by the
+      // per-type report screens — the combined dashboard summary never reads
+      // them, so skip them when loanType == null (a ~40ms×2 saving per render).
+      final includeDetail = loanType != null;
       final dailySummary = (loanType == null || loanType == 'daily')
-          ? await _getLoanTypeSummary(db, 'daily', startStr, endStr, endDateTime)
+          ? await _getLoanTypeSummary(db, 'daily', startStr, endStr,
+              includeDetail: includeDetail)
           : LoanTypeReportSummary.empty();
       final weeklySummary = (loanType == null || loanType == 'weekly')
-          ? await _getLoanTypeSummary(db, 'weekly', startStr, endStr, endDateTime)
+          ? await _getLoanTypeSummary(db, 'weekly', startStr, endStr,
+              includeDetail: includeDetail)
           : LoanTypeReportSummary.empty();
 
       // Distinct customer count across the filtered loan types (avoids
@@ -92,9 +97,9 @@ class ReportRepository {
     Database db,
     String? loanType,
     String startStr,
-    String endStr,
-    String endDateTime,
-  ) async {
+    String endStr, {
+    bool includeDetail = true,
+  }) async {
     // Build WHERE clause fragments for loan type filtering
     final ltClause = loanType != null ? ' AND l.loan_type = ?' : '';
     final ltParam = loanType;
@@ -150,8 +155,8 @@ class ReportRepository {
         " AND st.type = 'overpayment' "
         "WHERE p.status = 'completed' AND p.payment_date BETWEEN ? AND ?$ltClause",
         ltParam != null
-            ? [startStr, endDateTime, ltParam]
-            : [startStr, endDateTime],
+            ? [startStr, endStr, ltParam]
+            : [startStr, endStr],
       ),
       // 7: Expected collections (sum of unpaid portion of installments due in
       //    period) — only for active loans; cancelled/defaulted are not expected
@@ -216,10 +221,14 @@ class ReportRepository {
         ? ((amountCollected / expectedCollections) * 100).clamp(0.0, 100.0)
         : 0.0;
 
-    // Batch 2: Heavy queries (client reports + overdue entries)
-    final heavy = await Future.wait([
-      // 12: Client reports
-      db.rawQuery(
+    // Batch 2: Heavy queries (client reports + overdue entries) — only needed
+    // by the per-type report screens; the combined dashboard summary skips them.
+    List<ClientReport> clientReports = [];
+    List<OverdueEntry> overdueEntries = [];
+    if (includeDetail) {
+      final heavy = await Future.wait([
+        // 12: Client reports
+        db.rawQuery(
         'SELECT '
         'c.id AS customerId, '
         'c.full_name AS customerName, '
@@ -278,55 +287,55 @@ class ReportRepository {
       ),
     ]);
 
-    final nowDate = DateTime.now();
+      final nowDate = DateTime.now();
 
-    final clientReports = (heavy[0] as List<Map<String, dynamic>>)
-        .map((row) {
-          final borrowed = (row['amountBorrowed'] as num?)?.toDouble() ?? 0.0;
-          final rate = (row['interestRate'] as num?)?.toDouble() ?? 0.0;
-          return ClientReport(
-              customerId: row['customerId'] as String? ?? '',
-              customerName: row['customerName'] as String? ?? '',
-              phone: row['phone'] as String? ?? '',
-              loanId: row['loanId'] as String? ?? '',
-              loanType: row['loanType'] as String? ?? '',
-              amountBorrowed: borrowed,
-              outstandingBalance:
-                  (row['outstandingBalance'] as num?)?.toDouble() ?? 0.0,
-              totalPaid: (row['totalPaid'] as num?)?.toDouble() ?? 0.0,
-              loanStatus: row['loanStatus'] as String? ?? '',
-              groupName: row['groupName'] as String?,
-              guarantorName: row['guarantorName'] as String? ?? '',
-              guarantorPhone: row['guarantorPhone'] as String? ?? '',
-              loanDate: row['loanDate'] as String? ?? '',
-              interestAmount: borrowed * rate / 100,
-              savingsAmount: (row['savingsAmount'] as num?)?.toDouble() ?? 0.0,
-            );
-        })
-        .toList();
+      clientReports = (heavy[0] as List<Map<String, dynamic>>)
+          .map((row) {
+            final borrowed = (row['amountBorrowed'] as num?)?.toDouble() ?? 0.0;
+            final rate = (row['interestRate'] as num?)?.toDouble() ?? 0.0;
+            return ClientReport(
+                customerId: row['customerId'] as String? ?? '',
+                customerName: row['customerName'] as String? ?? '',
+                phone: row['phone'] as String? ?? '',
+                loanId: row['loanId'] as String? ?? '',
+                loanType: row['loanType'] as String? ?? '',
+                amountBorrowed: borrowed,
+                outstandingBalance:
+                    (row['outstandingBalance'] as num?)?.toDouble() ?? 0.0,
+                totalPaid: (row['totalPaid'] as num?)?.toDouble() ?? 0.0,
+                loanStatus: row['loanStatus'] as String? ?? '',
+                groupName: row['groupName'] as String?,
+                guarantorName: row['guarantorName'] as String? ?? '',
+                guarantorPhone: row['guarantorPhone'] as String? ?? '',
+                loanDate: row['loanDate'] as String? ?? '',
+                interestAmount: borrowed * rate / 100,
+                savingsAmount: (row['savingsAmount'] as num?)?.toDouble() ?? 0.0,
+              );
+          })
+          .toList();
 
-    final overdueEntries = (heavy[1] as List<Map<String, dynamic>>)
-        .map((row) {
-      final dueStr = row['dueDate'] as String? ?? endStr;
-      final dueDate = DateTime.tryParse(dueStr) ?? nowDate;
-      final overdueDays = nowDate.difference(dueDate).inDays;
-      return OverdueEntry(
-        customerId: row['customerId'] as String? ?? '',
-        customerName: row['customerName'] as String? ?? '',
-        phone: row['phone'] as String? ?? '',
-        loanId: row['loanId'] as String? ?? '',
-        loanType: row['loanType'] as String? ?? '',
-        installmentNumber: row['installmentNumber'] as int? ?? 0,
-        dueDate: dueStr,
-        amountDue: (row['amountDue'] as num?)?.toDouble() ?? 0.0,
-        paidAmount: (row['paidAmount'] as num?)?.toDouble() ?? 0.0,
-        overdueDays: overdueDays,
-        groupName: row['groupName'] as String?,
-        guarantorName: row['guarantorName'] as String? ?? '',
-        guarantorPhone: row['guarantorPhone'] as String? ?? '',
-      );
-    }).toList();
-
+      overdueEntries = (heavy[1] as List<Map<String, dynamic>>)
+          .map((row) {
+        final dueStr = row['dueDate'] as String? ?? endStr;
+        final dueDate = DateTime.tryParse(dueStr) ?? nowDate;
+        final overdueDays = nowDate.difference(dueDate).inDays;
+        return OverdueEntry(
+          customerId: row['customerId'] as String? ?? '',
+          customerName: row['customerName'] as String? ?? '',
+          phone: row['phone'] as String? ?? '',
+          loanId: row['loanId'] as String? ?? '',
+          loanType: row['loanType'] as String? ?? '',
+          installmentNumber: row['installmentNumber'] as int? ?? 0,
+          dueDate: dueStr,
+          amountDue: (row['amountDue'] as num?)?.toDouble() ?? 0.0,
+          paidAmount: (row['paidAmount'] as num?)?.toDouble() ?? 0.0,
+          overdueDays: overdueDays,
+          groupName: row['groupName'] as String?,
+          guarantorName: row['guarantorName'] as String? ?? '',
+          guarantorPhone: row['guarantorPhone'] as String? ?? '',
+        );
+      }).toList();
+    }
 
     return LoanTypeReportSummary(
       activeLoans: activeLoans,
@@ -644,13 +653,19 @@ class ReportRepository {
       final savingsOut = <DashboardTrendPoint>[];
       final customers = <DashboardTrendPoint>[];
       final loans = <DashboardTrendPoint>[];
-
+      // Build every bucket query up front and run them in ONE concurrent batch
+      // (order preserved by index). Previously each bucket awaited its 6
+      // queries serially — for a 31-day daily report that was 186 sequential
+      // round trips through the DB queue.
+      final queries = <Future<List<Map<String, Object?>>>>[];
+      final queryLabels = <String>[];
       for (final (bucketStart, bucketEnd, label) in buckets) {
         final startStr = AppDateUtils.formatForStorage(bucketStart);
         final endStr = AppDateUtils.formatForStorage(bucketEnd);
-        final endDateTime = '$endStr 23:59:59';
-
-        final result = await Future.wait([
+        queryLabels.add(label);
+        final dateArgs = [startStr, endStr];
+        final ltArgs = loanType != null ? [...dateArgs, loanType] : dateArgs;
+        queries.addAll([
           db.rawQuery(
             'SELECT COALESCE(SUM(p.amount - COALESCE(st.amount, 0.0)), 0) AS total '
             'FROM payments p '
@@ -658,49 +673,54 @@ class ReportRepository {
             'LEFT JOIN savings_transactions st '
             '  ON st.reference_loan_payment_id = p.id AND st.type = \'overpayment\' '
             "WHERE p.status = 'completed' AND p.payment_date BETWEEN ? AND ?$ltClause",
-            loanType != null ? [startStr, endDateTime, loanType] : [startStr, endDateTime],
+            ltArgs,
           ),
           db.rawQuery(
             'SELECT COALESCE(SUM(l.amount), 0) AS total FROM loans l '
             "WHERE l.status IN ('active', 'completed', 'defaulted') AND l.loan_date BETWEEN ? AND ?$ltClause",
-            loanType != null ? [startStr, endStr, loanType] : [startStr, endStr],
+            ltArgs,
           ),
           db.rawQuery(
             'SELECT COALESCE(SUM(st.amount), 0) AS total FROM savings_transactions st '
             'LEFT JOIN payments p ON st.reference_loan_payment_id = p.id '
             "WHERE st.type IN ('deposit', 'overpayment') AND (st.reference_loan_payment_id IS NULL OR p.status = 'completed') "
             'AND DATE(st.created_at) BETWEEN ? AND ?',
-            [startStr, endStr],
+            dateArgs,
           ),
           db.rawQuery(
             'SELECT COALESCE(SUM(st.amount), 0) AS total FROM savings_transactions st '
             "WHERE st.type = 'withdrawal' AND DATE(st.created_at) BETWEEN ? AND ?",
-            [startStr, endStr],
+            dateArgs,
           ),
           db.rawQuery(
             'SELECT COUNT(*) AS total FROM customers c '
             "WHERE c.status != 'archived' AND DATE(c.date_registered) BETWEEN ? AND ?",
-            [startStr, endStr],
+            dateArgs,
           ),
           db.rawQuery(
             'SELECT COUNT(*) AS total FROM loans l '
             "WHERE l.status != 'cancelled' AND l.loan_date BETWEEN ? AND ?$ltClause",
-            loanType != null ? [startStr, endStr, loanType] : [startStr, endStr],
+            ltArgs,
           ),
         ]);
+      }
+      final results = await Future.wait(queries);
 
+      for (var i = 0; i < buckets.length; i++) {
+        final label = queryLabels[i];
+        final base = i * 6;
         collections.add(DashboardTrendPoint(
-            label: label, value: _toDouble(result[0].first, 'total')));
+            label: label, value: _toDouble(results[base].first, 'total')));
         disbursed.add(DashboardTrendPoint(
-            label: label, value: _toDouble(result[1].first, 'total')));
+            label: label, value: _toDouble(results[base + 1].first, 'total')));
         savingsIn.add(DashboardTrendPoint(
-            label: label, value: _toDouble(result[2].first, 'total')));
+            label: label, value: _toDouble(results[base + 2].first, 'total')));
         savingsOut.add(DashboardTrendPoint(
-            label: label, value: _toDouble(result[3].first, 'total')));
+            label: label, value: _toDouble(results[base + 3].first, 'total')));
         customers.add(DashboardTrendPoint(
-            label: label, value: _toInt(result[4].first, 'total').toDouble()));
+            label: label, value: _toInt(results[base + 4].first, 'total').toDouble()));
         loans.add(DashboardTrendPoint(
-            label: label, value: _toInt(result[5].first, 'total').toDouble()));
+            label: label, value: _toInt(results[base + 5].first, 'total').toDouble()));
       }
 
       return Result.success(DashboardTrends(

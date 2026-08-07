@@ -70,7 +70,16 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
     );
     if (confirmed != true || !mounted) return;
     final repo = await ref.read(groupRepositoryProvider.future);
-    await repo.removeMember(customerId);
+    try {
+      await repo.removeMember(customerId);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to remove member from group')),
+        );
+      }
+      return;
+    }
     _invalidate();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -93,8 +102,17 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
       builder: (ctx) => _MemberPickerDialog(customers: available),
     );
     if (selected == null || selected.isEmpty || !mounted) return;
-    for (final id in selected) {
-      await repo.changeGroup(id, widget.groupId);
+    try {
+      for (final id in selected) {
+        await repo.changeGroup(id, widget.groupId);
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to add member(s) to group')),
+        );
+      }
+      return;
     }
     _invalidate();
     if (mounted) {
@@ -129,7 +147,16 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
 
     final movedCount = _selectedIds.length;
     final repo = await ref.read(groupRepositoryProvider.future);
-    await repo.moveMembers(_selectedIds.toList(), target.id);
+    try {
+      await repo.moveMembers(_selectedIds.toList(), target.id);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to move member(s)')),
+        );
+      }
+      return;
+    }
     _invalidate();
     if (!mounted) return;
     setState(() {

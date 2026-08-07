@@ -19,12 +19,60 @@ class LoanCreationScreen extends ConsumerStatefulWidget {
 class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
   bool _hasLoaded = false;
 
+  // Controllers seed the text fields when editing. Without them every field is
+  // blank on the edit screen even though the form state was loaded — the user
+  // was forced to retype the whole loan.
+  final _principalCtrl = TextEditingController();
+  final _interestCtrl = TextEditingController();
+  final _durationCtrl = TextEditingController();
+  final _insuranceCtrl = TextEditingController();
+  final _commissionCtrl = TextEditingController();
+  final _processingCtrl = TextEditingController();
+  final _adminCtrl = TextEditingController();
+  final _otherCtrl = TextEditingController();
+  final _customCtrl = TextEditingController();
+
   @override
   void initState() {
     super.initState();
-    if (widget.existingLoan != null) {
+    final loan = widget.existingLoan;
+    if (loan != null) {
+      _principalCtrl.text = _fmtAmount(loan.amount);
+      _interestCtrl.text = _fmtAmount(loan.interestRate);
+      _durationCtrl.text = loan.duration.toString();
+      _insuranceCtrl.text = _fmtAmount(loan.insuranceFee);
+      _commissionCtrl.text = _fmtAmount(loan.commission);
+      _processingCtrl.text = _fmtAmount(loan.processingFee);
+      _adminCtrl.text = _fmtAmount(loan.administrativeFee);
+      _otherCtrl.text = _fmtAmount(loan.otherCharges);
+      if (loan.customCollectionAmount != null &&
+          loan.customCollectionAmount! > 0) {
+        _customCtrl.text = _fmtAmount(loan.customCollectionAmount!);
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) => _loadLoanForEdit());
     }
+  }
+
+  /// Whole values render without a trailing `.0`; small fractions keep them
+  /// so the parse is lossless when the loan is saved again.
+  static String _fmtAmount(double value) {
+    return value == value.roundToDouble() && value.abs() < 1e12
+        ? value.toStringAsFixed(0)
+        : value.toString();
+  }
+
+  @override
+  void dispose() {
+    _principalCtrl.dispose();
+    _interestCtrl.dispose();
+    _durationCtrl.dispose();
+    _insuranceCtrl.dispose();
+    _commissionCtrl.dispose();
+    _processingCtrl.dispose();
+    _adminCtrl.dispose();
+    _otherCtrl.dispose();
+    _customCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _loadLoanForEdit() async {
@@ -111,12 +159,14 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
           // Input Fields
           _buildTextField(
             label: 'Loan Amount (Principal)',
+            controller: _principalCtrl,
             onChanged: (value) => formNotifier.updateField(
                 principal: CurrencyUtils.tryParseAmount(value) ?? 0.0,
                 clearCustomInstallment: true),
           ),
           _buildTextField(
             label: 'Interest Rate (%)',
+            controller: _interestCtrl,
             onChanged: (value) => formNotifier.updateField(
                 interestRatePercent: CurrencyUtils.tryParseAmount(value) ?? 0.0),
           ),
@@ -124,6 +174,7 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
             label: formState.loanType == LoanType.daily
                 ? 'Duration (Days)'
                 : 'Duration (Weeks)',
+            controller: _durationCtrl,
             onChanged: (value) {
               final parsedDuration = int.tryParse(value);
               formNotifier.updateField(
@@ -141,28 +192,33 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
             children: [
               _buildTextField(
                 label: 'Insurance fee (%)',
+                controller: _insuranceCtrl,
                 onChanged: (value) => formNotifier.updateField(
                     insuranceFeePercent:
                         CurrencyUtils.tryParseAmount(value) ?? 0.0),
               ),
               _buildTextField(
                 label: 'Commission (%)',
+                controller: _commissionCtrl,
                 onChanged: (value) => formNotifier.updateField(
                     commissionPercent: CurrencyUtils.tryParseAmount(value) ?? 0.0),
               ),
               _buildTextField(
                 label: 'Processing fee',
+                controller: _processingCtrl,
                 onChanged: (value) => formNotifier.updateField(
                     processingFee: CurrencyUtils.tryParseAmount(value) ?? 0.0),
               ),
               _buildTextField(
                 label: 'Administrative fee',
+                controller: _adminCtrl,
                 onChanged: (value) => formNotifier.updateField(
                     administrativeFee:
                         CurrencyUtils.tryParseAmount(value) ?? 0.0),
               ),
               _buildTextField(
                 label: 'Other charges',
+                controller: _otherCtrl,
                 onChanged: (value) => formNotifier.updateField(
                     otherCharges: CurrencyUtils.tryParseAmount(value) ?? 0.0),
               ),
@@ -172,6 +228,7 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
           // Custom collection amount
           _buildTextField(
             label: 'Collection amount per period (optional)',
+            controller: _customCtrl,
             hint: 'Amount to collect per period (default: ${CurrencyUtils.format(formState.calculationResult?.installmentAmount ?? 0)})',
             onChanged: (value) => formNotifier.updateField(
               customInstallmentAmount: CurrencyUtils.tryParsePositiveAmount(value),
@@ -224,12 +281,17 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
   }
 
   Widget _buildTextField(
-      {required String label, required ValueChanged<String> onChanged, String? hint}) {
+      {required String label,
+      required TextEditingController controller,
+      required ValueChanged<String> onChanged,
+      String? hint}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),
       child: TextFormField(
+        controller: controller,
         decoration: InputDecoration(labelText: label, hintText: hint),
         keyboardType: TextInputType.number,
+        inputFormatters: const [NoControlCharactersFormatter()],
         onChanged: onChanged,
       ),
     );

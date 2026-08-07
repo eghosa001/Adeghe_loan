@@ -20,6 +20,11 @@ class BackupService {
   final DatabaseService _databaseService;
   final SecureStorageService _secureStorage;
 
+  /// Serializes backup create/restore. Without this, an auto-backup firing at
+  /// unlock could run concurrently with a manual backup (or a restore), both
+  /// reading/writing the live DB and writing to the same backup folder.
+  bool _transferInProgress = false;
+
   static const _dbArchiveEntry = 'loantrack.db';
   static const _documentsArchivePrefix = 'secure_documents/';
 
@@ -31,7 +36,7 @@ class BackupService {
 
   /// 8 random hex chars, appended to backup filenames so two backups created in
   /// the same instant can never collide.
-  static String _uuidV4Short() {
+  static String _randomHexSuffix() {
     final r = Random.secure();
     final buffer = StringBuffer();
     for (var i = 0; i < 8; i++) {
@@ -129,62 +134,70 @@ class BackupService {
   /// closed for the duration and reopened under exclusive access so no other
   /// caller can grab a half-open connection mid-backup (M14).
   Future<File> createBackup() async {
-    return _databaseService.withExclusiveAccess(() async {
-      final source = File(await _databaseService.databasePath);
-      if (!await source.exists()) {
-        throw Exception('Database file not found for backup.');
-      }
-
-      final archive = Archive();
-      final dbBytes = await source.readAsBytes();
-      archive.addFile(ArchiveFile(_dbArchiveEntry, dbBytes.length, dbBytes));
-
-      final docsDirectory = await _secureDocumentsDirectory();
-      final docFiles = await docsDirectory
-          .list()
-          .where((e) => e is File)
-          .cast<File>()
-          .toList();
-      for (final doc in docFiles) {
-        final bytes = await doc.readAsBytes();
-        archive.addFile(ArchiveFile(
-            '$_documentsArchivePrefix${basename(doc.path)}',
-            bytes.length,
-            bytes));
-      }
-
-      final zipBytes = ZipEncoder().encode(archive);
-      if (zipBytes == null) {
-        throw Exception('Backup archive could not be written.');
-      }
-
-      // Encrypt the container with the app key so the ZIP (and its file names
-      // and sizes) never sit on disk in the clear. The enclosed DB and document
-      // files are already encrypted separately; this adds an outer layer.
-      final payload = await _encryptContainer(Uint8List.fromList(zipBytes));
-
-      final backupFileName =
-          'adeghe_backup_${DateTime.now().toIso8601String().replaceAll(':', '-')}_'
-          '${_uuidV4Short()}.${AppConstants.backupFileExtension}';
-      final target = File(join((await backupDirectory).path, backupFileName));
-      await target.writeAsBytes(payload, flush: true);
-
-      // On Windows, attempt to restrict the backup file's ACL to the current
-      // user. This is best-effort and will not fail the backup if it cannot be
-      // applied.
-      if (Platform.isWindows) {
-        try {
-          final user = Platform.environment['USERNAME'] ?? '';
-          if (user.isNotEmpty) {
-            await Process.run('icacls', [target.path, '/inheritance:r', '/grant:r', '$user:R']);
-          }
-        } catch (_) {
-          // Ignore failures; backup creation succeeded regardless of ACL.
+    if (_transferInProgress) {
+      throw Exception('A backup is already in progress. Please wait.');
+    }
+    _transferInProgress = true;
+    try {
+      return await _databaseService.withExclusiveAccess(() async {
+        final source = File(await _databaseService.databasePath);
+        if (!await source.exists()) {
+          throw Exception('Database file not found for backup.');
         }
-      }
 
-      return target;
-    });
+        final archive = Archive();
+        final dbBytes = await source.readAsBytes();
+        archive.addFile(ArchiveFile(_dbArchiveEntry, dbBytes.length, dbBytes));
+
+        final docsDirectory = await _secureDocumentsDirectory();
+        final docFiles = await docsDirectory
+            .list()
+            .where((e) => e is File)
+            .cast<File>()
+            .toList();
+        for (final doc in docFiles) {
+          final bytes = await doc.readAsBytes();
+          archive.addFile(ArchiveFile(
+              '$_documentsArchivePrefix${basename(doc.path)}',
+              bytes.length,
+              bytes));
+        }
+
+        final zipBytes = ZipEncoder().encode(archive);
+        if (zipBytes == null) {
+          throw Exception('Backup archive could not be written.');
+        }
+
+        // Encrypt the container with the app key so the ZIP (and its file names
+        // and sizes) never sit on disk in the clear. The enclosed DB and document
+        // files are already encrypted separately; this adds an outer layer.
+        final payload = await _encryptContainer(Uint8List.fromList(zipBytes));
+
+        final backupFileName =
+            'adeghe_backup_${DateTime.now().toIso8601String().replaceAll(':', '-')}_'
+            '${_randomHexSuffix()}.${AppConstants.backupFileExtension}';
+        final target = File(join((await backupDirectory).path, backupFileName));
+        await target.writeAsBytes(payload, flush: true);
+
+        // On Windows, attempt to restrict the backup file's ACL to the current
+        // user. This is best-effort and will not fail the backup if it cannot be
+        // applied.
+        if (Platform.isWindows) {
+          try {
+            final user = Platform.environment['USERNAME'] ?? '';
+            if (user.isNotEmpty) {
+              await Process.run('icacls', [target.path, '/inheritance:r', '/grant:r', '$user:R']);
+            }
+          } catch (_) {
+            // Ignore failures; backup creation succeeded regardless of ACL.
+          }
+        }
+
+        return target;
+      });
+    } finally {
+      _transferInProgress = false;
+    }
   }
 
   /// Creates a backup automatically when enabled in settings and none was made
@@ -195,7 +208,12 @@ class BackupService {
       final db = await _databaseService.database;
       final enabledRows = await db.query('settings',
           where: "key = 'auto_backup_enabled'", limit: 1);
-      if (enabledRows.isEmpty || enabledRows.first['value'] != '1') return;
+      // A missing row means "default on" — the settings screen renders the
+      // toggle as enabled when no value exists (`?? '1'`). Previously the two
+      // disagreed, so a fresh install silently never auto-backed-up.
+      final enabledValue =
+          enabledRows.isEmpty ? '1' : enabledRows.first['value'];
+      if (enabledValue != '1') return;
 
       final lastRows = await db.query('settings',
           where: "key = 'last_backup_date'", limit: 1);
@@ -239,6 +257,12 @@ class BackupService {
   }
 
   Future<void> restoreBackup(File backupFile) async {
+    if (_transferInProgress) {
+      throw Exception(
+          'A backup or restore is already in progress. Please wait.');
+    }
+    _transferInProgress = true;
+    try {
     if (!await backupFile.exists()) {
       throw Exception('Selected backup file does not exist.');
     }
@@ -350,6 +374,9 @@ class BackupService {
         await File(join(docsDirectory.path, entry.key))
             .writeAsBytes(entry.value, flush: true);
       }
+    }
+    } finally {
+      _transferInProgress = false;
     }
   }
 }

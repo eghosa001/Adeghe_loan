@@ -1,18 +1,18 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:loantrack/core/constants/app_constants.dart';
 import 'package:loantrack/core/di/providers.dart';
 import 'package:loantrack/core/database/database_service.dart';
 import 'package:loantrack/core/error/failure.dart';
-import 'package:loantrack/core/utils/currency_utils.dart';
 import 'package:loantrack/features/customers/data/models/customer_entity.dart';
-import 'package:loantrack/features/holidays/data/models/holiday_entity.dart';
+import 'package:loantrack/features/loans/data/loan_schedule_service.dart';
 import 'package:loantrack/features/loans/data/models/loan_entity.dart';
 import 'package:loantrack/features/loans/data/models/repayment_installment_entity.dart';
-import 'package:loantrack/features/loans/domain/schedule_generator.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
 
 class LoanRepository {
-  LoanRepository(this._dbService);
+  LoanRepository(this._dbService, {this._scheduleService});
   final DatabaseService _dbService;
+  final LoanScheduleService? _scheduleService;
 
   Future<Database> get _database async {
     return _dbService.database;
@@ -24,7 +24,7 @@ class LoanRepository {
     if (validation != null) return Result.failure(validation);
     try {
       final db = await _database;
-      return await db.transaction((txn) async {
+      final result = await db.transaction((txn) async {
         // A loan must never be created for an archived (soft-deleted) customer.
         final customerRows = await txn.query(
           'customers',
@@ -55,6 +55,16 @@ class LoanRepository {
         await batch.commit(noResult: true);
         return const Result.success(null);
       });
+      // Best-effort derived rebuild: recomputes paid amounts/statuses from the
+      // completed payments + overpayment surplus so the stored schedule is
+      // exactly what another device would derive from the same source data.
+      try {
+        await _scheduleService?.rebuildSchedule(loan.id);
+      } catch (_) {
+        // The schedule written inside the transaction is already valid; the
+        // rebuild is a normalization pass.
+      }
+      return result;
     } on DatabaseException catch (e) {
       return Result.failure(DatabaseFailure('Failed to save loan.', cause: e));
     }
@@ -88,6 +98,13 @@ class LoanRepository {
     }
     if (!loan.installmentAmount.isFinite || loan.installmentAmount < 0) {
       return const ValidationFailure('Loan installment amount is invalid.');
+    }
+    // Duration cap at the repository boundary (defence-in-depth behind the
+    // form): a huge duration would allocate an unbounded schedule via
+    // List.generate (finding N2).
+    if (loan.duration <= 0 || loan.duration > AppConstants.maxLoanDuration) {
+      return ValidationFailure(
+          'Loan duration must be between 1 and ${AppConstants.maxLoanDuration}.');
     }
     final custom = loan.customCollectionAmount;
     if (custom != null && (!custom.isFinite || custom <= 0)) {
@@ -197,6 +214,13 @@ class LoanRepository {
         }
         await batch.commit(noResult: true);
       });
+      // Best-effort derived rebuild so the stored schedule matches the derived
+      // one on a fresh device (see saveLoanAndSchedule).
+      try {
+        await _scheduleService?.rebuildSchedule(loan.id);
+      } catch (_) {
+        // The schedule written inside the transaction is already valid.
+      }
       return const Result.success(null);
     } on DatabaseException catch (e) {
       return Result.failure(DatabaseFailure('Failed to update loan.', cause: e));
@@ -338,102 +362,10 @@ class LoanRepository {
           DatabaseFailure('Failed to load repayment schedule.', cause: e));
     }
   }
-
-  /// Regenerates the repayment schedule of every active loan so holiday
-  /// changes are reflected in upcoming installments:
-  ///  * Payment-free loans get a full regeneration (existing behavior).
-  ///  * Loans with paid installments keep every non-pending installment
-  ///    exactly as-is and only regenerate the pending tail, continuing due
-  ///    dates from the last kept installment and skipping holidays/weekends.
-  ///  * Fully-paid loans are skipped (nothing pending).
-  /// Because consumers read `due_date` from storage, honoring the holiday
-  /// propagates everywhere (collection list, date-range queries, future
-  /// schedule, overdue queries, dashboard expected/due counts).
-  Future<Result<int>> regenSchedulesForActiveLoans(
-      List<Holiday> holidays) async {
-    try {
-      final db = await _database;
-      final rows =
-          await db.query('loans', where: "status = 'active'", whereArgs: []);
-      var regenCount = 0;
-
-      for (final row in rows) {
-        final loan = Loan.fromMap(row);
-        final existingMaps = await db.query(
-          'repayment_schedule',
-          where: 'loan_id = ?',
-          whereArgs: [loan.id],
-          orderBy: 'installment_number ASC',
-        );
-        if (existingMaps.isEmpty) continue;
-        final existing = existingMaps
-            .map((map) => RepaymentInstallment.fromMap(map))
-            .toList();
-
-        final pendingTail = existing
-            .where((inst) => inst.status == RepaymentStatus.pending)
-            .toList();
-        if (pendingTail.isEmpty) continue;
-
-        final kept = existing
-            .where((inst) => inst.status != RepaymentStatus.pending)
-            .toList();
-
-        final List<RepaymentInstallment> rebuilt;
-        if (kept.isEmpty) {
-          // Payment-free loan: full regeneration (existing behavior).
-          final customAmount = loan.customCollectionAmount;
-          final isCustom = customAmount != null && customAmount > 0;
-          final totalRepayment = isCustom
-              ? CurrencyUtils.roundToCents(customAmount * loan.duration)
-              : loan.totalRepayment;
-          final amounts =
-              CurrencyUtils.splitEvenly(totalRepayment, loan.duration);
-          rebuilt = ScheduleGenerator.generate(
-            loanId: loan.id,
-            loanType: loan.loanType,
-            startDate: loan.repaymentStartDate,
-            amounts: amounts,
-            holidays: holidays,
-          );
-        } else {
-          // Loan with paid installments: regenerate only the pending tail,
-          // continuing due dates from the last kept installment.
-          final newDueDates = ScheduleGenerator.generateContinuationDueDates(
-            loanType: loan.loanType,
-            afterDate: kept.last.dueDate,
-            count: pendingTail.length,
-            holidays: holidays,
-          );
-          rebuilt = [
-            ...kept,
-            for (var i = 0; i < pendingTail.length; i++)
-              pendingTail[i].copyWith(dueDate: newDueDates[i]),
-          ];
-        }
-        if (rebuilt.isEmpty) continue;
-
-        await db.transaction((txn) async {
-          await txn.delete('repayment_schedule',
-              where: 'loan_id = ?', whereArgs: [loan.id]);
-          final batch = txn.batch();
-          for (final installment in rebuilt) {
-            batch.insert('repayment_schedule', installment.toMap(),
-                conflictAlgorithm: ConflictAlgorithm.replace);
-          }
-          await batch.commit(noResult: true);
-        });
-        regenCount++;
-      }
-      return Result.success(regenCount);
-    } on DatabaseException catch (e) {
-      return Result.failure(
-          DatabaseFailure('Failed to regenerate schedules.', cause: e));
-    }
-  }
 }
 
 final loanRepositoryProvider = FutureProvider<LoanRepository>((ref) async {
   final dbService = await ref.watch(databaseServiceProvider.future);
-  return LoanRepository(dbService);
+  final scheduleService = await ref.watch(loanScheduleServiceProvider.future);
+  return LoanRepository(dbService, scheduleService: scheduleService);
 });

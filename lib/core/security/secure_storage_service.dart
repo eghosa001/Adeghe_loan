@@ -141,11 +141,12 @@ class SecureStorageService implements SecureKeyValueStore {
     return false;
   }
 
-  /// Enforces a strong recovery password: at least 12 characters containing
-  /// both letters and digits. Returns null when [password] is acceptable.
+  /// Enforces a strong recovery password: at least 16 characters (OWASP,
+  /// raised from 12 on 2026-08-04) containing both letters and digits. Returns
+  /// null when [password] is acceptable.
   static String? recoveryPasswordError(String password) {
-    if (password.length < 12) {
-      return 'Recovery password must be at least 12 characters';
+    if (password.length < 16) {
+      return 'Recovery password must be at least 16 characters';
     }
     if (!RegExp(r'[A-Za-z]').hasMatch(password) ||
         !RegExp(r'[0-9]').hasMatch(password)) {

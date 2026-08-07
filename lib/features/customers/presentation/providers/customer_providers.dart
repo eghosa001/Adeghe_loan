@@ -11,6 +11,9 @@ final customerSearchQueryProvider = StateProvider<String>((ref) => '');
 /// [ungroupedGroupFilter] filters to customers not in any group.
 final customerGroupFilterProvider = StateProvider<String?>((ref) => null);
 
+/// Filter for customer status: active (default) or archived.
+final customerStatusFilterProvider = StateProvider<CustomerStatusFilter>((ref) => CustomerStatusFilter.active);
+
 enum CustomerSortBy { name, group, amountOwed }
 
 final customerSortByProvider = StateProvider<CustomerSortBy>(
@@ -29,7 +32,8 @@ final customerCountProvider = FutureProvider<int>((ref) async {
   final repo = await ref.watch(customerRepositoryProvider.future);
   final query = ref.watch(customerSearchQueryProvider);
   final groupId = ref.watch(customerGroupFilterProvider);
-  return repo.count(query, groupId: groupId);
+  final statusFilter = ref.watch(customerStatusFilterProvider);
+  return repo.count(query, groupId: groupId, statusFilter: statusFilter);
 });
 
 /// Paginated customer list — sorting is handled in SQL ORDER BY.
@@ -38,6 +42,7 @@ final customerListProvider = FutureProvider<List<Customer>>((ref) async {
   final groupId = ref.watch(customerGroupFilterProvider);
   final sortBy = ref.watch(customerSortByProvider);
   final page = ref.watch(customerPageProvider);
+  final statusFilter = ref.watch(customerStatusFilterProvider);
   final repo = await ref.watch(customerRepositoryProvider.future);
   return repo.searchPaginated(
     query,
@@ -45,12 +50,21 @@ final customerListProvider = FutureProvider<List<Customer>>((ref) async {
     limit: AppConstants.defaultPageSize,
     offset: page * AppConstants.defaultPageSize,
     sortBy: sortBy._toSql,
+    statusFilter: statusFilter,
   );
 });
 
 final customerProvider = FutureProvider.family<Customer?, String>((ref, id) async {
   final repo = await ref.watch(customerRepositoryProvider.future);
   return repo.getById(id);
+});
+
+/// ALL non-archived customers (unpaginated) for dropdown pickers (statements,
+/// savings transfers, etc.). `customerListProvider` is page-size capped, so a
+/// customer beyond the first page could never be selected in those pickers.
+final allCustomersProvider = FutureProvider<List<Customer>>((ref) async {
+  final repo = await ref.watch(customerRepositoryProvider.future);
+  return repo.search('');
 });
 
 extension on CustomerSortBy {

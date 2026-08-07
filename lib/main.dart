@@ -1,4 +1,8 @@
+import 'dart:async';
+import 'dart:ui' show PlatformDispatcher;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
@@ -14,6 +18,18 @@ import 'features/business/presentation/providers/business_providers.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Global error handlers: unhandled framework errors still render the debug
+  // red screen during development, and release builds log them instead of
+  // terminating (a transient async error must not kill a live session that
+  // holds financial data). Errors also hit the default handler so tooling
+  // (test runner / flutter logs) still sees them.
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('Unhandled async error: $error\n$stack');
+    return kDebugMode ? false : true;
+  };
   if (SupabaseConfig.isConfigured) {
     try {
       // The cloud auth session is persisted in flutter_secure_storage (not
@@ -49,6 +65,16 @@ class MyApp extends ConsumerStatefulWidget {
 }
 
 class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
+  /// Periodic background sync: while the app is unlocked, a full push+pull
+  /// runs on this cadence so changes made on one device (loans, repayment
+  /// schedules, payments, customers, savings) appear on the other device
+  /// within a couple of minutes without requiring a lock/unlock cycle.
+  /// The sync service additionally throttles to one attempt per
+  /// `_minAutoSyncInterval` and no-ops when not signed in / not configured.
+  static const Duration _periodicSyncInterval = Duration(minutes: 2);
+
+  Timer? _periodicSyncTimer;
+
   @override
   void initState() {
     super.initState();
@@ -57,6 +83,7 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _periodicSyncTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -68,6 +95,23 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
     }
   }
 
+  void _syncInBackground() {
+    ref.read(cloudSyncServiceProvider.future).then((service) {
+      service.syncIfSignedIn();
+    }).catchError((_) {});
+  }
+
+  void _startPeriodicSync() {
+    _periodicSyncTimer?.cancel();
+    _periodicSyncTimer =
+        Timer.periodic(_periodicSyncInterval, (_) => _syncInBackground());
+  }
+
+  void _stopPeriodicSync() {
+    _periodicSyncTimer?.cancel();
+    _periodicSyncTimer = null;
+  }
+
   @override
   Widget build(BuildContext context) {
     // Riverpod requires ref.listen to be called inside build (not initState).
@@ -75,13 +119,21 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
     // settings and none was created in the last 24h).
     ref.listen(authProvider, (previous, next) {
       if (next == AuthState.unlocked && previous != AuthState.unlocked) {
-        ref.read(backupServiceProvider.future).then((service) {
-          service.maybeAutoBackup();
-        }).catchError((_) {});
+        // Auto-backup is deliberately deferred: running it at unlock adds a
+        // multi-MB disk write that contends with the database providers still
+        // initializing. Give the app time to settle, and skip if the user has
+        // already locked again by the time the timer fires.
+        Future.delayed(AppConstants.autoBackupDelay, () {
+          if (ref.read(authProvider) != AuthState.unlocked) return;
+          ref.read(backupServiceProvider.future).then((service) {
+            service.maybeAutoBackup();
+          }).catchError((_) {});
+        });
         // Cloud sync runs in the background whenever the owner is signed in.
-        ref.read(cloudSyncServiceProvider.future).then((service) {
-          service.syncIfSignedIn();
-        }).catchError((_) {});
+        _syncInBackground();
+        _startPeriodicSync();
+      } else if (next != AuthState.unlocked) {
+        _stopPeriodicSync();
       }
     });
 

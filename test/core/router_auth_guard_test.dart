@@ -18,6 +18,8 @@ void main() {
     expect(redirect(AuthState.locked, '/loans'), '/auth/pin');
     expect(redirect(AuthState.locked, '/customers/CUS-1'), '/auth/pin');
     expect(redirect(AuthState.locked, '/collections/future-schedule'), '/auth/pin');
+    expect(redirect(AuthState.locked, '/collections'), '/auth/pin');
+    expect(redirect(AuthState.locked, '/collections/weekly'), '/auth/pin');
   });
 
   test('unlocked state allows everything', () {

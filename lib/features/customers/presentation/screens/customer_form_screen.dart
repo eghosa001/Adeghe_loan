@@ -188,6 +188,7 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
       final repo = await ref.read(customerRepositoryProvider.future);
       await repo.save(customer);
       ref.invalidate(customerListProvider);
+      ref.invalidate(customerCountProvider);
       ref.invalidate(customerProvider(customer.id));
       ref.invalidate(dashboardDataProvider);
       ref.invalidate(collectionListProvider);

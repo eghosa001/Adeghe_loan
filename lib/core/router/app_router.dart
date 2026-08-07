@@ -30,7 +30,8 @@ import '../../features/payments/presentation/screens/record_payment_screen.dart'
 import '../../features/payments/presentation/screens/payment_history_screen.dart';
 import '../../features/holidays/presentation/screens/holiday_management_screen.dart';
 import '../../features/dashboard/presentation/screens/dashboard_screen.dart';
-import '../../features/collection/presentation/screens/collection_screen.dart';
+import '../../features/collection/presentation/screens/daily_collection_screen.dart';
+import '../../features/collection/presentation/screens/weekly_collection_screen.dart';
 import '../../features/collection/presentation/screens/future_schedule_screen.dart';
 import '../../features/reports/presentation/screens/report_screen.dart';
 import '../../features/reports/presentation/screens/overdue_report_screen.dart';
@@ -39,7 +40,6 @@ import '../../features/reports/presentation/screens/weekly_loan_report_screen.da
 import '../../features/reports/presentation/screens/customer_report_screen.dart';
 import '../../features/reports/presentation/screens/savings_report_screen.dart';
 import '../../features/reports/presentation/screens/profit_report_screen.dart';
-import '../../features/reports/presentation/screens/collections_report_screen.dart';
 import '../../features/audit_log/presentation/screens/audit_log_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
 import '../../features/settings/presentation/screens/cloud_gate_screen.dart';
@@ -126,7 +126,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ),
         GoRoute(
           path: '/collections',
-          builder: (context, state) => const CollectionScreen(),
+          builder: (context, state) => const DailyCollectionScreen(),
+          routes: [
+            GoRoute(
+              path: 'weekly',
+              builder: (context, state) => const WeeklyCollectionScreen(),
+            ),
+          ],
         ),
         GoRoute(
           path: '/reports',
@@ -155,10 +161,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             GoRoute(
               path: 'profit',
               builder: (context, state) => const ProfitReportScreen(),
-            ),
-            GoRoute(
-              path: 'collections',
-              builder: (context, state) => const CollectionsReportScreen(),
             ),
           ],
         ),

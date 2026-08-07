@@ -12,6 +12,7 @@ import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../features/backup/data/backup_service.dart';
 import '../../features/customers/data/statement_service.dart';
 import '../../features/audit_log/data/audit_log_repository.dart';
+import '../../features/loans/data/loan_schedule_service.dart';
 
 class _ThemeModeNotifier extends StateNotifier<ThemeMode> {
   _ThemeModeNotifier(this._storage) : super(ThemeMode.system) {
@@ -47,6 +48,14 @@ final databaseServiceProvider = FutureProvider<DatabaseService>((ref) async {
   if (authState == AuthState.unlocked) {
     final secure = ref.read(secureStorageProvider);
     final service = DatabaseService(secure);
+    // Each unlock runs this provider body and opens a fresh SQLCipher
+    // connection. Without this the previous connection is never closed, so
+    // every lock/unlock cycle leaks an open DB handle. On dispose (auth
+    // state change) close the memoized connection; the next unlock opens a
+    // new one. `withExclusiveAccess` makes close→reopen safe for callers.
+    ref.onDispose(() {
+      unawaited(service.close());
+    });
     await service.database;
     return service;
   }
@@ -84,7 +93,19 @@ final cloudGateDismissedProvider = StateProvider<bool>((ref) => false);
 
 final cloudSyncServiceProvider = FutureProvider<CloudSyncService>((ref) async {
   final dbService = await ref.watch(databaseServiceProvider.future);
-  return CloudSyncService(dbService);
+  // Reuse the SAME version notifier as `loanScheduleServiceProvider` so the
+  // post-pull rebuild refreshes every schedule-reading provider.
+  final scheduleService = LoanScheduleService(
+      dbService, ref.read(loanScheduleVersionProvider.notifier));
+  final service = CloudSyncService(dbService);
+  service.onPullComplete = () async {
+    try {
+      await scheduleService.rebuildAllSchedules();
+    } catch (_) {
+      // Best-effort: a rebuild failure must not fail the sync cycle.
+    }
+  };
+  return service;
 });
 
 final themeModeProvider =

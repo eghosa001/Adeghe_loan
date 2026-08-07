@@ -222,7 +222,7 @@ Iterable<String> _referencedTables(String sql) {
       r'\b(?:FROM|JOIN|UPDATE|INTO)\s+([A-Za-z_][A-Za-z0-9_]*)',
       caseSensitive: false));
   add(RegExp(
-      r'\bCREATE\s+INDEX(?:\s+IF\s+NOT\s+EXISTS)?\s+[A-Za-z_][A-Za-z0-9_]*\s+ON\s+([A-Za-z_][A-Za-z0-9_]*)',
+      r'\bCREATE\s+(?:UNIQUE\s+)?INDEX(?:\s+IF\s+NOT\s+EXISTS)?\s+[A-Za-z_][A-Za-z0-9_]*\s+ON\s+([A-Za-z_][A-Za-z0-9_]*)',
       caseSensitive: false));
   return result;
 }
@@ -292,7 +292,7 @@ Set<String> _excludedIdentifiers(
     excluded.add(m.group(1)!.toLowerCase());
   }
   final idxRe = RegExp(
-      r'\bCREATE\s+INDEX(?:\s+IF\s+NOT\s+EXISTS)?\s+([A-Za-z_][A-Za-z0-9_]*)',
+      r'\bCREATE\s+(?:UNIQUE\s+)?INDEX(?:\s+IF\s+NOT\s+EXISTS)?\s+([A-Za-z_][A-Za-z0-9_]*)',
       caseSensitive: false);
   for (final m in idxRe.allMatches(sql)) {
     excluded.add(m.group(1)!.toLowerCase());

@@ -158,9 +158,27 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
                     ),
                   ),
                   title: Text(log.action),
-                  subtitle: Text(
-                    '${log.user} — ${AppDateUtils.formatTime(log.timestamp)}',
-                    style: Theme.of(context).textTheme.bodySmall,
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${log.user} — ${AppDateUtils.formatTime(log.timestamp)}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      if (log.details.isNotEmpty)
+                        Text(
+                          log.details,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.color
+                                    ?.withValues(alpha: 0.7),
+                              ),
+                        ),
+                    ],
                   ),
                   trailing: const Icon(Icons.chevron_right),
                 )),

@@ -157,6 +157,14 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
                     'local PIN to open the app.',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Auto-sync runs right after the app is unlocked and every '
+                    '2 minutes while it is open, so loans, repayment '
+                    'schedules, payments and savings appear on the other '
+                    'device within a couple of minutes of a change.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ],
               ),
             ),

@@ -119,6 +119,7 @@ class _RecordPaymentScreenState extends ConsumerState<RecordPaymentScreen> {
         ref.invalidate(customerListProvider);
         ref.invalidate(reportSummaryProvider);
         ref.invalidate(activeLoansForCustomerProvider(widget.customerId));
+        ref.invalidate(allLoansProvider);
         Navigator.of(context).pop();
       }
     } catch (e) {

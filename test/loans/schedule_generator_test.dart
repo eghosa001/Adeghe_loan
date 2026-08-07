@@ -80,66 +80,92 @@ void main() {
       expect(schedule[1].dueDate, DateTime(2026, 8, 10));
       expect(schedule[2].dueDate, DateTime(2026, 8, 11));
     });
-  });
 
-  group('ScheduleGenerator.generateContinuationDueDates', () {
-    test('daily continues on the next working day after the last kept date',
-        () {
-      final dates = ScheduleGenerator.generateContinuationDueDates(
-        loanType: LoanType.daily,
-        afterDate: DateTime(2026, 8, 7), // Friday
-        count: 3,
-        holidays: const [],
-      );
-      // Fri(7) → Mon(10), Tue(11), Wed(12) — weekend skipped.
-      expect(dates, [
-        DateTime(2026, 8, 10),
-        DateTime(2026, 8, 11),
-        DateTime(2026, 8, 12),
-      ]);
+    group('deterministic installment ids', () {
+      test('daily ids are <loanId>-<installmentNumber>', () {
+        final schedule = ScheduleGenerator.generate(
+          loanId: 'L1',
+          loanType: LoanType.daily,
+          startDate: startDate,
+          amounts: [1000, 1000, 1000],
+          holidays: const [],
+        );
+        expect(schedule.map((i) => i.id), ['L1-1', 'L1-2', 'L1-3']);
+      });
+
+      test('weekly ids are <loanId>-<installmentNumber>', () {
+        final schedule = ScheduleGenerator.generate(
+          loanId: 'L1',
+          loanType: LoanType.weekly,
+          startDate: startDate,
+          amounts: [1000, 1000, 1000],
+          holidays: const [],
+        );
+        expect(schedule.map((i) => i.id), ['L1-1', 'L1-2', 'L1-3']);
+      });
+
+      test('a regenerated schedule is byte-for-byte identical', () {
+        final holidays = [
+          Holiday(
+            id: 'H1',
+            name: 'Public Holiday',
+            date: DateTime(2026, 8, 10),
+          ),
+        ];
+        final first = ScheduleGenerator.generate(
+          loanId: 'L1',
+          loanType: LoanType.daily,
+          startDate: DateTime(2026, 8, 7), // Friday
+          amounts: [1000, 1000, 1000],
+          holidays: holidays,
+        );
+        final second = ScheduleGenerator.generate(
+          loanId: 'L1',
+          loanType: LoanType.daily,
+          startDate: DateTime(2026, 8, 7),
+          amounts: [1000, 1000, 1000],
+          holidays: holidays,
+        );
+        expect(second.map((i) => i.id), first.map((i) => i.id));
+        expect(second.map((i) => i.dueDate), first.map((i) => i.dueDate));
+      });
     });
 
-    test('daily skips a holiday in the pending tail', () {
-      final holidays = [
-        Holiday(
-          id: 'H1',
-          name: 'Public Holiday',
-          date: DateTime(2026, 8, 10), // Monday
-        ),
-      ];
-      final dates = ScheduleGenerator.generateContinuationDueDates(
-        loanType: LoanType.daily,
-        afterDate: DateTime(2026, 8, 7), // Friday
-        count: 2,
-        holidays: holidays,
-      );
-      // Mon(10) is a holiday → Tue(11), then Wed(12).
-      expect(dates, [
-        DateTime(2026, 8, 11),
-        DateTime(2026, 8, 12),
-      ]);
-    });
+    group('weekly anchor-weekday rule', () {
+      test('a holiday shifts only that installment; the next resumes the anchor '
+          'weekday', () {
+        final holidays = [
+          Holiday(
+            id: 'H1',
+            name: 'Public Holiday',
+            date: DateTime(2026, 8, 17), // Monday
+          ),
+        ];
+        final schedule = ScheduleGenerator.generate(
+          loanId: 'L1',
+          loanType: LoanType.weekly,
+          startDate: DateTime(2026, 8, 10), // Monday anchor
+          amounts: [1000, 1000, 1000],
+          holidays: holidays,
+        );
+        // Mon(10) → Mon(17) holiday → Tue(18); next resumes Mon(24); then Mon(31).
+        expect(schedule[0].dueDate, DateTime(2026, 8, 10));
+        expect(schedule[1].dueDate, DateTime(2026, 8, 18));
+        expect(schedule[2].dueDate, DateTime(2026, 8, 24));
+      });
 
-    test('weekly adds seven days then shifts past a holiday', () {
-      final holidays = [
-        Holiday(
-          id: 'H1',
-          name: 'Public Holiday',
-          date: DateTime(2026, 8, 17), // Monday
-        ),
-      ];
-      final dates = ScheduleGenerator.generateContinuationDueDates(
-        loanType: LoanType.weekly,
-        afterDate: DateTime(2026, 8, 10), // Monday
-        count: 3,
-        holidays: holidays,
-      );
-      // Mon(10) → +7 = Mon(17) holiday → Tue(18); → +7 = Mon(25); → +7 = Sep 1.
-      expect(dates, [
-        DateTime(2026, 8, 18),
-        DateTime(2026, 8, 25),
-        DateTime(2026, 9, 1),
-      ]);
+      test('a weekend landing shifts only that installment', () {
+        final schedule = ScheduleGenerator.generate(
+          loanId: 'L1',
+          loanType: LoanType.weekly,
+          startDate: DateTime(2026, 8, 14), // Friday anchor
+          amounts: [1000, 1000],
+          holidays: const [],
+        );
+        // Fri(14) → +7 = Fri(21); stays on the anchor weekday.
+        expect(schedule[0].dueDate, DateTime(2026, 8, 14));
+        expect(schedule[1].dueDate, DateTime(2026, 8, 21));
+      });
     });
   });
 }

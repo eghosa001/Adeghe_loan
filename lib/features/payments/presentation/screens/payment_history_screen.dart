@@ -311,6 +311,7 @@ class _PaymentCard extends StatelessWidget {
       ref.invalidate(allAccountsWithNamesProvider);
       ref.invalidate(customerProvider(customerId));
       ref.invalidate(customerListProvider);
+      ref.invalidate(allLoansProvider);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Payment reversed successfully')),

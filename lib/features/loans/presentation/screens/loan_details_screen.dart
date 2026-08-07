@@ -333,6 +333,7 @@ class LoanDetailsScreen extends ConsumerWidget {
       ref.invalidate(reportSummaryProvider);
       ref.invalidate(customerProvider(loan.customerId));
       ref.invalidate(paymentsForLoanProvider(loan.id));
+      ref.invalidate(allLoansProvider);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Loan cleared with savings.')),

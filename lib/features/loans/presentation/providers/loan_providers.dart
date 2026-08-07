@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:loantrack/core/constants/app_constants.dart';
 import 'package:loantrack/core/di/providers.dart';
+import 'package:loantrack/core/error/failure.dart';
 import 'package:loantrack/features/customers/presentation/providers/customer_providers.dart';
 import 'package:loantrack/features/dashboard/presentation/providers/dashboard_provider.dart';
 import 'package:loantrack/features/collection/presentation/providers/collection_provider.dart';
@@ -9,6 +10,7 @@ import 'package:loantrack/features/reports/presentation/providers/report_provide
 import 'package:loantrack/core/utils/currency_utils.dart';
 import 'package:loantrack/features/holidays/presentation/providers/holiday_provider.dart';
 import 'package:loantrack/features/loans/data/loan_repository.dart';
+import 'package:loantrack/features/loans/data/loan_schedule_service.dart';
 import 'package:loantrack/features/loans/data/models/loan_entity.dart';
 import 'package:loantrack/features/loans/data/models/repayment_installment_entity.dart';
 import 'package:loantrack/features/loans/domain/loan_calculator.dart';
@@ -238,6 +240,7 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
         _ref.invalidate(collectionListProvider);
         _ref.invalidate(reportSummaryProvider);
         _ref.invalidate(activeLoansForCustomerProvider(customerId));
+        _ref.invalidate(allLoansProvider);
         logAuditAction(_ref, 'CREATE',
             'Loan $loanId created for customer $customerId — ${state.loanType.name}, ${state.principal}');
         state = LoanFormData(repaymentStartDate: DateTime.now());
@@ -255,6 +258,15 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
     final paidSoFar = (existingLoan.totalRepayment -
             existingLoan.outstandingBalance)
         .clamp(0.0, double.infinity);
+    if (paidSoFar > loan.totalRepayment + 0.005) {
+      // Editing the loan smaller than what was already collected would silently
+      // write off the difference (newOutstanding clamps to 0 while the collected
+      // money stays counted). Refuse instead of letting money disappear.
+      throw ValidationFailure(
+          'Total repayment cannot be reduced below the '
+          '${CurrencyUtils.format(paidSoFar)} already collected. '
+          'Reverse some payments first.');
+    }
     final newOutstanding =
         (loan.totalRepayment - paidSoFar).clamp(0.0, double.infinity);
     final status = existingLoan.status == LoanStatus.active
@@ -310,6 +322,10 @@ final loanDetailsProvider =
 
 final loanScheduleProvider =
     FutureProvider.family<List<RepaymentInstallment>, String>((ref, loanId) async {
+  // Re-read whenever any schedule rebuild finishes (payment recorded/reversed,
+  // holiday change, loan edit, cloud pull) so open screens auto-refresh without
+  // every caller needing to `ref.invalidate` explicitly.
+  ref.watch(loanScheduleVersionProvider);
   final repo = await ref.watch(loanRepositoryProvider.future);
   final result = await repo.getScheduleForLoan(loanId);
   return result.when(

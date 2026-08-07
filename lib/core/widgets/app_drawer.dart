@@ -94,8 +94,15 @@ class AppDrawer extends StatelessWidget {
                   ),
                   _MenuItem(
                     icon: Icons.account_balance_wallet_rounded,
-                    label: 'Collections',
+                    label: 'Daily Collection',
                     route: '/collections',
+                    currentRoute: currentRoute,
+                    highlightExact: true,
+                  ),
+                  _MenuItem(
+                    icon: Icons.calendar_view_week_rounded,
+                    label: 'Weekly Collection',
+                    route: '/collections/weekly',
                     currentRoute: currentRoute,
                   ),
                   const Padding(
@@ -194,17 +201,25 @@ class _MenuItem extends StatelessWidget {
   final String route;
   final String currentRoute;
 
+  /// When true the item highlights only on an exact route match. Used for
+  /// `/collections` (Daily) so navigating to `/collections/weekly` does not
+  /// highlight the Daily item too.
+  final bool highlightExact;
+
   const _MenuItem({
     required this.icon,
     required this.label,
     required this.route,
     required this.currentRoute,
+    this.highlightExact = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isSelected = currentRoute == route ||
-        (route != '/dashboard' && currentRoute.startsWith(route));
+    final isSelected = highlightExact
+        ? currentRoute == route
+        : currentRoute == route ||
+            (route != '/dashboard' && currentRoute.startsWith(route));
     final colorScheme = Theme.of(context).colorScheme;
 
     return Padding(
@@ -219,8 +234,10 @@ class _MenuItem extends StatelessWidget {
           onTap: () {
             Navigator.of(context).pop();
             if (currentRoute != route) {
-              const shellRoutes = ['/dashboard', '/collections', '/reports', '/savings'];
-              if (shellRoutes.contains(route)) {
+              const shellPrefixes = ['/dashboard', '/collections', '/reports', '/savings'];
+              final isShellRoute =
+                  shellPrefixes.any((s) => route == s || route.startsWith('$s/'));
+              if (isShellRoute) {
                 GoRouter.of(context).go(route);
               } else {
                 GoRouter.of(context).push(route);

@@ -359,7 +359,6 @@ class _ReportNavGrid extends StatelessWidget {
     (Icons.people_alt_rounded, 'Customers', '/reports/customers'),
     (Icons.savings_rounded, 'Savings', '/reports/savings-report'),
     (Icons.trending_up_rounded, 'Profit', '/reports/profit'),
-    (Icons.receipt_long_rounded, 'Collections', '/reports/collections'),
   ];
 
   @override

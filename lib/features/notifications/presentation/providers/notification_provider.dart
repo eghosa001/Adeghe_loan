@@ -5,9 +5,15 @@ import 'package:uuid/uuid.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/database/holiday_sql.dart';
 import '../../../../core/di/providers.dart';
+import '../../../loans/data/loan_schedule_service.dart';
 import '../../data/notification_item.dart';
 
 final notificationProvider = FutureProvider<List<NotificationItem>>((ref) async {
+  // Recompute when the derived schedule changes (payment recorded/reversed,
+  // loan saved, holiday changed, cloud pull) so the badge/list don't go stale
+  // mid-session — an overdue or due-today notification must clear as soon as
+  // the collection is recorded.
+  ref.watch(loanScheduleVersionProvider);
   final dbService = await ref.watch(databaseServiceProvider.future);
   final db = await dbService.database;
   final notifications = <NotificationItem>[];

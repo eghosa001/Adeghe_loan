@@ -55,7 +55,7 @@ class FutureScheduleScreen extends ConsumerWidget {
 
           double grandTotal = 0;
           for (final row in rows) {
-            grandTotal += row.amountDue;
+            grandTotal += (row.amountDue - row.amountPaid).clamp(0, double.infinity);
           }
 
           return Column(
@@ -90,8 +90,8 @@ class FutureScheduleScreen extends ConsumerWidget {
                     itemBuilder: (context, index) {
                       final date = sortedDates[index];
                       final dayRows = grouped[date]!;
-                      final dayTotal =
-                          dayRows.fold<double>(0, (s, r) => s + r.amountDue);
+                      final dayTotal = dayRows.fold<double>(0, (s, r) =>
+                          s + (r.amountDue - r.amountPaid).clamp(0, double.infinity));
                       final parsed = DateTime.tryParse(date);
                       final label = parsed != null
                           ? '${AppDateUtils.formatDate(parsed)}  ·  ${DateFormat('EEEE').format(parsed)}'
@@ -135,9 +135,12 @@ class FutureScheduleScreen extends ConsumerWidget {
                                   dense: true,
                                   title: Text(row.customerName),
                                   subtitle: Text(
-                                      '${row.loanType}${row.groupName != null ? ' — ${row.groupName}' : ''}'),
+                                      '${row.loanType}${row.groupName != null ? ' — ${row.groupName}' : ''}'
+                                      '${row.amountPaid > 0 ? '  ·  ${CurrencyUtils.format(row.amountPaid)} already paid' : ''}'),
                                   trailing: Text(
-                                    CurrencyUtils.format(row.amountDue),
+                                    CurrencyUtils.format(
+                                        (row.amountDue - row.amountPaid)
+                                            .clamp(0, double.infinity)),
                                     style: const TextStyle(
                                         fontWeight: FontWeight.bold),
                                   ),
@@ -165,6 +168,9 @@ class FutureScheduleScreen extends ConsumerWidget {
     final currency =
         ref.read(currencySymbolProvider).valueOrNull ?? CurrencyUtils.defaultSymbol;
     final ctrl = TextEditingController(text: remaining.toStringAsFixed(0));
+    // Stable id for THIS payment action: reused if the confirm is retried so a
+    // timeout/retry can never double-record the same logical payment (F3).
+    final requestId = const Uuid().v4();
 
     showDialog(
       context: context,
@@ -202,7 +208,7 @@ class FutureScheduleScreen extends ConsumerWidget {
               final amount = double.tryParse(ctrl.text) ?? 0;
               if (!amount.isFinite || amount <= 0) return;
               Navigator.pop(ctx);
-              _doQuickPay(context, ref, row, amount);
+              _doQuickPay(context, ref, row, amount, requestId);
             },
             child: const Text('Pay'),
           ),
@@ -212,7 +218,7 @@ class FutureScheduleScreen extends ConsumerWidget {
   }
 
   Future<void> _doQuickPay(BuildContext context, WidgetRef ref,
-      CollectionRow row, double amount) async {
+      CollectionRow row, double amount, String requestId) async {
     try {
       final repo = await ref.read(paymentRepositoryProvider.future);
       final profileAsync = ref.read(businessProfileProvider);
@@ -224,7 +230,7 @@ class FutureScheduleScreen extends ConsumerWidget {
         method: PaymentMethod.cash,
         collector: collector,
         installmentDue: row.amountDue > 0 ? row.amountDue : null,
-        clientRequestId: const Uuid().v4(),
+        clientRequestId: requestId,
       );
       ref.invalidate(futureScheduleProvider);
       ref.invalidate(collectionListProvider);
@@ -240,6 +246,7 @@ class FutureScheduleScreen extends ConsumerWidget {
       ref.invalidate(loanScheduleProvider(row.loanId));
       ref.invalidate(paymentsForLoanProvider(row.loanId));
       ref.invalidate(activeLoansForCustomerProvider(row.customerId));
+      ref.invalidate(allLoansProvider);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

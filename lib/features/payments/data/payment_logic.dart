@@ -1,5 +1,7 @@
 import 'dart:math';
 
+import '../../../core/utils/currency_utils.dart';
+
 // Pure financial calculation functions for payment processing.
 // These functions are isolated from the database layer so they can be
 // unit-tested without SQLite infrastructure.
@@ -54,12 +56,21 @@ PaymentAmounts computePaymentSplit({
         'must be a finite number >= 0');
   }
 
+  // The cap is the unpaid installment — but never more than what is actually
+  // owed. Without the clamp a payment on a nearly-settled loan whose
+  // installment exceeds the remaining balance would apply (and count as
+  // "collected on the loan") money the loan no longer owes, instead of
+  // crediting the excess to savings.
   final cap = (installmentDue != null && installmentDue > 0)
-      ? installmentDue
+      ? min(installmentDue, outstandingBalance)
       : outstandingBalance;
-  final loanPaid = min(paymentAmount, cap);
-  final surplus = paymentAmount - loanPaid;
-  final newBalance = max(0.0, outstandingBalance - loanPaid);
+  final rawLoanPaid = min(paymentAmount, cap);
+  // Round to cents so floating-point dust (e.g. 0.001 surpluses) never lands
+  // in the savings balance or the loan balance.
+  final loanPaid = CurrencyUtils.roundToCents(rawLoanPaid);
+  final surplus = CurrencyUtils.roundToCents(paymentAmount - rawLoanPaid);
+  final newBalance =
+      CurrencyUtils.roundToCents(max(0.0, outstandingBalance - loanPaid));
 
   return PaymentAmounts(
     appliedToLoan: loanPaid,

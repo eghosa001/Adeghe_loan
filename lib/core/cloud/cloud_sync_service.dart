@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' show min;
 
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
@@ -47,6 +48,12 @@ class CloudSyncService {
 
   final DatabaseService _databaseService;
 
+  /// Called after every completed pull (best-effort; failures are swallowed).
+  /// `fullSync` uses it to re-derive repayment schedules from the freshly
+  /// synced source data — the derived `repayment_schedule` rows themselves are
+  /// never replicated (see `_tables`), so each device recomputes them locally.
+  Future<void> Function()? onPullComplete;
+
   static const String _pullFlagKey = 'pull_in_progress';
 
   /// Remote tombstones applied per pull cycle. Bounds how much deletion a
@@ -57,17 +64,23 @@ class CloudSyncService {
   /// Minimum time between automatically triggered background syncs. Rapid
   /// lock/unlock cycles would otherwise each kick off a full push+pull and can
   /// hit Supabase request/concurrency limits. Manual "Sync now" is unaffected.
-  static const Duration _minAutoSyncInterval = Duration(minutes: 5);
+  /// Two minutes keeps loan history (payments + the schedules derived from
+  /// them) visible on the other device within a couple of minutes of a change
+  /// while staying well inside Supabase request/concurrency limits (two owners,
+  /// ~30 cycles/hr worst case).
+  static const Duration _minAutoSyncInterval = Duration(minutes: 2);
 
   DateTime? _lastAutoSyncAt;
 
   /// Replicated tables in parent-before-child order (FK-safe for pull writes).
+  /// NOTE: `repayment_schedule` is intentionally NOT here — it is a derived
+  /// cache recomputed on each device from the synced source data (loans +
+  /// payments + savings + holidays) after every pull.
   static const List<String> _tables = [
     'business_profile',
     'customer_groups',
     'customers',
     'loans',
-    'repayment_schedule',
     'payments',
     'savings_accounts',
     'savings_transactions',
@@ -80,7 +93,6 @@ class CloudSyncService {
     'customer_groups': 'id',
     'customers': 'id',
     'loans': 'id',
-    'repayment_schedule': 'id',
     'payments': 'id',
     'savings_accounts': 'id',
     'savings_transactions': 'id',
@@ -191,6 +203,14 @@ class CloudSyncService {
         noteError(error);
       }
 
+      // After every pull, re-derive all repayment schedules from the freshly
+      // synced source data (loans + payments + savings + holidays). The derived
+      // schedule rows are never replicated, so each device must recompute them
+      // locally. Best-effort: a rebuild failure must not fail the sync cycle.
+      try {
+        await onPullComplete?.call();
+      } catch (_) {}
+
       // Never report a false "Sync complete": any per-table/per-row failure —
       // or a cycle that moved nothing despite local changes to push — surfaces
       // as an error so the user can investigate (RLS, network, owner access).
@@ -261,10 +281,17 @@ class CloudSyncService {
         } else {
           // Rows are pushed in full (explicit NULLs included) so field-clearing
           // writes like changeGroup(id, null) propagate; regulated identifiers
-          // (bvn/nin) are stripped first (see cloudSensitiveColumns).
-          await client.from(table).upsert(
-              [for (final row in rows) stripSensitiveColumns(table, row)],
-              onConflict: _tablePrimaryKeys[table]!);
+          // (bvn/nin) are stripped first (see cloudSensitiveColumns). Chunked
+          // so a large table never sends one oversized request or reads the
+          // whole snapshot into a single upsert payload.
+          final cleanedRows = [
+            for (final row in rows) stripSensitiveColumns(table, row),
+          ];
+          for (final batch in _chunk(cleanedRows, 500)) {
+            await client
+                .from(table)
+                .upsert(batch, onConflict: _tablePrimaryKeys[table]!);
+          }
           pushed += rows.length;
         }
       } catch (_) {
@@ -378,7 +405,8 @@ class CloudSyncService {
       // Remote deletes first: delete parents first so cascades clean up
       // children (matching local FK behavior). Each tombstone is validated so
       // a crafted or hostile row cannot mass-delete local data.
-      final remoteTombstones = await client.from('sync_tombstones').select();
+      final remoteTombstones =
+          await _fetchAll(client.from('sync_tombstones').select());
       var appliedTombstones = 0;
       for (final tombstone in remoteTombstones) {
         if (appliedTombstones >= _maxRemoteTombstonesPerCycle) break;
@@ -413,10 +441,31 @@ class CloudSyncService {
 
       for (final table in _tables) {
         final pk = _tablePrimaryKeys[table]!;
-        final remoteRows = lastPulled == null
-            ? await client.from(table).select()
-            : await client.from(table).select().gte('updated_at', lastPulled);
+        final query = client.from(table).select();
+        final filtered =
+            lastPulled == null ? query : query.gte('updated_at', lastPulled);
+        final remoteRows = await _fetchAll(filtered);
+        if (remoteRows.isEmpty) continue;
         final sensitive = cloudSensitiveColumns[table];
+
+        // Load the local copy of every remote id ONCE so the LWW merge is not
+        // an N+1 `db.query` per remote row.
+        final localRows = <String, Map<String, Object?>>{};
+        final ids = remoteRows
+            .map((r) => r[pk])
+            .whereType<String>()
+            .toSet()
+            .toList();
+        for (final idChunk in _chunk(ids, 400)) {
+          final placeholders = List.filled(idChunk.length, '?').join(',');
+          final chunkRows = await db.query(table,
+              where: '$pk IN ($placeholders)', whereArgs: idChunk);
+          for (final row in chunkRows) {
+            final id = row[pk] as String;
+            localRows[id] = row;
+          }
+        }
+
         for (final remoteRow in remoteRows) {
           final id = remoteRow[pk];
           if (id == null) continue;
@@ -430,11 +479,10 @@ class CloudSyncService {
           }
           final remoteUpdated = (remoteRow['updated_at'] as String?) ?? '';
           try {
-            final localRows = await db.query(table,
-                where: '$pk = ?', whereArgs: [id], limit: 1);
-            if (localRows.isNotEmpty) {
+            final localRow = localRows[id];
+            if (localRow != null) {
               final localUpdated =
-                  (localRows.first['updated_at'] as String?) ?? '';
+                  (localRow['updated_at'] as String?) ?? '';
               if (remoteUpdated.compareTo(localUpdated) <= 0) continue;
             } else {
               // Locally deleted — respect the delete unless the remote version
@@ -447,18 +495,19 @@ class CloudSyncService {
               }
             }
             var row = Map<String, Object?>.from(remoteRow);
-            if (sensitive != null && localRows.isNotEmpty) {
+            if (sensitive != null && localRow != null) {
               // Regulated identifiers never leave this device: the cloud row
               // has no bvn/nin columns, so carry the local values across the
               // OR-REPLACE (which would otherwise reset them to NULL).
               for (final column in sensitive) {
-                row[column] = localRows.first[column];
+                row[column] = localRow[column];
               }
             }
             if (table == 'documents') {
               await _materializeDocument(row);
             }
-            await db.insert(table, row, conflictAlgorithm: ConflictAlgorithm.replace);
+            await db.insert(table, row,
+                conflictAlgorithm: ConflictAlgorithm.replace);
             if (localTombstones.containsKey('$table|$id')) {
               await db.delete('sync_tombstones',
                   where: 'deleted_table = ? AND deleted_row_id = ?',
@@ -476,7 +525,16 @@ class CloudSyncService {
       await _setPullFlag(db, false);
     }
 
-    await _writeMeta(db, pulledAt: watermark);
+    // Advance the pull watermark ONLY when every row applied. A failed row
+    // (rejected by isSaneCloudRow, failed document materialization, or a DB
+    // insert error) would otherwise be skipped forever: the next cycle pulls
+    // updated_at >= lastPulled, and a failed row's timestamp is older than the
+    // watermark captured here. Leaving the watermark put makes the next cycle
+    // re-fetch (and re-apply, idempotently) everything since the last good
+    // pull. This mirrors the push side's all-or-nothing watermark advance.
+    if (failures == 0) {
+      await _writeMeta(db, pulledAt: watermark);
+    }
     return (pulled: pulled, failures: failures);
   }
 
@@ -573,6 +631,32 @@ class CloudSyncService {
   }
 
   String _isoUtcNow() => syncTimestamp();
+
+  /// Fetches every row a [PostgrestFilterBuilder] can produce, paging with
+  /// `.range()`. PostgREST caps a single response at `max-rows` (default
+  /// 1000), so an unpaginated `select()` would silently drop rows on any table
+  /// with more than 1000 changed rows — a replication data-loss bug (the old
+  /// code only ever saw the first 1000 rows of a big table on the first sync).
+  Future<PostgrestList> _fetchAll(
+      PostgrestFilterBuilder<PostgrestList> builder) async {
+    const pageSize = 1000;
+    final rows = <Map<String, dynamic>>[];
+    var offset = 0;
+    while (true) {
+      final page = await builder.range(offset, offset + pageSize - 1);
+      rows.addAll(page);
+      if (page.length < pageSize) break;
+      offset += pageSize;
+    }
+    return rows;
+  }
+
+  /// Splits [items] into consecutive sublists of at most [size] elements.
+  Iterable<List<T>> _chunk<T>(List<T> items, int size) sync* {
+    for (var i = 0; i < items.length; i += size) {
+      yield items.sublist(i, min(i + size, items.length));
+    }
+  }
 }
 
 class CloudSyncException implements Exception {

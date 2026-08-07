@@ -54,6 +54,26 @@ class _PinSetupScreenState extends ConsumerState<PinSetupScreen> {
     });
   }
 
+  /// Physical-keyboard entry (desktop: there is no touch numpad). Digits
+  /// (top row or numpad) append to the current PIN field, Backspace deletes.
+  /// Only handles [KeyDownEvent] so each press registers once.
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final character = event.character;
+    if (character != null &&
+        character.length == 1 &&
+        character.codeUnitAt(0) >= 0x30 &&
+        character.codeUnitAt(0) <= 0x39) {
+      _onKey(character);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.backspace) {
+      _onDelete();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   void _showRecoveryDialog() {
     showDialog(
       context: context,
@@ -156,7 +176,10 @@ class _PinSetupScreenState extends ConsumerState<PinSetupScreen> {
     final currentLength = _isConfirming ? _confirm.length : _pin.length;
 
     return Scaffold(
-      body: Container(
+      body: Focus(
+        autofocus: true,
+        onKeyEvent: _handleKeyEvent,
+        child: Container(
         width: double.infinity,
         height: double.infinity,
         decoration: const BoxDecoration(
@@ -225,6 +248,7 @@ class _PinSetupScreenState extends ConsumerState<PinSetupScreen> {
             ],
           ),
         ),
+      ),
       ),
     );
   }
