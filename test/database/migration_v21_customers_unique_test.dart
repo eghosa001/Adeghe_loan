@@ -62,6 +62,18 @@ void main() {
         updated_at TEXT
       )
     ''');
+    // The v17 bookkeeping tables the recreated change-tracking triggers
+    // reference (on a real upgrade v17 runs before v21, so they exist).
+    await db.execute(
+        'CREATE TABLE sync_flags (key TEXT PRIMARY KEY, value TEXT)');
+    await db.execute('''
+      CREATE TABLE sync_tombstones (
+        deleted_table TEXT NOT NULL,
+        deleted_row_id TEXT NOT NULL,
+        deleted_at TEXT NOT NULL,
+        PRIMARY KEY (deleted_table, deleted_row_id)
+      )
+    ''');
     return db;
   }
 
@@ -131,5 +143,36 @@ void main() {
     expect(indexRows, hasLength(1));
     final indexSql = indexRows.first['sql'] as String;
     expect(indexSql.toLowerCase(), contains("where status != 'archived'"));
+  });
+
+  test('v21 recreates the customer change-tracking triggers lost by DROP TABLE',
+      () async {
+    final db = await openV20Database();
+    addTearDown(db.close);
+
+    await DatabaseMigrations.run(db, 20, 21);
+
+    // The DROP TABLE customers in v21 used to destroy trg_customers_ins/upd/del.
+    for (final name in const ['ins', 'upd', 'del']) {
+      final rows = await db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_customers_$name'");
+      expect(rows, hasLength(1), reason: 'trg_customers_$name missing after v21');
+    }
+
+    // Behavior: an insert still stamps `updated_at` and a delete still records
+    // a tombstone, so customer sync keeps working on upgraded devices.
+    await db.insert('customers', {
+      'id': 'A', 'full_name': 'Ada', 'phone': '0801',
+      'date_registered': '2026-01-01', 'status': 'active',
+    });
+    final stamped = await db.query('customers',
+        columns: ['updated_at'], where: 'id = ?', whereArgs: ['A']);
+    expect((stamped.first['updated_at'] as String?)?.isNotEmpty, isTrue);
+
+    await db.delete('customers', where: 'id = ?', whereArgs: ['A']);
+    final tombstones = await db.query('sync_tombstones');
+    expect(tombstones, hasLength(1));
+    expect(tombstones.first['deleted_table'], 'customers');
+    expect(tombstones.first['deleted_row_id'], 'A');
   });
 }

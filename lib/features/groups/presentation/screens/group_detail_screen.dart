@@ -223,89 +223,106 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               onRefresh: _loadData,
-              child: ListView(
+              child: ListView.builder(
                 padding: const EdgeInsets.only(bottom: 88),
-                children: [
-                  _GroupInfoCard(group: group),
-                  _StatsCards(stats: _stats),
-                  _CollectionSummaryCard(summary: _collectionSummary),
-                  _buildMemberSection(),
-                ],
+                itemCount: 4 + _members.length + 1,
+                itemBuilder: (context, index) {
+                  if (index == 0) return _GroupInfoCard(group: group);
+                  if (index == 1) return _StatsCards(stats: _stats);
+                  if (index == 2) {
+                    return _CollectionSummaryCard(summary: _collectionSummary);
+                  }
+                  if (index == 3) {
+                    if (_members.isEmpty) {
+                      return const Padding(
+                        padding: EdgeInsets.all(32),
+                        child:
+                            Center(child: Text('No members in this group yet.')),
+                      );
+                    }
+                    return _buildMemberHeader();
+                  }
+                  if (index < 4 + _members.length) {
+                    return _buildMemberTile(_members[index - 4]);
+                  }
+                  return _buildViewCollectionsButton();
+                },
               ),
             ),
     );
   }
 
-  Widget _buildMemberSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Row(
-            children: [
-              Text('Members (${_members.length})',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const Spacer(),
-              if (_members.isNotEmpty)
-                TextButton(
-                  onPressed: () => setState(() {
-                    _selectionMode = !_selectionMode;
-                    if (!_selectionMode) _selectedIds.clear();
-                  }),
-                  child: Text(_selectionMode ? 'Cancel' : 'Select'),
-                ),
-            ],
-          ),
-        ),
-        if (_members.isEmpty)
-          const Padding(
-            padding: EdgeInsets.all(32),
-            child: Center(child: Text('No members in this group yet.')),
-          )
-        else
-          ..._members.map((customer) => ListTile(
-                leading: _selectionMode
-                    ? Checkbox(
-                        value: _selectedIds.contains(customer.id),
-                        onChanged: (_) => _toggleSelection(customer.id),
-                      )
-                    : CircleAvatar(
-                        child: Text(customer.fullName.isNotEmpty
-                            ? customer.fullName[0].toUpperCase()
-                            : '?'),
-                      ),
-                title: Text(customer.fullName),
-                subtitle: Text(customer.phone),
-                trailing: _selectionMode
-                    ? null
-                    : PopupMenuButton<String>(
-                        onSelected: (action) {
-                          if (action == 'remove') _removeMember(customer.id);
-                          if (action == 'view') context.push('/customers/${customer.id}');
-                        },
-                        itemBuilder: (_) => [
-                          const PopupMenuItem(value: 'view', child: Text('View profile')),
-                          const PopupMenuItem(value: 'remove', child: Text('Remove from group')),
-                        ],
-                      ),
-                onTap: _selectionMode
-                    ? () => _toggleSelection(customer.id)
-                    : () => context.push('/customers/${customer.id}'),
-              )),
-        const SizedBox(height: 16),
-        Center(
-          child: OutlinedButton.icon(
-            onPressed: () {
-            ref.read(collectionGroupFilterProvider.notifier).state = widget.groupId;
+  Widget _buildMemberHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Row(
+        children: [
+          Text('Members (${_members.length})',
+              style: Theme.of(context).textTheme.titleMedium),
+          const Spacer(),
+          if (_members.isNotEmpty)
+            TextButton(
+              onPressed: () => setState(() {
+                _selectionMode = !_selectionMode;
+                if (!_selectionMode) _selectedIds.clear();
+              }),
+              child: Text(_selectionMode ? 'Cancel' : 'Select'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMemberTile(Customer customer) {
+    return ListTile(
+      leading: _selectionMode
+          ? Checkbox(
+              value: _selectedIds.contains(customer.id),
+              onChanged: (_) => _toggleSelection(customer.id),
+            )
+          : CircleAvatar(
+              child: Text(customer.fullName.isNotEmpty
+                  ? customer.fullName[0].toUpperCase()
+                  : '?'),
+            ),
+      title: Text(customer.fullName),
+      subtitle: Text(customer.phone),
+      trailing: _selectionMode
+          ? null
+          : PopupMenuButton<String>(
+              onSelected: (action) {
+                if (action == 'remove') _removeMember(customer.id);
+                if (action == 'view') {
+                  context.push('/customers/${customer.id}');
+                }
+              },
+              itemBuilder: (_) => [
+                const PopupMenuItem(
+                    value: 'view', child: Text('View profile')),
+                const PopupMenuItem(
+                    value: 'remove', child: Text('Remove from group')),
+              ],
+            ),
+      onTap: _selectionMode
+          ? () => _toggleSelection(customer.id)
+          : () => context.push('/customers/${customer.id}'),
+    );
+  }
+
+  Widget _buildViewCollectionsButton() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 16, bottom: 16),
+      child: Center(
+        child: OutlinedButton.icon(
+          onPressed: () {
+            ref.read(collectionGroupFilterProvider.notifier).state =
+                widget.groupId;
             context.push('/collections');
           },
-            icon: const Icon(Icons.collections_bookmark),
-            label: const Text('View group collections'),
-          ),
+          icon: const Icon(Icons.collections_bookmark),
+          label: const Text('View group collections'),
         ),
-        const SizedBox(height: 16),
-      ],
+      ),
     );
   }
 }

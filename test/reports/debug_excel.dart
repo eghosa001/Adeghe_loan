@@ -1,3 +1,4 @@
+// ignore_for_file: avoid_print
 import 'package:excel/excel.dart';
 import 'package:loantrack/features/collection/data/models/weekly_collection_row.dart';
 import 'package:loantrack/features/reports/services/export_manager.dart';

@@ -261,6 +261,17 @@ Map<String, String> _buildAliasMap(String sql) {
     aliases[m.group(2)!] = m.group(1)!;
     aliases[m.group(1)!] = m.group(1)!;
   }
+  // Derived-table aliases (`FROM (SELECT ...) tgt ON ...`) are valid SQL but
+  // are not schema tables; registering them keeps their dotted column refs
+  // (`tgt.due_date`) and the bare alias itself from being flagged as schema
+  // columns. Column refs against a derived alias cannot be schema-verified,
+  // which matches the "undeclared alias — not verifiable" rule already used.
+  final derivedRe = RegExp(
+      r'\)\s+([A-Za-z_][A-Za-z0-9_]*)\s+(?:ON\b|,|(?:LEFT|RIGHT|INNER|CROSS)\s+JOIN\b|JOIN\b|WHERE\b|GROUP\b|ORDER\b|LIMIT\b|\)|$)',
+      caseSensitive: false);
+  for (final m in derivedRe.allMatches(sql)) {
+    aliases[m.group(1)!] = '<derived>';
+  }
   return aliases;
 }
 

@@ -96,9 +96,9 @@ class CollectionRepository {
       final db = await _database;
       final startStr = start.toIso8601String().split('T').first;
       final endStr = end.toIso8601String().split('T').first;
-      final conditions = <String>[
-        "l.status = 'active'",
-      ];
+      // Include completed loans so paid installments remain visible for
+      // historical/reference purposes (paid weekly loans should still show).
+      final conditions = <String>["l.status IN ('active','completed')"];
       final args = <dynamic>[];
 
       if (groupId != null && groupId.isNotEmpty) {
@@ -347,7 +347,14 @@ cg.name AS groupName,
       final startStr = start.toIso8601String().split('T').first;
       final endStr = end.toIso8601String().split('T').first;
 
-      // Filter by the current installment's due_date falling within the range.
+      // Filter by installments whose due_date falls within the range.
+      //
+      // A loan stays visible while the range covers ANY of its installments —
+      // including already-paid ones — so a paid installment keeps showing as
+      // "Paid" (mirrors the Daily Collection sheet). The row's installment
+      // fields come from the FIRST installment in range, preferring an unpaid
+      // one; when every installment in range is paid the first (paid)
+      // installment is shown so the green tick/Paid state is preserved.
       final rows = await db.rawQuery('''
         SELECT
           c.id AS customerId,
@@ -371,62 +378,50 @@ cg.name AS groupName,
             WHERE rs.loan_id = l.id
             ORDER BY rs.installment_number ASC LIMIT 1
           ), l.weekly_payment) AS weeklyInstallment,
-          COALESCE((
-            SELECT rs.installment_number
-            FROM repayment_schedule rs
-            WHERE rs.loan_id = l.id AND rs.status != 'paid'
-              AND $notOnEnabledHolidaySql
-            ORDER BY rs.due_date ASC LIMIT 1
-          ), (SELECT COUNT(*) FROM repayment_schedule rs WHERE rs.loan_id = l.id)) AS currentInstallmentNumber,
-          COALESCE((
-            SELECT rs.due_date
-            FROM repayment_schedule rs
-            WHERE rs.loan_id = l.id AND rs.status != 'paid'
-              AND $notOnEnabledHolidaySql
-            ORDER BY rs.due_date ASC LIMIT 1
-          ), (SELECT rs.due_date FROM repayment_schedule rs WHERE rs.loan_id = l.id ORDER BY rs.installment_number DESC LIMIT 1)) AS currentInstallmentDueDate,
-          COALESCE((
-            SELECT rs.amount
-            FROM repayment_schedule rs
-            WHERE rs.loan_id = l.id AND rs.status != 'paid'
-              AND $notOnEnabledHolidaySql
-            ORDER BY rs.due_date ASC LIMIT 1
-          ), (SELECT rs.amount FROM repayment_schedule rs WHERE rs.loan_id = l.id ORDER BY rs.installment_number DESC LIMIT 1)) AS currentInstallmentAmount,
-          COALESCE((
-            SELECT COALESCE(rs.paid_amount, 0.0)
-            FROM repayment_schedule rs
-            WHERE rs.loan_id = l.id AND rs.status != 'paid'
-              AND $notOnEnabledHolidaySql
-            ORDER BY rs.due_date ASC LIMIT 1
-          ), (SELECT COALESCE(rs.paid_amount, 0.0) FROM repayment_schedule rs WHERE rs.loan_id = l.id ORDER BY rs.installment_number DESC LIMIT 1)) AS currentInstallmentPaidAmount,
-          COALESCE((
-            SELECT rs.status
-            FROM repayment_schedule rs
-            WHERE rs.loan_id = l.id AND rs.status != 'paid'
-              AND $notOnEnabledHolidaySql
-            ORDER BY rs.due_date ASC LIMIT 1
-          ), 'paid') AS currentInstallmentStatus
+          tgt.installment_number AS currentInstallmentNumber,
+          tgt.due_date AS currentInstallmentDueDate,
+          tgt.amount AS currentInstallmentAmount,
+          tgt.paid_amount AS currentInstallmentPaidAmount,
+          tgt.status AS currentInstallmentStatus
         FROM loans l
         INNER JOIN customers c ON l.customer_id = c.id
+        LEFT JOIN (
+          SELECT t.loan_id,
+                 t.installment_number,
+                 t.due_date,
+                 t.amount,
+                 t.paid_amount,
+                 t.status
+          FROM repayment_schedule t
+          WHERE t.installment_number = (
+            SELECT COALESCE(
+              (SELECT MIN(rs.installment_number)
+               FROM repayment_schedule rs
+               WHERE rs.loan_id = t.loan_id
+                 AND DATE(rs.due_date) BETWEEN ? AND ?
+                 AND rs.status != 'paid'
+                 AND $notOnEnabledHolidaySql),
+              (SELECT MIN(rs.installment_number)
+               FROM repayment_schedule rs
+               WHERE rs.loan_id = t.loan_id
+                 AND DATE(rs.due_date) BETWEEN ? AND ?
+                 AND $notOnEnabledHolidaySql)
+            )
+          )
+        ) tgt ON tgt.loan_id = l.id
         LEFT JOIN payments p ON p.loan_id = l.id AND p.status = 'completed'
         LEFT JOIN savings_transactions st
           ON st.reference_loan_payment_id = p.id AND st.type = 'overpayment'
         WHERE l.loan_type = 'weekly' AND l.status IN ('active', 'completed')
-          AND (
-            (SELECT rs.due_date
-             FROM repayment_schedule rs
-             WHERE rs.loan_id = l.id AND rs.status != 'paid'
-               AND $notOnEnabledHolidaySql
-             ORDER BY rs.due_date ASC LIMIT 1) BETWEEN ? AND ?
-            OR NOT EXISTS (
-              SELECT 1 FROM repayment_schedule rs
-              WHERE rs.loan_id = l.id AND rs.status != 'paid'
-                AND $notOnEnabledHolidaySql
-            )
+          AND EXISTS (
+            SELECT 1 FROM repayment_schedule rs
+            WHERE rs.loan_id = l.id
+              AND DATE(rs.due_date) BETWEEN ? AND ?
+              AND $notOnEnabledHolidaySql
           )
         GROUP BY l.id
         ORDER BY c.full_name COLLATE NOCASE ASC
-      ''', [startStr, endStr]);
+      ''', [startStr, endStr, startStr, endStr, startStr, endStr]);
 
       final weeklyRows = rows.map((row) {
         final currentInstallmentDueDate = row['currentInstallmentDueDate'] as String? ?? '';

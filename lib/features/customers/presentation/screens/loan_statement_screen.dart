@@ -10,6 +10,7 @@ import '../../../../core/utils/currency_utils.dart';
 import '../../../customers/presentation/providers/customer_providers.dart';
 import '../../../loans/presentation/providers/loan_providers.dart';
 import '../../../loans/data/models/loan_entity.dart';
+import '../../../business/presentation/providers/business_providers.dart';
 
 class LoanStatementScreen extends ConsumerStatefulWidget {
   const LoanStatementScreen({super.key});
@@ -132,6 +133,8 @@ class _LoanStatementBody extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final loansAsync = ref.watch(allLoansForCustomerProvider(customerId));
+    final currency =
+        ref.watch(currencySymbolProvider).valueOrNull ?? CurrencyUtils.defaultSymbol;
 
     return loansAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
@@ -193,9 +196,9 @@ class _LoanStatementBody extends ConsumerWidget {
                       ],
                     ),
                     const Divider(),
-                    _detailRow('Principal', CurrencyUtils.format(loan.amount)),
-                    _detailRow('Total Repayment', CurrencyUtils.format(loan.totalRepayment)),
-                    _detailRow('Outstanding', CurrencyUtils.format(loan.outstandingBalance)),
+                    _detailRow('Principal', CurrencyUtils.format(loan.amount, symbol: currency)),
+                    _detailRow('Total Repayment', CurrencyUtils.format(loan.totalRepayment, symbol: currency)),
+                    _detailRow('Outstanding', CurrencyUtils.format(loan.outstandingBalance, symbol: currency)),
                     _detailRow('Interest Rate', '${loan.interestRate}%'),
                     _detailRow('Loan Date', loan.loanDate.toString().split(' ').first),
                   ],

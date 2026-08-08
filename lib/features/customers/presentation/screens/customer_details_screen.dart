@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../data/models/customer_entity.dart';
 import '../providers/customer_providers.dart';
@@ -17,6 +18,7 @@ import '../../../savings/presentation/providers/savings_providers.dart';
 import '../../../collection/presentation/providers/collection_provider.dart';
 import '../../../dashboard/presentation/providers/dashboard_provider.dart';
 import '../../../../core/di/providers.dart';
+import '../../../business/presentation/providers/business_providers.dart';
 import '../../../reports/presentation/providers/report_provider.dart';
 
 class CustomerDetailScreen extends ConsumerWidget {
@@ -524,23 +526,31 @@ class _LoanTile extends ConsumerWidget {
       BuildContext context, WidgetRef ref, double amount) async {
     try {
       final repo = await ref.read(paymentRepositoryProvider.future);
+      final collectorName =
+          ref.read(businessProfileProvider).valueOrNull?.ownerName ?? 'Admin';
       await repo.createPayment(
         loanId: loan.id,
         customerId: loan.customerId,
         amount: amount,
         method: PaymentMethod.cash,
-        collector: '',
+        collector: collectorName,
+        clientRequestId: const Uuid().v4(),
       );
       ref.invalidate(activeLoansForCustomerProvider(loan.customerId));
       ref.invalidate(loanDetailsProvider(loan.id));
       ref.invalidate(loanScheduleProvider(loan.id));
       ref.invalidate(dashboardDataProvider);
       ref.invalidate(collectionListProvider);
+      ref.invalidate(weeklyCollectionListProvider);
       ref.invalidate(reportSummaryProvider);
       ref.invalidate(savingsBalanceProvider(loan.customerId));
       ref.invalidate(savingsTransactionsProvider(loan.customerId));
       ref.invalidate(paymentsForLoanProvider(loan.id));
       ref.invalidate(customerProvider(loan.customerId));
+      ref.invalidate(allSavingsAccountsProvider);
+      ref.invalidate(allAccountsWithNamesProvider);
+      ref.invalidate(customerListProvider);
+      ref.invalidate(allLoansProvider);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Paid ${CurrencyUtils.format(amount)}')),

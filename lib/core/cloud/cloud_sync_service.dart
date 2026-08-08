@@ -6,6 +6,7 @@ import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import '../constants/app_constants.dart';
 import '../database/database_service.dart';
 import 'cloud_auth_service.dart';
 import 'supabase_config.dart';
@@ -503,6 +504,22 @@ class CloudSyncService {
                 row[column] = localRow[column];
               }
             }
+            if (table == 'customers') {
+              // Names are stored ALL CAPS locally (owner decision); a remote
+              // device running an older build may push mixed-case names, so
+              // normalize the pulled row before it lands in the local DB.
+              for (final column in const [
+                'full_name',
+                'next_of_kin',
+                'guarantor_1_name',
+                'guarantor_2_name',
+              ]) {
+                final value = row[column];
+                if (value is String) {
+                  row[column] = value.trim().toUpperCase();
+                }
+              }
+            }
             if (table == 'documents') {
               await _materializeDocument(row);
             }
@@ -795,6 +812,24 @@ bool isSaneCloudRow(String table, Map<String, Object?> row, String pk) {
     final value = row[column];
     if (value == null) continue;
     if (value is! int) return false;
+  }
+  // N2-class guard for sync: loan durations are capped at the same limit the
+  // save path enforces (`AppConstants.maxLoanDuration`). A pulled row with a
+  // huge duration passes the `num` typing above but would make
+  // `CurrencyUtils.splitEvenly`/`LoanScheduleCalculator` allocate unbounded
+  // installments on the next `rebuildAllSchedules` (the local N2 OOM, now
+  // reachable via sync). `duration_days`/`duration_weeks` are INTEGER in the
+  // cloud schema, so a whole int is expected.
+  if (table == 'loans') {
+    for (final column in const ['duration_days', 'duration_weeks']) {
+      final value = row[column];
+      if (value == null) continue;
+      if (value is! int ||
+          value < 1 ||
+          value > AppConstants.maxLoanDuration) {
+        return false;
+      }
+    }
   }
   final enums = cloudEnumValues[table];
   if (enums != null) {

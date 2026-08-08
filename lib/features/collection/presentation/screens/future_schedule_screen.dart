@@ -58,6 +58,15 @@ class FutureScheduleScreen extends ConsumerWidget {
             grandTotal += (row.amountDue - row.amountPaid).clamp(0, double.infinity);
           }
 
+          // Flatten day headers + rows so the lazy builder only materializes
+          // the visible items instead of eagerly building every day's full
+          // row set inside a single card.
+          final items = <(String?, CollectionRow?)>[];
+          for (final date in sortedDates) {
+            items.add((date, null));
+            items.addAll(grouped[date]!.map((r) => (null, r)));
+          }
+
           return Column(
             children: [
               Container(
@@ -86,69 +95,31 @@ class FutureScheduleScreen extends ConsumerWidget {
                   onRefresh: () async =>
                       ref.invalidate(futureScheduleProvider),
                   child: ListView.builder(
-                    itemCount: sortedDates.length,
+                    itemCount: items.length,
                     itemBuilder: (context, index) {
-                      final date = sortedDates[index];
-                      final dayRows = grouped[date]!;
-                      final dayTotal = dayRows.fold<double>(0, (s, r) =>
-                          s + (r.amountDue - r.amountPaid).clamp(0, double.infinity));
-                      final parsed = DateTime.tryParse(date);
-                      final label = parsed != null
-                          ? '${AppDateUtils.formatDate(parsed)}  ·  ${DateFormat('EEEE').format(parsed)}'
-                          : date;
-
+                      final (date, row) = items[index];
+                      if (row == null) {
+                        return _buildDayHeaderCard(context, date!, grouped[date]!);
+                      }
                       return Card(
                         margin: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 4),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 8),
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .surfaceContainerHighest,
-                              child: Row(
-                                children: [
-                                  Icon(Icons.calendar_today, size: 16,
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .primary),
-                                  const SizedBox(width: 8),
-                                  Text(label,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.bold)),
-                                  const Spacer(),
-                                  Text(CurrencyUtils.format(dayTotal),
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary,
-                                      )),
-                                ],
-                              ),
-                            ),
-                            ...dayRows.map((row) => ListTile(
-                                  dense: true,
-                                  title: Text(row.customerName),
-                                  subtitle: Text(
-                                      '${row.loanType}${row.groupName != null ? ' — ${row.groupName}' : ''}'
-                                      '${row.amountPaid > 0 ? '  ·  ${CurrencyUtils.format(row.amountPaid)} already paid' : ''}'),
-                                  trailing: Text(
-                                    CurrencyUtils.format(
-                                        (row.amountDue - row.amountPaid)
-                                            .clamp(0, double.infinity)),
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.bold),
-                                  ),
-                                  onTap: () {
-                                    _quickPay(context, ref, row);
-                                  },
-                                )),
-                          ],
+                            horizontal: 12, vertical: 2),
+                        child: ListTile(
+                          dense: true,
+                          title: Text(row.customerName),
+                          subtitle: Text(
+                              '${row.loanType}${row.groupName != null ? ' — ${row.groupName}' : ''}'
+                              '${row.amountPaid > 0 ? '  ·  ${CurrencyUtils.format(row.amountPaid)} already paid' : ''}'),
+                          trailing: Text(
+                            CurrencyUtils.format(
+                                (row.amountDue - row.amountPaid)
+                                    .clamp(0, double.infinity)),
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold),
+                          ),
+                          onTap: () {
+                            _quickPay(context, ref, row);
+                          },
                         ),
                       );
                     },
@@ -234,6 +205,7 @@ class FutureScheduleScreen extends ConsumerWidget {
       );
       ref.invalidate(futureScheduleProvider);
       ref.invalidate(collectionListProvider);
+      ref.invalidate(weeklyCollectionListProvider);
       ref.invalidate(dashboardDataProvider);
       ref.invalidate(savingsBalanceProvider(row.customerId));
       ref.invalidate(savingsTransactionsProvider(row.customerId));
@@ -261,6 +233,40 @@ class FutureScheduleScreen extends ConsumerWidget {
         );
       }
     }
+  }
+
+  Widget _buildDayHeaderCard(
+      BuildContext context, String date, List<CollectionRow> dayRows) {
+    final dayTotal = dayRows.fold<double>(0, (s, r) =>
+        s + (r.amountDue - r.amountPaid).clamp(0, double.infinity));
+    final parsed = DateTime.tryParse(date);
+    final label = parsed != null
+        ? '${AppDateUtils.formatDate(parsed)}  ·  ${DateFormat('EEEE').format(parsed)}'
+        : date;
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        child: Row(
+          children: [
+            Icon(Icons.calendar_today,
+                size: 16, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(width: 8),
+            Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
+            const Spacer(),
+            Text(
+              CurrencyUtils.format(dayTotal),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

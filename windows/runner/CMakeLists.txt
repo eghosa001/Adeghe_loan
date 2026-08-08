@@ -36,5 +36,15 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
+# Release-only size/speed optimization: Whole Program Optimization (MSVC /GL +
+# /LTCG) and identical-code folding (/OPT:ICF) so the thin runner executable
+# stays as small as possible. The Dart logic is already AOT-compiled into
+# data/app.so by the Flutter tool; these flags only affect the native wrapper.
+target_compile_options(${BINARY_NAME} PRIVATE "$<$<CONFIG:Release>:/GL>")
+target_link_options(${BINARY_NAME} PRIVATE
+  "$<$<CONFIG:Release>:/OPT:REF>"
+  "$<$<CONFIG:Release>:/OPT:ICF>"
+  "$<$<CONFIG:Release>:/LTCG>")
+
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)

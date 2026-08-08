@@ -32,6 +32,7 @@ class DatabaseMigrations {
     if (pending(19)) await _v19(db);
     if (pending(20)) await _v20(db);
     if (pending(21)) await _v21(db);
+    if (pending(22)) await _v22(db);
   }
 
   /// v20 — indexes backing the money-rule join and common date-range filters.
@@ -144,6 +145,28 @@ class DatabaseMigrations {
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_nin_unique ON customers(nin) WHERE status != 'archived'");
     await db.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_bvn_unique ON customers(bvn) WHERE status != 'archived'");
+    // Recreate the v17 change-tracking triggers: the DROP TABLE above destroyed
+    // trg_customers_ins/upd/del (SQLite drops a table's triggers with it), so
+    // without this, customer writes on upgraded devices would never stamp
+    // `updated_at` or record tombstones and customer sync would silently stop.
+    await createSyncTriggersForTable(db, 'customers');
+  }
+
+  /// v22 — normalize existing customer names to ALL CAPS (owner request
+  /// 2026-08-08). New names are already normalized at the repository boundary
+  /// (`CustomerRepository.save`) and on cloud pull; this migration uppercases
+  /// rows written before that so legacy data matches everywhere it renders
+  /// (screens, reports, collection sheets, statements, documents). The v17
+  /// `trg_customers_upd` trigger stamps `updated_at`, so renamed rows reach
+  /// the cloud on the next sync.
+  static Future<void> _v22(Database db) async {
+    await db.execute('''
+      UPDATE customers SET
+        full_name = UPPER(TRIM(full_name)),
+        next_of_kin = CASE WHEN next_of_kin IS NULL THEN NULL ELSE UPPER(TRIM(next_of_kin)) END,
+        guarantor_1_name = CASE WHEN guarantor_1_name IS NULL THEN NULL ELSE UPPER(TRIM(guarantor_1_name)) END,
+        guarantor_2_name = CASE WHEN guarantor_2_name IS NULL THEN NULL ELSE UPPER(TRIM(guarantor_2_name)) END
+    ''');
   }
 
   /// Tables that get cloud-sync change tracking (updated_at stamping +
@@ -204,7 +227,18 @@ class DatabaseMigrations {
   /// deliberately not added here because the schema guard's parser only
   /// recognises `CREATE INDEX` (not `CREATE UNIQUE INDEX`).
   static Future<void> _v18(Database db) async {
-    await db.execute('ALTER TABLE payments ADD COLUMN client_request_id TEXT');
+    // Idempotent guard: an early build shipped the fresh-install DDL with
+    // `client_request_id` already present while `_databaseVersion` was still
+    // 17, so databases created by that build reach v18 with the column already
+    // in place — a bare ALTER throws "duplicate column name" and SQLite rolls
+    // the whole upgrade back on every launch. SQLite has no
+    // `ADD COLUMN IF NOT EXISTS`, so probe `PRAGMA table_info` first.
+    final columns = await db.rawQuery('PRAGMA table_info(payments)');
+    final hasColumn = columns.any((c) => c['name'] == 'client_request_id');
+    if (!hasColumn) {
+      await db
+          .execute('ALTER TABLE payments ADD COLUMN client_request_id TEXT');
+    }
   }
 
   /// v17 — add cloud-sync change tracking.
@@ -289,36 +323,45 @@ class DatabaseMigrations {
     await db.insert('sync_meta', {'id': 1},
         conflictAlgorithm: ConflictAlgorithm.ignore);
 
+    for (final table in _syncTables) {
+      await createSyncTriggersForTable(db, table);
+    }
+  }
+
+  /// Recreates the stamp/tombstone change-tracking triggers for a single
+  /// tracked table. Idempotent: existing triggers for the table are dropped
+  /// first. Used by [createSyncSchema] and by table-recreate migrations (v21)
+  /// that rebuild a tracked table and would otherwise silently lose its
+  /// triggers (SQLite drops a table's triggers when the table is dropped).
+  static Future<void> createSyncTriggersForTable(
+      Database db, String table) async {
+    final pk = _syncTablePrimaryKeys[table]!;
     const guard =
         "COALESCE((SELECT value FROM sync_flags WHERE key = 'pull_in_progress'), '0') = '0'";
-    final stamp =
-        "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
-    for (final table in _syncTables) {
-      final pk = _syncTablePrimaryKeys[table]!;
-      final names = ['ins', 'upd', 'del'];
-      for (final name in names) {
-        await db.execute('DROP TRIGGER IF EXISTS trg_${table}_$name');
-      }
-      // Stamp on INSERT / UPDATE unless a pull is in progress (the sync
-      // service sets sync_flags.pull_in_progress = '1' while it writes rows
-      // fetched from the cloud, so pulled rows keep the remote timestamp).
-      final ins = 'CREATE TRIGGER trg_${table}_ins AFTER INSERT ON $table '
-          'WHEN $guard '
-          'BEGIN UPDATE $table SET updated_at = $stamp WHERE $pk = NEW.$pk; END';
-      final upd = 'CREATE TRIGGER trg_${table}_upd AFTER UPDATE ON $table '
-          'WHEN $guard '
-          'BEGIN UPDATE $table SET updated_at = $stamp WHERE $pk = NEW.$pk; END';
-      // Record a tombstone so the cloud delete can be replicated to other
-      // devices (cascaded deletes are captured too, since SQLite fires the
-      // DELETE trigger for each row a CASCADE removes).
-      final del = 'CREATE TRIGGER trg_${table}_del AFTER DELETE ON $table '
-          'WHEN $guard '
-          "BEGIN INSERT INTO sync_tombstones (deleted_table, deleted_row_id, deleted_at) "
-          "VALUES ('$table', OLD.$pk, $stamp); END";
-      await db.execute(ins);
-      await db.execute(upd);
-      await db.execute(del);
+    final stamp = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
+    final names = ['ins', 'upd', 'del'];
+    for (final name in names) {
+      await db.execute('DROP TRIGGER IF EXISTS trg_${table}_$name');
     }
+    // Stamp on INSERT / UPDATE unless a pull is in progress (the sync
+    // service sets sync_flags.pull_in_progress = '1' while it writes rows
+    // fetched from the cloud, so pulled rows keep the remote timestamp).
+    final ins = 'CREATE TRIGGER trg_${table}_ins AFTER INSERT ON $table '
+        'WHEN $guard '
+        'BEGIN UPDATE $table SET updated_at = $stamp WHERE $pk = NEW.$pk; END';
+    final upd = 'CREATE TRIGGER trg_${table}_upd AFTER UPDATE ON $table '
+        'WHEN $guard '
+        'BEGIN UPDATE $table SET updated_at = $stamp WHERE $pk = NEW.$pk; END';
+    // Record a tombstone so the cloud delete can be replicated to other
+    // devices (cascaded deletes are captured too, since SQLite fires the
+    // DELETE trigger for each row a CASCADE removes).
+    final del = 'CREATE TRIGGER trg_${table}_del AFTER DELETE ON $table '
+        'WHEN $guard '
+        "BEGIN INSERT INTO sync_tombstones (deleted_table, deleted_row_id, deleted_at) "
+        "VALUES ('$table', OLD.$pk, $stamp); END";
+    await db.execute(ins);
+    await db.execute(upd);
+    await db.execute(del);
   }
 
   // v8 — remove monthly loan columns since monthly loans are not supported

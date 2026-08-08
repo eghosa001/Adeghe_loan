@@ -207,6 +207,31 @@ void main() {
       expect(isSaneCloudRow('loans', row, 'id'), isTrue);
     });
 
+    test('rejects a loan duration above maxLoanDuration (sync N2 OOM)', () {
+      // A huge duration passes the numeric check but would make splitEvenly /
+      // LoanScheduleCalculator allocate unbounded installments on the next
+      // rebuildAllSchedules. The local save path caps at 365; so must the pull.
+      final daily = loanRow()..['duration_days'] = 9999;
+      expect(isSaneCloudRow('loans', daily, 'id'), isFalse);
+      final weekly = loanRow()..['duration_weeks'] = 9999;
+      expect(isSaneCloudRow('loans', weekly, 'id'), isFalse);
+    });
+
+    test('rejects a zero or fractional loan duration', () {
+      expect(isSaneCloudRow('loans', loanRow()..['duration_days'] = 0, 'id'),
+          isFalse);
+      expect(isSaneCloudRow('loans', loanRow()..['duration_weeks'] = 2.5, 'id'),
+          isFalse);
+    });
+
+    test('accepts a legal loan duration', () {
+      expect(isSaneCloudRow('loans', loanRow()..['duration_days'] = 30, 'id'),
+          isTrue);
+      expect(
+          isSaneCloudRow('loans', loanRow()..['duration_weeks'] = 52, 'id'),
+          isTrue);
+    });
+
     test('rejects a customers row with an empty full_name (empty-name crash)', () {
       final row = {
         'id': 'c1',

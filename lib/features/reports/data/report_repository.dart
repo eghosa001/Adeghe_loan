@@ -186,7 +186,7 @@ class ReportRepository {
         'JOIN payments p ON st.reference_loan_payment_id = p.id '
         'JOIN loans l ON p.loan_id = l.id '
         "WHERE st.type = 'overpayment' AND p.status = 'completed' "
-        'AND DATE(st.created_at) BETWEEN ? AND ?$ltClause',
+        'AND substr(st.created_at, 1, 10) BETWEEN ? AND ?$ltClause',
         ltParam != null
             ? [startStr, endStr, ltParam]
             : [startStr, endStr],
@@ -254,12 +254,13 @@ class ReportRepository {
         "AND p.status = 'completed' "
         'LEFT JOIN savings_transactions st '
         'ON st.reference_loan_payment_id = p.id AND st.type = \'overpayment\' '
-        "WHERE l.status IN ('active', 'defaulted') AND l.loan_date <= ?$ltClause "
+        // Include loans within the selected period and include completed loans
+        'WHERE l.loan_date BETWEEN ? AND ? AND l.status IN (\'active\', \'defaulted\', \'completed\') $ltClause '
         'GROUP BY l.id '
         'ORDER BY l.outstanding_balance DESC',
         ltParam != null
-            ? [endStr, ltParam]
-            : [endStr],
+            ? [startStr, endStr, ltParam]
+            : [startStr, endStr],
       ),
       // 13: Overdue entries
       db.rawQuery(
@@ -684,12 +685,12 @@ class ReportRepository {
             'SELECT COALESCE(SUM(st.amount), 0) AS total FROM savings_transactions st '
             'LEFT JOIN payments p ON st.reference_loan_payment_id = p.id '
             "WHERE st.type IN ('deposit', 'overpayment') AND (st.reference_loan_payment_id IS NULL OR p.status = 'completed') "
-            'AND DATE(st.created_at) BETWEEN ? AND ?',
+            'AND substr(st.created_at, 1, 10) BETWEEN ? AND ?',
             dateArgs,
           ),
           db.rawQuery(
             'SELECT COALESCE(SUM(st.amount), 0) AS total FROM savings_transactions st '
-            "WHERE st.type = 'withdrawal' AND DATE(st.created_at) BETWEEN ? AND ?",
+            "WHERE st.type = 'withdrawal' AND substr(st.created_at, 1, 10) BETWEEN ? AND ?",
             dateArgs,
           ),
           db.rawQuery(

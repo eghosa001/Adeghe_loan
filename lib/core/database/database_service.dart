@@ -12,7 +12,7 @@ import '../security/secure_storage_service.dart';
 import 'migrations.dart';
 
 class DatabaseService {
-  static const int _databaseVersion = 21;
+  static const int _databaseVersion = 22;
   final SecureStorageService _secureStorage;
 
   /// Test-only replacement for [_initDatabase], letting tests exercise the

@@ -108,22 +108,41 @@ class _GlobalSearchScreenState extends ConsumerState<GlobalSearchScreen> {
           final loanResults = results.where((r) => r.category == 'loan').toList();
           final groupResults = results.where((r) => r.category == 'group').toList();
 
-          return ListView(
+          // Flat descriptor list (header label | result item) so only the
+          // visible section headers/tiles are built by the lazy ListView.
+          final items = <(String?, SearchResultItem?)>[];
+          if (customerResults.isNotEmpty) {
+            items.add(('Customers (${customerResults.length})', null));
+            items.addAll(customerResults.map((r) => (null, r)));
+          }
+          if (loanResults.isNotEmpty) {
+            items.add(('Loans (${loanResults.length})', null));
+            items.addAll(loanResults.map((r) => (null, r)));
+          }
+          if (groupResults.isNotEmpty) {
+            items.add(('Groups (${groupResults.length})', null));
+            items.addAll(groupResults.map((r) => (null, r)));
+          }
+
+          return ListView.builder(
             padding: const EdgeInsets.symmetric(vertical: 8),
-            children: [
-              if (customerResults.isNotEmpty) ...[
-                _SectionHeader(label: 'Customers (${customerResults.length})'),
-                ...customerResults.map((r) => _ResultTile(item: r, icon: Icons.person_rounded, onTap: () => context.push(r.route))),
-              ],
-              if (loanResults.isNotEmpty) ...[
-                _SectionHeader(label: 'Loans (${loanResults.length})'),
-                ...loanResults.map((r) => _ResultTile(item: r, icon: Icons.monetization_on_rounded, onTap: () => context.push(r.route))),
-              ],
-              if (groupResults.isNotEmpty) ...[
-                _SectionHeader(label: 'Groups (${groupResults.length})'),
-                ...groupResults.map((r) => _ResultTile(item: r, icon: Icons.group_rounded, onTap: () => context.push(r.route))),
-              ],
-            ],
+            itemCount: items.length,
+            itemBuilder: (context, index) {
+              final (label, item) = items[index];
+              if (item == null) {
+                return _SectionHeader(label: label!);
+              }
+              final icon = switch (item.category) {
+                'customer' => Icons.person_rounded,
+                'loan' => Icons.monetization_on_rounded,
+                _ => Icons.group_rounded,
+              };
+              return _ResultTile(
+                item: item,
+                icon: icon,
+                onTap: () => context.push(item.route),
+              );
+            },
           );
         },
       ),

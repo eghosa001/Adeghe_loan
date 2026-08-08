@@ -360,6 +360,121 @@ void main() {
     );
   });
 
+  test('paid installment on the selected date still shows as paid (weekly does not disappear)', () async {
+    final db = await openDb();
+    addTearDown(db.close);
+    await seedWeeklyLoan(db, 'L1', 'C1', 'Ada'); // installment 1 due 2026-08-05
+
+    // Pay the full installment 1 (550).
+    await db.insert('payments', {
+      'id': 'P1',
+      'loan_id': 'L1',
+      'customer_id': 'C1',
+      'amount': 550,
+      'status': 'completed',
+      'payment_date': '2026-08-05',
+    });
+    await db.update(
+      'repayment_schedule',
+      {'status': 'paid', 'paid_amount': 550},
+      where: "loan_id = 'L1' AND installment_number = 1",
+    );
+
+    final result =
+        await repo(db).getWeeklyCollectionByDate(DateTime(2026, 8, 5));
+    result.when(
+      success: (rows) {
+        // The loan must NOT disappear after paying — it shows as paid.
+        expect(rows, hasLength(1));
+        final row = rows.first;
+        expect(row.currentInstallmentStatus, 'paid');
+        expect(row.isCurrentInstallmentPaid, isTrue);
+        expect(row.currentInstallmentPaidAmount, closeTo(550.0, 0.001));
+        expect(row.collectedThisPeriod, closeTo(550.0, 0.001));
+        expect(row.installmentDue, closeTo(0.0, 0.001));
+      },
+      failure: (f) => fail('query failed: $f'),
+    );
+  });
+
+  test('unpaid next installment shows pending on its own due date', () async {
+    final db = await openDb();
+    addTearDown(db.close);
+    await seedWeeklyLoan(db, 'L1', 'C1', 'Ada'); // installment 2 due 2026-08-12
+
+    await db.insert('payments', {
+      'id': 'P1',
+      'loan_id': 'L1',
+      'customer_id': 'C1',
+      'amount': 550,
+      'status': 'completed',
+      'payment_date': '2026-08-05',
+    });
+    await db.update(
+      'repayment_schedule',
+      {'status': 'paid', 'paid_amount': 550},
+      where: "loan_id = 'L1' AND installment_number = 1",
+    );
+
+    final result =
+        await repo(db).getWeeklyCollectionByDate(DateTime(2026, 8, 12));
+    result.when(
+      success: (rows) {
+        expect(rows, hasLength(1));
+        final row = rows.first;
+        expect(row.currentInstallmentNumber, 2);
+        expect(row.currentInstallmentStatus, 'pending');
+        expect(row.installmentDue, closeTo(550.0, 0.001));
+        expect(row.collectedThisPeriod, closeTo(0.0, 0.001));
+      },
+      failure: (f) => fail('query failed: $f'),
+    );
+  });
+
+  test('date with no scheduled installment returns empty (paid or not)', () async {
+    final db = await openDb();
+    addTearDown(db.close);
+    await seedWeeklyLoan(db, 'L1', 'C1', 'Ada'); // installments on Wednesdays
+
+    // Thursday 2026-08-06 is not an installment date.
+    final result =
+        await repo(db).getWeeklyCollectionByDate(DateTime(2026, 8, 6));
+    result.when(
+      success: (rows) => expect(rows, isEmpty),
+      failure: (f) => fail('query failed: $f'),
+    );
+  });
+
+  test('range with a paid installment still lists the loan as paid', () async {
+    final db = await openDb();
+    addTearDown(db.close);
+    await seedWeeklyLoan(db, 'L1', 'C1', 'Ada');
+
+    await db.insert('payments', {
+      'id': 'P1',
+      'loan_id': 'L1',
+      'customer_id': 'C1',
+      'amount': 550,
+      'status': 'completed',
+      'payment_date': '2026-08-05',
+    });
+    await db.update(
+      'repayment_schedule',
+      {'status': 'paid', 'paid_amount': 550},
+      where: "loan_id = 'L1' AND installment_number = 1",
+    );
+
+    final result = await repo(db)
+        .getWeeklyCollectionByDateRange(DateTime(2026, 8, 3), DateTime(2026, 8, 7));
+    result.when(
+      success: (rows) {
+        expect(rows, hasLength(1));
+        expect(rows.first.currentInstallmentStatus, 'paid');
+      },
+      failure: (f) => fail('query failed: $f'),
+    );
+  });
+
   test('paymentDaySortValue groups by repayment day Monday to Sunday', () async {
     final db = await openDb();
     addTearDown(db.close);

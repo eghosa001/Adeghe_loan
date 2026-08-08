@@ -74,6 +74,7 @@ class _CollectionStatementScreenState extends ConsumerState<CollectionStatementS
                   firstDate: pickedStart,
                   lastDate: now,
                 );
+                if (!context.mounted) return;
                 setState(() {
                   _startDate = pickedStart;
                   if (pickedEnd != null) _endDate = pickedEnd;
@@ -135,9 +136,9 @@ class _CollectionStatementScreenState extends ConsumerState<CollectionStatementS
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  _SummaryItem(label: 'Total Due', value: CurrencyUtils.format(totalDue)),
-                  _SummaryItem(label: 'Total Paid', value: CurrencyUtils.format(totalPaid)),
-                  _SummaryItem(label: 'Remaining', value: CurrencyUtils.format(totalDue - totalPaid)),
+                  _SummaryItem(label: 'Total Due', value: CurrencyUtils.format(totalDue, symbol: _currencySymbol)),
+                  _SummaryItem(label: 'Total Paid', value: CurrencyUtils.format(totalPaid, symbol: _currencySymbol)),
+                  _SummaryItem(label: 'Remaining', value: CurrencyUtils.format(totalDue - totalPaid, symbol: _currencySymbol)),
                 ],
               ),
             ),
@@ -155,9 +156,9 @@ class _CollectionStatementScreenState extends ConsumerState<CollectionStatementS
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text(CurrencyUtils.format(row.amountPaid),
+                        Text(CurrencyUtils.format(row.amountPaid, symbol: _currencySymbol),
                             style: const TextStyle(fontWeight: FontWeight.bold)),
-                        Text('/ ${CurrencyUtils.format(row.amountDue)}',
+                        Text('/ ${CurrencyUtils.format(row.amountDue, symbol: _currencySymbol)}',
                             style: Theme.of(context).textTheme.bodySmall),
                       ],
                     ),

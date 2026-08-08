@@ -35,6 +35,7 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
   }
 
   Future<void> _refreshBackups() async {
+    if (!mounted) return;
     setState(() {
       _backupFilesFuture = _loadBackups();
     });

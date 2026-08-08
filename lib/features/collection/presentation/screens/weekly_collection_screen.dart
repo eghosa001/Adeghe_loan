@@ -277,37 +277,52 @@ class WeeklyCollectionScreen extends ConsumerWidget {
           ),
         ),
         Expanded(
-          child: ListView(
-            children: _buildSectionedRows(context, ref, rows),
+          // Lazy list: only the visible day headers/tiles are built (the
+          // section metadata is a small flat list of records). Previously
+          // _buildSectionedRows eagerly materialized every tile up front.
+          child: ListView.builder(
+            itemCount: _sectionItems(rows).length,
+            itemBuilder: (context, index) {
+              final (day, row) = _sectionItems(rows)[index];
+              if (row == null) {
+                return _PaymentDayHeader(day: day ?? '');
+              }
+              return Column(
+                children: [
+                  _WeeklyCollectionRowTile(
+                    row: row,
+                    onPaymentRecorded: () {
+                      ref.invalidate(weeklyCollectionListProvider);
+                    },
+                  ),
+                  const Divider(height: 1),
+                ],
+              );
+            },
           ),
         ),
       ],
     );
   }
 
-  /// Builds the list as day sections: a header row is inserted whenever the
-  /// recurring payment day changes, so collectors see every customer grouped
-  /// under the day they repay. When sorted by Payment Day (the default) the
-  /// sections run Monday → Sunday.
-  List<Widget> _buildSectionedRows(
-      BuildContext context, WidgetRef ref, List<WeeklyCollectionRow> rows) {
-    final children = <Widget>[];
+  /// Flattens the weekly rows into section markers: a day-header item is
+  /// inserted whenever the recurring payment day changes, so collectors see
+  /// every customer grouped under the day they repay. When sorted by Payment
+  /// Day (the default) the sections run Monday → Sunday. Each item is a record
+  /// `(day, row)` where a null row marks a header and a null day marks a row.
+  List<(String?, WeeklyCollectionRow?)> _sectionItems(
+      List<WeeklyCollectionRow> rows) {
+    final items = <(String?, WeeklyCollectionRow?)>[];
     String? lastDay;
     for (final row in rows) {
       final day = row.paymentDay;
       if (day != lastDay) {
-        children.add(_PaymentDayHeader(day: day));
+        items.add((day, null));
         lastDay = day;
       }
-children.add(_WeeklyCollectionRowTile(
-        row: row,
-        onPaymentRecorded: () {
-          ref.invalidate(weeklyCollectionListProvider);
-        },
-      ));
-      children.add(const Divider(height: 1));
+      items.add((null, row));
     }
-    return children;
+    return items;
   }
 }
 

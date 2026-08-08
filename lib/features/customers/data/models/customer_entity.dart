@@ -135,6 +135,14 @@ class Customer {
         groupId: clearGroupId ? null : (groupId ?? this.groupId),
       );
 
+  static String _caps(String value) => value.trim().toUpperCase();
+
+  static String? _capsNullable(String? value) {
+    if (value == null) return null;
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? trimmed : trimmed.toUpperCase();
+  }
+
   Map<String, Object?> toMap() => {
         'id': id,
         'passport_path': passportPath,
@@ -177,7 +185,7 @@ class Customer {
   factory Customer.fromMap(Map<String, Object?> map) => Customer(
         id: map['id']! as String,
         passportPath: map['passport_path'] as String?,
-        fullName: map['full_name']! as String,
+        fullName: _caps(map['full_name']! as String),
         gender: map['gender'] as String?,
         dateOfBirth: map['dob'] as String?,
         phone: map['phone']! as String,
@@ -191,13 +199,13 @@ class Customer {
         nationality: map['nationality'] as String?,
         state: map['state'] as String?,
         lga: map['lga'] as String?,
-        nextOfKin: map['next_of_kin'] as String?,
+        nextOfKin: _capsNullable(map['next_of_kin'] as String?),
         nextOfKinRelation: map['next_of_kin_relation'] as String?,
         nextOfKinPhone: map['next_of_kin_phone'] as String?,
-        guarantor1Name: map['guarantor_1_name'] as String?,
+        guarantor1Name: _capsNullable(map['guarantor_1_name'] as String?),
         guarantor1Phone: map['guarantor_1_phone'] as String?,
         guarantor1Address: map['guarantor_1_address'] as String?,
-        guarantor2Name: map['guarantor_2_name'] as String?,
+        guarantor2Name: _capsNullable(map['guarantor_2_name'] as String?),
         guarantor2Phone: map['guarantor_2_phone'] as String?,
         guarantor2Address: map['guarantor_2_address'] as String?,
         guarantorPassportPath: map['guarantor_passport_path'] as String?,

@@ -75,6 +75,24 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
 
   Timer? _periodicSyncTimer;
 
+  /// The instant the app was last backgrounded (`AppLifecycleState.paused`).
+  /// Used to apply the session-timeout grace period on return: backgrounding no
+  /// longer locks immediately — the app only re-locks when the user returns
+  /// after the timeout (default 5 minutes) has elapsed. Returning within the
+  /// grace period resumes the unlocked session without a PIN prompt.
+  DateTime? _pausedAt;
+
+  /// Fires if the app stays backgrounded past the timeout. Dart timers are
+  /// suspended while the app is paused, so this is best-effort; the elapsed
+  /// check in [didChangeAppLifecycleState] (on `resumed`) is the authoritative
+  /// lock decision and makes this timer redundant on platforms that freeze it.
+  Timer? _backgroundLockTimer;
+
+  Duration get _sessionTimeout => Duration(
+        minutes: ref.read(sessionTimeoutMinutesProvider).valueOrNull ??
+            AppConstants.defaultInactivityTimeout.inMinutes,
+      );
+
   @override
   void initState() {
     super.initState();
@@ -84,6 +102,7 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     _periodicSyncTimer?.cancel();
+    _backgroundLockTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -91,7 +110,21 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
-      ref.read(authProvider.notifier).lock();
+      _pausedAt = DateTime.now();
+      final timeout = _sessionTimeout;
+      _backgroundLockTimer?.cancel();
+      _backgroundLockTimer = Timer(timeout, () {
+        ref.read(authProvider.notifier).lock();
+      });
+    } else if (state == AppLifecycleState.resumed) {
+      _backgroundLockTimer?.cancel();
+      _backgroundLockTimer = null;
+      final pausedAt = _pausedAt;
+      _pausedAt = null;
+      if (pausedAt != null &&
+          DateTime.now().difference(pausedAt) >= _sessionTimeout) {
+        ref.read(authProvider.notifier).lock();
+      }
     }
   }
 

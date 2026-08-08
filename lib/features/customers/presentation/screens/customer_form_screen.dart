@@ -242,6 +242,13 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
     );
   }
 
+  List<TextInputFormatter> _nameFormatters() => [
+        TextInputFormatter.withFunction(
+            (oldValue, newValue) =>
+                newValue.copyWith(text: newValue.text.toUpperCase())),
+        ...textFormatters(maxLength: AppConstants.maxNameLength),
+      ];
+
   String? _validatePhone(String? value) {
     final v = value?.trim() ?? '';
     if (v.isEmpty) return null;
@@ -330,7 +337,8 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                   const SizedBox(height: 16),
                   _field('fullName', 'Full name',
                       required: true,
-                      maxLength: AppConstants.maxNameLength),
+                      maxLength: AppConstants.maxNameLength,
+                      inputFormatters: _nameFormatters()),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: DropdownButtonFormField<String>(
@@ -414,7 +422,8 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                       style: Theme.of(context).textTheme.titleSmall),
                   const SizedBox(height: 8),
                   _field('guarantor1Name', 'Name',
-                      maxLength: AppConstants.maxNameLength),
+                      maxLength: AppConstants.maxNameLength,
+                      inputFormatters: _nameFormatters()),
                   _field('guarantor1Phone', 'Phone',
                       type: TextInputType.phone,
                       maxLength: AppConstants.maxPhoneLength,
@@ -428,7 +437,8 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                       style: Theme.of(context).textTheme.titleSmall),
                   const SizedBox(height: 8),
                   _field('guarantor2Name', 'Name',
-                      maxLength: AppConstants.maxNameLength),
+                      maxLength: AppConstants.maxNameLength,
+                      inputFormatters: _nameFormatters()),
                   _field('guarantor2Phone', 'Phone',
                       type: TextInputType.phone,
                       maxLength: AppConstants.maxPhoneLength,

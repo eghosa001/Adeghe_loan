@@ -108,6 +108,7 @@ class _RecordPaymentScreenState extends ConsumerState<RecordPaymentScreen> {
             '${_isOverpayment ? '\n${CurrencyUtils.format(_surplus)} credited to savings.' : ''}');
         ref.invalidate(dashboardDataProvider);
         ref.invalidate(collectionListProvider);
+        ref.invalidate(weeklyCollectionListProvider);
         ref.invalidate(loanDetailsProvider(widget.loanId));
         ref.invalidate(paymentsForLoanProvider(widget.loanId));
         ref.invalidate(loanScheduleProvider(widget.loanId));

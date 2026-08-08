@@ -7,6 +7,7 @@ import '../../../../core/utils/currency_utils.dart';
 import '../../data/models/dashboard_data.dart';
 import '../providers/dashboard_provider.dart';
 import '../../../notifications/presentation/providers/notification_provider.dart';
+import '../../../business/presentation/providers/business_providers.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -14,6 +15,8 @@ class DashboardScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final dashboardAsync = ref.watch(dashboardDataProvider);
+    final currency =
+        ref.watch(currencySymbolProvider).valueOrNull ?? CurrencyUtils.defaultSymbol;
 
     return Scaffold(
       appBar: AppBar(
@@ -21,6 +24,7 @@ class DashboardScreen extends ConsumerWidget {
         leading: Builder(
           builder: (context) => IconButton(
             icon: const Icon(Icons.menu),
+            tooltip: 'Menu',
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
@@ -54,7 +58,7 @@ class DashboardScreen extends ConsumerWidget {
           child: ListView(
             padding: const EdgeInsets.all(16.0),
             children: [
-              _MinimalStatCards(data: data),
+              _MinimalStatCards(data: data, currency: currency),
               const SizedBox(height: 24),
               Text(
                 'Quick Actions',
@@ -79,9 +83,9 @@ class DashboardScreen extends ConsumerWidget {
                           child: Text(loan.loanType.name.characters.first
                               .toUpperCase()),
                         ),
-                        title: Text(CurrencyUtils.format(loan.amount)),
+                        title: Text(CurrencyUtils.format(loan.amount, symbol: currency)),
                         subtitle: Text(
-                            'Outstanding: ${CurrencyUtils.format(loan.outstandingBalance)}'),
+                            'Outstanding: ${CurrencyUtils.format(loan.outstandingBalance, symbol: currency)}'),
                         trailing: _StatusChip(status: loan.status.name),
                         onTap: () => context.push('/loans/${loan.id}'),
                       ),
@@ -102,7 +106,7 @@ class DashboardScreen extends ConsumerWidget {
                         leading: const CircleAvatar(
                           child: Icon(Icons.payment),
                         ),
-                        title: Text(CurrencyUtils.format(payment.amount)),
+                        title: Text(CurrencyUtils.format(payment.amount, symbol: currency)),
                         subtitle: Text(
                             '${payment.method.name} — ${payment.collector}'),
                         trailing: Text(
@@ -144,7 +148,7 @@ class DashboardScreen extends ConsumerWidget {
                           '${txn.typeLabel} — ${txn.createdAt.split('T').first}',
                         ),
                         trailing: Text(
-                          CurrencyUtils.format(txn.amount),
+                          CurrencyUtils.format(txn.amount, symbol: currency),
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             color: txn.isCredit ? Colors.green : Colors.red,
@@ -163,8 +167,9 @@ class DashboardScreen extends ConsumerWidget {
 }
 
 class _MinimalStatCards extends StatelessWidget {
-  const _MinimalStatCards({required this.data});
+  const _MinimalStatCards({required this.data, required this.currency});
   final DashboardData data;
+  final String currency;
 
   @override
   Widget build(BuildContext context) {
@@ -185,7 +190,7 @@ class _MinimalStatCards extends StatelessWidget {
             Expanded(
               child: _StatCard(
                 label: 'Outstanding',
-                value: CurrencyUtils.format(data.outstandingBalance),
+                value: CurrencyUtils.format(data.outstandingBalance, symbol: currency),
                 icon: Icons.account_balance,
                 color: Colors.red,
                 onTap: () => context.go('/reports'),
@@ -199,7 +204,7 @@ class _MinimalStatCards extends StatelessWidget {
             Expanded(
               child: _StatCard(
                 label: 'Collected',
-                value: CurrencyUtils.format(data.totalCollected),
+                value: CurrencyUtils.format(data.totalCollected, symbol: currency),
                 icon: Icons.savings,
                 color: Colors.teal,
                 onTap: () => context.go('/reports'),
@@ -209,7 +214,7 @@ class _MinimalStatCards extends StatelessWidget {
             Expanded(
               child: _StatCard(
                 label: 'Disbursed',
-                value: CurrencyUtils.format(data.totalDisbursed),
+                value: CurrencyUtils.format(data.totalDisbursed, symbol: currency),
                 icon: Icons.trending_up,
                 color: Colors.orange,
                 onTap: () => context.go('/reports'),
@@ -223,7 +228,7 @@ class _MinimalStatCards extends StatelessWidget {
             Expanded(
               child: _StatCard(
                 label: 'Savings',
-                value: CurrencyUtils.format(data.totalSavingsBalance),
+                value: CurrencyUtils.format(data.totalSavingsBalance, symbol: currency),
                 icon: Icons.account_balance_wallet,
                 color: Colors.indigo,
                 onTap: () => context.go('/savings'),
@@ -358,12 +363,7 @@ class _QuickActionsSection extends StatelessWidget {
         ),
         _QuickAction(
           icon: Icons.savings_outlined,
-          label: 'Savings\nDeposit',
-          onTap: () => context.push('/savings'),
-        ),
-        _QuickAction(
-          icon: Icons.logout,
-          label: 'Savings\nWithdrawal',
+          label: 'Savings\nAccount',
           onTap: () => context.push('/savings'),
         ),
         _QuickAction(

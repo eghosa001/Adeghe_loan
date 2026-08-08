@@ -177,26 +177,30 @@ class CustomerRepository {
 
   Future<void> save(Customer customer) async {
     final db = await _database;
+    // Names are the source of truth for every screen, report, collection
+    // sheet, statement and document — store them in ALL CAPS (trimmed) so a
+    // single write normalizes every read path that consumes them.
+    final normalized = _uppercaseNames(customer);
 
     await db.transaction((txn) async {
-      await _validateUnique(txn, customer);
+      await _validateUnique(txn, normalized);
 
       final existing = await txn.query(
         'customers',
         columns: const ['id'],
         where: 'id = ?',
-        whereArgs: [customer.id],
+        whereArgs: [normalized.id],
       );
       final isNew = existing.isEmpty;
 
       if (isNew) {
-        await txn.insert('customers', customer.toMap());
+        await txn.insert('customers', normalized.toMap());
       } else {
         await txn.update(
           'customers',
-          customer.toMap(),
+          normalized.toMap(),
           where: 'id = ?',
-          whereArgs: [customer.id],
+          whereArgs: [normalized.id],
         );
       }
 
@@ -206,7 +210,7 @@ class CustomerRepository {
           'savings_accounts',
           {
             'id': const Uuid().v4(),
-            'customer_id': customer.id,
+            'customer_id': normalized.id,
             'balance': 0.0,
             'created_at': DateTime.now().toIso8601String(),
           },
@@ -214,6 +218,51 @@ class CustomerRepository {
         );
       }
     });
+  }
+
+  Customer _uppercaseNames(Customer c) => Customer(
+        id: c.id,
+        passportPath: c.passportPath,
+        fullName: c.fullName.trim().toUpperCase(),
+        gender: c.gender,
+        dateOfBirth: c.dateOfBirth,
+        phone: c.phone,
+        altPhone: c.altPhone,
+        email: c.email,
+        residentialAddress: c.residentialAddress,
+        businessAddress: c.businessAddress,
+        occupation: c.occupation,
+        employer: c.employer,
+        maritalStatus: c.maritalStatus,
+        nationality: c.nationality,
+        state: c.state,
+        lga: c.lga,
+        nextOfKin: _capsNullable(c.nextOfKin),
+        nextOfKinRelation: c.nextOfKinRelation,
+        nextOfKinPhone: c.nextOfKinPhone,
+        guarantor1Name: _capsNullable(c.guarantor1Name),
+        guarantor1Phone: c.guarantor1Phone,
+        guarantor1Address: c.guarantor1Address,
+        guarantor2Name: _capsNullable(c.guarantor2Name),
+        guarantor2Phone: c.guarantor2Phone,
+        guarantor2Address: c.guarantor2Address,
+        guarantorPassportPath: c.guarantorPassportPath,
+        nin: c.nin,
+        bvn: c.bvn,
+        idType: c.idType,
+        idNumber: c.idNumber,
+        signaturePath: c.signaturePath,
+        dateRegistered: c.dateRegistered,
+        notes: c.notes,
+        status: c.status,
+        creditScore: c.creditScore,
+        groupId: c.groupId,
+      );
+
+  static String? _capsNullable(String? value) {
+    if (value == null) return null;
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? trimmed : trimmed.toUpperCase();
   }
 
   /// Soft-deletes a customer by archiving them. No rows or files are removed —
