@@ -3,6 +3,7 @@ import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
@@ -12,6 +13,7 @@ import 'core/router/app_router.dart';
 import 'core/cloud/supabase_config.dart';
 import 'core/cloud/secure_cloud_storage.dart';
 import 'core/di/providers.dart';
+import 'core/widgets/refresh_bus.dart';
 import 'features/auth/presentation/providers/auth_provider.dart';
 import 'features/auth/presentation/widgets/inactivity_wrapper.dart';
 import 'features/business/presentation/providers/business_providers.dart';
@@ -89,22 +91,43 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
   Timer? _backgroundLockTimer;
 
   Duration get _sessionTimeout => Duration(
-        minutes: ref.read(sessionTimeoutMinutesProvider).valueOrNull ??
-            AppConstants.defaultInactivityTimeout.inMinutes,
-      );
+    minutes:
+        ref.read(sessionTimeoutMinutesProvider).valueOrNull ??
+        AppConstants.defaultInactivityTimeout.inMinutes,
+  );
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    HardwareKeyboard.instance.addHandler(_onGlobalKeyEvent);
   }
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onGlobalKeyEvent);
     _periodicSyncTimer?.cancel();
     _backgroundLockTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  /// Desktop refresh shortcut: F5 (or Ctrl/Cmd+R) runs the same refresh as a
+  /// pull-to-refresh gesture on touch devices, for every screen that supports
+  /// it. Consumes the event so it never reaches other handlers.
+  bool _onGlobalKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    final logical = event.logicalKey;
+    final isRefresh =
+        logical == LogicalKeyboardKey.f5 ||
+        ((HardwareKeyboard.instance.isControlPressed ||
+                HardwareKeyboard.instance.isMetaPressed) &&
+            logical == LogicalKeyboardKey.keyR);
+    if (isRefresh) {
+      ref.read(refreshBusProvider).refreshAll();
+      return true;
+    }
+    return false;
   }
 
   @override
@@ -129,15 +152,20 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
   }
 
   void _syncInBackground() {
-    ref.read(cloudSyncServiceProvider.future).then((service) {
-      service.syncIfSignedIn();
-    }).catchError((_) {});
+    ref
+        .read(cloudSyncServiceProvider.future)
+        .then((service) {
+          service.syncIfSignedIn();
+        })
+        .catchError((_) {});
   }
 
   void _startPeriodicSync() {
     _periodicSyncTimer?.cancel();
-    _periodicSyncTimer =
-        Timer.periodic(_periodicSyncInterval, (_) => _syncInBackground());
+    _periodicSyncTimer = Timer.periodic(
+      _periodicSyncInterval,
+      (_) => _syncInBackground(),
+    );
   }
 
   void _stopPeriodicSync() {
@@ -158,9 +186,12 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
         // already locked again by the time the timer fires.
         Future.delayed(AppConstants.autoBackupDelay, () {
           if (ref.read(authProvider) != AuthState.unlocked) return;
-          ref.read(backupServiceProvider.future).then((service) {
-            service.maybeAutoBackup();
-          }).catchError((_) {});
+          ref
+              .read(backupServiceProvider.future)
+              .then((service) {
+                service.maybeAutoBackup();
+              })
+              .catchError((_) {});
         });
         // Cloud sync runs in the background whenever the owner is signed in.
         _syncInBackground();
@@ -172,9 +203,8 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
 
     final themeMode = ref.watch(themeModeProvider);
     final router = ref.watch(appRouterProvider);
-    final timeoutMinutes = ref
-            .watch(sessionTimeoutMinutesProvider)
-            .valueOrNull ??
+    final timeoutMinutes =
+        ref.watch(sessionTimeoutMinutesProvider).valueOrNull ??
         AppConstants.defaultInactivityTimeout.inMinutes;
 
     return InactivityWrapper(

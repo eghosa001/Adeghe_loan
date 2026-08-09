@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/utils/currency_utils.dart';
 import '../../../../core/widgets/app_drawer.dart';
 import '../../../../core/widgets/empty_state.dart';
+import '../../../../core/widgets/keyboard_refreshable.dart';
 import '../../../reports/services/excel_export_service.dart';
 import '../../../business/presentation/providers/business_providers.dart';
 import '../providers/savings_providers.dart';
@@ -16,7 +17,8 @@ class SavingsOverviewScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final accountsAsync = ref.watch(allAccountsWithNamesProvider);
     final currency =
-        ref.watch(currencySymbolProvider).valueOrNull ?? CurrencyUtils.defaultSymbol;
+        ref.watch(currencySymbolProvider).valueOrNull ??
+        CurrencyUtils.defaultSymbol;
 
     return Scaffold(
       appBar: AppBar(
@@ -29,27 +31,45 @@ class SavingsOverviewScreen extends ConsumerWidget {
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh (F5)',
+            onPressed: () => ref.invalidate(allAccountsWithNamesProvider),
+          ),
+          IconButton(
             icon: const Icon(Icons.file_download),
             tooltip: 'Export to Excel',
             onPressed: () async {
               final accounts = accountsAsync.valueOrNull;
               if (accounts == null || accounts.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('No savings accounts to export')),
+                  const SnackBar(
+                    content: Text('No savings accounts to export'),
+                  ),
                 );
                 return;
               }
               try {
-                final headers = ['Customer', 'Balance',
-                    'Created Date', 'Status'];
-                final rows = accounts.map((a) => [
-                  a['customerName'] as String? ?? '',
-                  CurrencyUtils.format(
-                      (a['balance'] as num?)?.toDouble() ?? 0, symbol: currency),
-                  (a['createdAt'] as String?)?.split('T').first ?? '-',
-                  ((a['balance'] as num?)?.toDouble() ?? 0) > 0
-                      ? 'Active' : 'Empty',
-                ]).toList();
+                final headers = [
+                  'Customer',
+                  'Balance',
+                  'Created Date',
+                  'Status',
+                ];
+                final rows = accounts
+                    .map(
+                      (a) => [
+                        a['customerName'] as String? ?? '',
+                        CurrencyUtils.format(
+                          (a['balance'] as num?)?.toDouble() ?? 0,
+                          symbol: currency,
+                        ),
+                        (a['createdAt'] as String?)?.split('T').first ?? '-',
+                        ((a['balance'] as num?)?.toDouble() ?? 0) > 0
+                            ? 'Active'
+                            : 'Empty',
+                      ],
+                    )
+                    .toList();
                 final file = await ExcelExportService.buildXlsx(
                   headers: headers,
                   rows: rows,
@@ -59,9 +79,9 @@ class SavingsOverviewScreen extends ConsumerWidget {
                 await ExcelExportService.shareXlsx(file, 'Savings Report');
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Export failed: $e')),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
                 }
               }
             },
@@ -77,16 +97,20 @@ class SavingsOverviewScreen extends ConsumerWidget {
             return const EmptyState(
               icon: Icons.savings_outlined,
               title: 'No savings accounts yet',
-              subtitle: 'Savings are created automatically when\noverpayments are received.',
+              subtitle:
+                  'Savings are created automatically when\noverpayments are received.',
             );
           }
 
           final totalBalance = accounts.fold<double>(
-              0, (sum, a) => sum + ((a['balance'] as num?)?.toDouble() ?? 0));
-          final activeAccounts =
-              accounts.where((a) => ((a['balance'] as num?)?.toDouble() ?? 0) > 0).length;
+            0,
+            (sum, a) => sum + ((a['balance'] as num?)?.toDouble() ?? 0),
+          );
+          final activeAccounts = accounts
+              .where((a) => ((a['balance'] as num?)?.toDouble() ?? 0) > 0)
+              .length;
 
-          return RefreshIndicator(
+          return KeyboardRefreshable(
             onRefresh: () async => ref.invalidate(allAccountsWithNamesProvider),
             child: ListView.builder(
               padding: const EdgeInsets.all(16),
@@ -105,14 +129,16 @@ class SavingsOverviewScreen extends ConsumerWidget {
                     padding: const EdgeInsets.only(top: 20, bottom: 8),
                     child: Text(
                       'Individual Accounts',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(fontWeight: FontWeight.bold),
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   );
                 }
-                return _AccountCard(account: accounts[index - 2], currency: currency);
+                return _AccountCard(
+                  account: accounts[index - 2],
+                  currency: currency,
+                );
               },
             ),
           );
@@ -146,26 +172,25 @@ class _SavingsSummaryCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.savings,
-                    color: Theme.of(context).colorScheme.onPrimaryContainer),
+                Icon(
+                  Icons.savings,
+                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                ),
                 const SizedBox(width: 8),
-                Text('Total Savings Held',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onPrimaryContainer)),
+                Text(
+                  'Total Savings Held',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 8),
             Text(
               CurrencyUtils.format(totalBalance, symbol: currency),
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineMedium
-                  ?.copyWith(fontWeight: FontWeight.bold),
+              style: Theme.of(
+                context,
+              ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
             Row(
@@ -175,10 +200,7 @@ class _SavingsSummaryCard extends StatelessWidget {
                   color: Colors.green,
                 ),
                 const SizedBox(width: 8),
-                _OverviewPill(
-                  label: '$accountCount total',
-                  color: Colors.blue,
-                ),
+                _OverviewPill(label: '$accountCount total', color: Colors.blue),
               ],
             ),
           ],

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:loantrack/core/widgets/app_drawer.dart';
+import 'package:loantrack/core/widgets/keyboard_refreshable.dart';
 
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_utils.dart';
@@ -30,7 +31,8 @@ class ReportScreen extends ConsumerWidget {
     final summaryAsync = ref.watch(reportSummaryProvider(range));
     final trendsAsync = ref.watch(dashboardTrendsProvider(range));
     final currencySymbol =
-        ref.watch(currencySymbolProvider).valueOrNull ?? CurrencyUtils.defaultSymbol;
+        ref.watch(currencySymbolProvider).valueOrNull ??
+        CurrencyUtils.defaultSymbol;
 
     final periodLabel = _periodLabel(preset, start, end);
 
@@ -44,11 +46,25 @@ class ReportScreen extends ConsumerWidget {
           ),
         ),
         actions: [
+          IconButton(
+            tooltip: 'Refresh (F5)',
+            icon: const Icon(Icons.refresh),
+            onPressed: () {
+              ref.invalidate(reportSummaryProvider(range));
+              ref.invalidate(dashboardTrendsProvider(range));
+            },
+          ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.download),
             tooltip: 'Export',
             onSelected: (value) => _handleExport(
-                context, ref, value, summaryAsync, trendsAsync, periodLabel),
+              context,
+              ref,
+              value,
+              summaryAsync,
+              trendsAsync,
+              periodLabel,
+            ),
             itemBuilder: (_) => const [
               PopupMenuItem(value: 'pdf', child: Text('Save PDF')),
               PopupMenuItem(value: 'excel', child: Text('Export Excel')),
@@ -58,7 +74,7 @@ class ReportScreen extends ConsumerWidget {
         ],
       ),
       drawer: const AppDrawer(currentRoute: '/reports'),
-      body: RefreshIndicator(
+      body: KeyboardRefreshable(
         onRefresh: () async {
           // Invalidate only the current range so switching periods or pulling
           // to refresh does not re-run every cached date range's queries.
@@ -86,8 +102,9 @@ class ReportScreen extends ConsumerWidget {
                     Text(
                       'Loan Type',
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: Theme.of(context).colorScheme.onSurface),
+                        fontWeight: FontWeight.w700,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     SegmentedButton<String>(
@@ -98,11 +115,8 @@ class ReportScreen extends ConsumerWidget {
                       ],
                       selected: {loanType ?? ''},
                       onSelectionChanged: (selection) {
-                        ref
-                            .read(reportLoanTypeFilterProvider.notifier)
-                            .state = selection.first.isEmpty
-                            ? null
-                            : selection.first;
+                        ref.read(reportLoanTypeFilterProvider.notifier).state =
+                            selection.first.isEmpty ? null : selection.first;
                       },
                     ),
                   ],
@@ -110,9 +124,13 @@ class ReportScreen extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 16),
-            Text('Financial Summary',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
+            Text(
+              'Financial Summary',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
             const SizedBox(height: 10),
             summaryAsync.when(
               loading: () => const Padding(
@@ -131,15 +149,23 @@ class ReportScreen extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 20),
-            Text('Report Screens',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
+            Text(
+              'Report Screens',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
             const SizedBox(height: 10),
             const _ReportNavGrid(),
             const SizedBox(height: 20),
-            Text('Trends',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
+            Text(
+              'Trends',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
             const SizedBox(height: 10),
             trendsAsync.when(
               loading: () => const Padding(
@@ -163,7 +189,11 @@ class ReportScreen extends ConsumerWidget {
     );
   }
 
-  String _periodLabel(ReportPeriodPreset? preset, DateTime start, DateTime end) {
+  String _periodLabel(
+    ReportPeriodPreset? preset,
+    DateTime start,
+    DateTime end,
+  ) {
     if (preset != null) return preset.label;
     return '${AppDateUtils.formatDate(start)} - ${AppDateUtils.formatDate(end)}';
   }
@@ -188,41 +218,53 @@ class ReportScreen extends ConsumerWidget {
     if (summary == null || trends == null) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Report data not ready yet.')));
+          const SnackBar(content: Text('Report data not ready yet.')),
+        );
       }
       return;
     }
     final profile = ref.read(businessProfileProvider).valueOrNull;
     final currencySymbol =
-        ref.read(currencySymbolProvider).valueOrNull ?? CurrencyUtils.defaultSymbol;
-    final data =
-        _buildExportData(summary, trends, periodLabel, currencySymbol);
+        ref.read(currencySymbolProvider).valueOrNull ??
+        CurrencyUtils.defaultSymbol;
+    final data = _buildExportData(summary, trends, periodLabel, currencySymbol);
     try {
       if (value == 'pdf') {
         final path = await ExportManager.saveReportPdf(data, profile: profile);
         if (context.mounted && path != null) {
           ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('PDF saved to Documents')));
+            const SnackBar(content: Text('PDF saved to Documents')),
+          );
         }
       } else if (value == 'excel') {
         final file = await ExportManager.exportReportToXlsx(data);
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Excel exported: ${file.path.split(RegExp(r'[/\\]')).last}')));
+            SnackBar(
+              content: Text(
+                'Excel exported: ${file.path.split(RegExp(r'[/\\]')).last}',
+              ),
+            ),
+          );
         }
       } else if (value == 'print') {
         await ExportManager.printReportPdf(data, profile: profile);
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Export failed: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
       }
     }
   }
 
-  ReportExportData _buildExportData(ReportSummary s, DashboardTrends t,
-      String periodLabel, String currencySymbol) {
+  ReportExportData _buildExportData(
+    ReportSummary s,
+    DashboardTrends t,
+    String periodLabel,
+    String currencySymbol,
+  ) {
     String fmt(num v) => CurrencyUtils.format(v, symbol: currencySymbol);
     final cards = <ReportCard>[
       ReportCard('Total Disbursed', fmt(s.totalDisbursed)),
@@ -232,12 +274,32 @@ class ReportScreen extends ConsumerWidget {
       ReportCard('Active Loans', '${s.activeLoans}'),
       ReportCard('Completed Loans', '${s.completedLoans}'),
       ReportCard('Defaulted Loans', '${s.defaultedLoans}'),
-      ReportCard('Outstanding', fmt(s.dailyLoans.outstandingBalance + s.weeklyLoans.outstandingBalance)),
-      ReportCard('Expected', fmt(s.dailyLoans.expectedCollections + s.weeklyLoans.expectedCollections)),
+      ReportCard(
+        'Outstanding',
+        fmt(s.dailyLoans.outstandingBalance + s.weeklyLoans.outstandingBalance),
+      ),
+      ReportCard(
+        'Expected',
+        fmt(
+          s.dailyLoans.expectedCollections + s.weeklyLoans.expectedCollections,
+        ),
+      ),
       ReportCard('Efficiency', '${s.collectionEfficiency.toStringAsFixed(1)}%'),
-      ReportCard('Interest', fmt(s.dailyLoans.interestEarned + s.weeklyLoans.interestEarned)),
-      ReportCard('Fees', fmt(s.dailyLoans.feesEarned + s.weeklyLoans.feesEarned)),
-      ReportCard('Savings', fmt(s.dailyLoans.savingsFromOverpayments + s.weeklyLoans.savingsFromOverpayments)),
+      ReportCard(
+        'Interest',
+        fmt(s.dailyLoans.interestEarned + s.weeklyLoans.interestEarned),
+      ),
+      ReportCard(
+        'Fees',
+        fmt(s.dailyLoans.feesEarned + s.weeklyLoans.feesEarned),
+      ),
+      ReportCard(
+        'Savings',
+        fmt(
+          s.dailyLoans.savingsFromOverpayments +
+              s.weeklyLoans.savingsFromOverpayments,
+        ),
+      ),
       ReportCard('Daily Disbursed', fmt(s.dailyLoans.amountDisbursed)),
       ReportCard('Daily Collected', fmt(s.dailyLoans.amountCollected)),
       ReportCard('Daily Overdue', '${s.dailyLoans.overdueLoans}'),
@@ -245,7 +307,15 @@ class ReportScreen extends ConsumerWidget {
       ReportCard('Weekly Collected', fmt(s.weeklyLoans.amountCollected)),
     ];
 
-    final headers = ['Period', 'Collected', 'Disbursed', 'Savings In', 'Savings Out', 'Customers', 'Loans'];
+    final headers = [
+      'Period',
+      'Collected',
+      'Disbursed',
+      'Savings In',
+      'Savings Out',
+      'Customers',
+      'Loans',
+    ];
     final rows = <List<String>>[];
     var totalCollected = 0.0;
     var totalDisbursed = 0.0;
@@ -312,22 +382,102 @@ class _SummaryGrid extends StatelessWidget {
     final items = <(String, String, IconData, bool)>[
       ('Total Disbursed', fmt(s.totalDisbursed), Icons.payments_rounded, false),
       ('Total Collected', fmt(s.totalCollected), Icons.savings_rounded, false),
-      ('Net Profit', fmt(s.netProfit), Icons.trending_up_rounded, s.netProfit < 0),
-      ('Total Customers', '${s.totalCustomers}', Icons.people_alt_rounded, false),
+      (
+        'Net Profit',
+        fmt(s.netProfit),
+        Icons.trending_up_rounded,
+        s.netProfit < 0,
+      ),
+      (
+        'Total Customers',
+        '${s.totalCustomers}',
+        Icons.people_alt_rounded,
+        false,
+      ),
       ('Active Loans', '${s.activeLoans}', Icons.fact_check_rounded, false),
-      ('Completed Loans', '${s.completedLoans}', Icons.check_circle_rounded, false),
-      ('Defaulted Loans', '${s.defaultedLoans}', Icons.error_rounded, s.defaultedLoans > 0),
-      ('Outstanding', fmt(s.dailyLoans.outstandingBalance + s.weeklyLoans.outstandingBalance), Icons.account_balance_rounded, false),
-      ('Expected', fmt(s.dailyLoans.expectedCollections + s.weeklyLoans.expectedCollections), Icons.event_available_rounded, false),
-      ('Efficiency', '${s.collectionEfficiency.toStringAsFixed(1)}%', Icons.speed_rounded, false),
-      ('Interest Earned', fmt(s.dailyLoans.interestEarned + s.weeklyLoans.interestEarned), Icons.percent_rounded, false),
-      ('Fees Earned', fmt(s.dailyLoans.feesEarned + s.weeklyLoans.feesEarned), Icons.receipt_rounded, false),
-      ('Savings', fmt(s.dailyLoans.savingsFromOverpayments + s.weeklyLoans.savingsFromOverpayments), Icons.savings_rounded, false),
-      ('Daily Disbursed', fmt(s.dailyLoans.amountDisbursed), Icons.today_rounded, false),
-      ('Daily Collected', fmt(s.dailyLoans.amountCollected), Icons.done_all_rounded, false),
-      ('Daily Overdue', '${s.dailyLoans.overdueLoans}', Icons.warning_rounded, s.dailyLoans.overdueLoans > 0),
-      ('Weekly Disbursed', fmt(s.weeklyLoans.amountDisbursed), Icons.calendar_view_week_rounded, false),
-      ('Weekly Collected', fmt(s.weeklyLoans.amountCollected), Icons.task_alt_rounded, false),
+      (
+        'Completed Loans',
+        '${s.completedLoans}',
+        Icons.check_circle_rounded,
+        false,
+      ),
+      (
+        'Defaulted Loans',
+        '${s.defaultedLoans}',
+        Icons.error_rounded,
+        s.defaultedLoans > 0,
+      ),
+      (
+        'Outstanding',
+        fmt(s.dailyLoans.outstandingBalance + s.weeklyLoans.outstandingBalance),
+        Icons.account_balance_rounded,
+        false,
+      ),
+      (
+        'Expected',
+        fmt(
+          s.dailyLoans.expectedCollections + s.weeklyLoans.expectedCollections,
+        ),
+        Icons.event_available_rounded,
+        false,
+      ),
+      (
+        'Efficiency',
+        '${s.collectionEfficiency.toStringAsFixed(1)}%',
+        Icons.speed_rounded,
+        false,
+      ),
+      (
+        'Interest Earned',
+        fmt(s.dailyLoans.interestEarned + s.weeklyLoans.interestEarned),
+        Icons.percent_rounded,
+        false,
+      ),
+      (
+        'Fees Earned',
+        fmt(s.dailyLoans.feesEarned + s.weeklyLoans.feesEarned),
+        Icons.receipt_rounded,
+        false,
+      ),
+      (
+        'Savings',
+        fmt(
+          s.dailyLoans.savingsFromOverpayments +
+              s.weeklyLoans.savingsFromOverpayments,
+        ),
+        Icons.savings_rounded,
+        false,
+      ),
+      (
+        'Daily Disbursed',
+        fmt(s.dailyLoans.amountDisbursed),
+        Icons.today_rounded,
+        false,
+      ),
+      (
+        'Daily Collected',
+        fmt(s.dailyLoans.amountCollected),
+        Icons.done_all_rounded,
+        false,
+      ),
+      (
+        'Daily Overdue',
+        '${s.dailyLoans.overdueLoans}',
+        Icons.warning_rounded,
+        s.dailyLoans.overdueLoans > 0,
+      ),
+      (
+        'Weekly Disbursed',
+        fmt(s.weeklyLoans.amountDisbursed),
+        Icons.calendar_view_week_rounded,
+        false,
+      ),
+      (
+        'Weekly Collected',
+        fmt(s.weeklyLoans.amountCollected),
+        Icons.task_alt_rounded,
+        false,
+      ),
     ];
 
     return GridView.builder(
@@ -343,7 +493,11 @@ class _SummaryGrid extends StatelessWidget {
       itemBuilder: (context, index) {
         final (label, value, icon, accent) = items[index];
         return ReportMetricCard(
-            label: label, value: value, icon: icon, accent: accent);
+          label: label,
+          value: value,
+          icon: icon,
+          accent: accent,
+        );
       },
     );
   }
@@ -384,13 +538,19 @@ class _ReportNavGrid extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(icon, size: 26, color: Theme.of(context).colorScheme.primary),
+                  Icon(
+                    icon,
+                    size: 26,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
                   const SizedBox(height: 8),
                   Text(
                     label,
                     textAlign: TextAlign.center,
                     style: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w700),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ],
               ),
@@ -518,11 +678,12 @@ class _BarTrendChart extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleSmall
-                    ?.copyWith(fontWeight: FontWeight.w700)),
+            Text(
+              title,
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 12),
             SizedBox(
               height: 180,
@@ -537,8 +698,9 @@ class _BarTrendChart extends StatelessWidget {
                               return BarTooltipItem(
                                 fmt(rod.toY),
                                 const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w600),
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               );
                             },
                           ),
@@ -572,7 +734,10 @@ class _BarTrendChart extends StatelessWidget {
                             ),
                           ),
                         ),
-                        gridData: const FlGridData(show: true, drawVerticalLine: false),
+                        gridData: const FlGridData(
+                          show: true,
+                          drawVerticalLine: false,
+                        ),
                         borderData: FlBorderData(show: false),
                         barGroups: spots,
                       ),
@@ -631,11 +796,12 @@ class _LineTrendChart extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleSmall
-                    ?.copyWith(fontWeight: FontWeight.w700)),
+            Text(
+              title,
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 12),
             SizedBox(
               height: 180,
@@ -649,13 +815,18 @@ class _LineTrendChart extends StatelessWidget {
                           touchTooltipData: LineTouchTooltipData(
                             getTooltipItems: (spots) {
                               return spots
-                                  .map((spot) => LineTooltipItem(
-                                        CurrencyUtils.format(spot.y,
-                                            symbol: currencySymbol),
-                                        const TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.w600),
-                                      ))
+                                  .map(
+                                    (spot) => LineTooltipItem(
+                                      CurrencyUtils.format(
+                                        spot.y,
+                                        symbol: currencySymbol,
+                                      ),
+                                      const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  )
                                   .toList();
                             },
                           ),
@@ -689,7 +860,10 @@ class _LineTrendChart extends StatelessWidget {
                             ),
                           ),
                         ),
-                        gridData: const FlGridData(show: true, drawVerticalLine: false),
+                        gridData: const FlGridData(
+                          show: true,
+                          drawVerticalLine: false,
+                        ),
                         borderData: FlBorderData(show: false),
                         lineBarsData: [
                           LineChartBarData(
@@ -748,10 +922,13 @@ class _LegendDot extends StatelessWidget {
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 6),
-        Text(label,
-            style: TextStyle(
-                fontSize: 12,
-                color: Theme.of(context).colorScheme.onSurfaceVariant)),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
       ],
     );
   }

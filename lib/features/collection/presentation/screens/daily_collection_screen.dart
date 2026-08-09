@@ -5,6 +5,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:uuid/uuid.dart';
 import 'package:loantrack/core/widgets/app_drawer.dart';
 import 'package:loantrack/core/widgets/debounced_text_field.dart';
+import 'package:loantrack/core/widgets/keyboard_refreshable.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../../core/utils/currency_utils.dart';
@@ -50,6 +51,11 @@ class DailyCollectionScreen extends ConsumerWidget {
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh (F5)',
+            onPressed: () => ref.invalidate(collectionListProvider),
+          ),
+          IconButton(
             icon: const Icon(Icons.calendar_month),
             tooltip: 'Future Schedule',
             onPressed: () => context.push('/collections/future-schedule'),
@@ -62,52 +68,68 @@ class DailyCollectionScreen extends ConsumerWidget {
                 final result = await ref.read(collectionListProvider.future);
                 final currencySymbol =
                     ref.read(currencySymbolProvider).valueOrNull ??
-                        CurrencyUtils.defaultSymbol;
+                    CurrencyUtils.defaultSymbol;
                 if (value == 'excel') {
                   final file = await ExportManager.exportCollectionToExcel(
-                      result, selectedDate);
+                    result,
+                    selectedDate,
+                  );
                   final opened = await OpenFilex.open(file.path);
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                          content: Text(opened.type == ResultType.done
+                        content: Text(
+                          opened.type == ResultType.done
                               ? 'Excel opened: ${p.basename(file.path)}'
-                              : 'Excel saved to downloads: ${p.basename(file.path)}')),
+                              : 'Excel saved to downloads: ${p.basename(file.path)}',
+                        ),
+                      ),
                     );
                   }
                 } else if (value == 'share_excel') {
                   await ExportManager.shareCollectionExcel(
-                      result, selectedDate);
+                    result,
+                    selectedDate,
+                  );
                 } else if (value == 'pdf') {
-                  final file =
-                      await ExportManager.exportCollectionToPdf(result,
-                          selectedDate,
-                          currencySymbol: currencySymbol);
+                  final file = await ExportManager.exportCollectionToPdf(
+                    result,
+                    selectedDate,
+                    currencySymbol: currencySymbol,
+                  );
                   final opened = await OpenFilex.open(file.path);
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                          content: Text(opened.type == ResultType.done
+                        content: Text(
+                          opened.type == ResultType.done
                               ? 'PDF opened: ${p.basename(file.path)}'
-                              : 'PDF saved: ${p.basename(file.path)}')),
+                              : 'PDF saved: ${p.basename(file.path)}',
+                        ),
+                      ),
                     );
                   }
                 } else if (value == 'share') {
-                  await ExportManager.shareCollectionPdf(result, selectedDate,
-                      currencySymbol: currencySymbol);
+                  await ExportManager.shareCollectionPdf(
+                    result,
+                    selectedDate,
+                    currencySymbol: currencySymbol,
+                  );
                 }
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Export failed: $e')));
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
                 }
               }
             },
             itemBuilder: (_) => [
+              const PopupMenuItem(value: 'excel', child: Text('Export Excel')),
               const PopupMenuItem(
-                  value: 'excel', child: Text('Export Excel')),
-              const PopupMenuItem(
-                  value: 'share_excel', child: Text('Share Excel')),
+                value: 'share_excel',
+                child: Text('Share Excel'),
+              ),
               const PopupMenuItem(value: 'pdf', child: Text('Open PDF')),
               const PopupMenuItem(value: 'share', child: Text('Share PDF')),
             ],
@@ -130,7 +152,8 @@ class DailyCollectionScreen extends ConsumerWidget {
                 Switch(
                   value: isRangeMode,
                   onChanged: (v) {
-                    ref.read(collectionDateRangeModeProvider.notifier).state = v;
+                    ref.read(collectionDateRangeModeProvider.notifier).state =
+                        v;
                   },
                 ),
               ],
@@ -171,22 +194,30 @@ class DailyCollectionScreen extends ConsumerWidget {
                       child: FilterChip(
                         label: const Text('All'),
                         selected: selectedGroup == null,
-                        onSelected: (_) => ref
-                            .read(collectionGroupFilterProvider.notifier)
-                            .state = null,
+                        onSelected: (_) =>
+                            ref
+                                    .read(
+                                      collectionGroupFilterProvider.notifier,
+                                    )
+                                    .state =
+                                null,
                       ),
                     ),
-                    ...groups.map((g) => Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          child: FilterChip(
-                            label: Text(g.name),
-                            selected: selectedGroup == g.id,
-                            onSelected: (_) => ref
-                                .read(collectionGroupFilterProvider.notifier)
-                                .state =
-                                selectedGroup == g.id ? null : g.id,
-                          ),
-                        )),
+                    ...groups.map(
+                      (g) => Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: FilterChip(
+                          label: Text(g.name),
+                          selected: selectedGroup == g.id,
+                          onSelected: (_) =>
+                              ref
+                                  .read(collectionGroupFilterProvider.notifier)
+                                  .state = selectedGroup == g.id
+                              ? null
+                              : g.id,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               );
@@ -199,7 +230,10 @@ class DailyCollectionScreen extends ConsumerWidget {
                 hintText: 'Search customer...',
                 prefixIcon: Icon(Icons.search, size: 20),
                 isDense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 border: OutlineInputBorder(),
               ),
               onChanged: (v) =>
@@ -213,28 +247,40 @@ class DailyCollectionScreen extends ConsumerWidget {
                 const Text('Sort by:', style: TextStyle(fontSize: 12)),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Consumer(builder: (context, ref, _) {
-                    final sortBy = ref.watch(collectionSortByProvider);
-                    return DropdownButtonHideUnderline(
-                      child: DropdownButton<CollectionSortBy>(
-                        value: sortBy,
-                        isDense: true,
-                        items: const [
-                          DropdownMenuItem(
-                              value: CollectionSortBy.name, child: Text('Name')),
-                          DropdownMenuItem(
-                              value: CollectionSortBy.amountDue, child: Text('Amount Due')),
-                          DropdownMenuItem(
-                              value: CollectionSortBy.amountPaid, child: Text('Amount Paid')),
-                          DropdownMenuItem(
-                              value: CollectionSortBy.outstanding, child: Text('Outstanding')),
-                        ],
-                        onChanged: (value) => ref
-                            .read(collectionSortByProvider.notifier)
-                            .state = value!,
-                      ),
-                    );
-                  }),
+                  child: Consumer(
+                    builder: (context, ref, _) {
+                      final sortBy = ref.watch(collectionSortByProvider);
+                      return DropdownButtonHideUnderline(
+                        child: DropdownButton<CollectionSortBy>(
+                          value: sortBy,
+                          isDense: true,
+                          items: const [
+                            DropdownMenuItem(
+                              value: CollectionSortBy.name,
+                              child: Text('Name'),
+                            ),
+                            DropdownMenuItem(
+                              value: CollectionSortBy.amountDue,
+                              child: Text('Amount Due'),
+                            ),
+                            DropdownMenuItem(
+                              value: CollectionSortBy.amountPaid,
+                              child: Text('Amount Paid'),
+                            ),
+                            DropdownMenuItem(
+                              value: CollectionSortBy.outstanding,
+                              child: Text('Outstanding'),
+                            ),
+                          ],
+                          onChanged: (value) =>
+                              ref
+                                      .read(collectionSortByProvider.notifier)
+                                      .state =
+                                  value!,
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ],
             ),
@@ -259,8 +305,11 @@ class DailyCollectionScreen extends ConsumerWidget {
   }
 
   Widget _buildSummaryAndList(
-      BuildContext context, WidgetRef ref, List<CollectionRow> rows,
-      [bool isRangeMode = false]) {
+    BuildContext context,
+    WidgetRef ref,
+    List<CollectionRow> rows, [
+    bool isRangeMode = false,
+  ]) {
     double totalDue = 0;
     double totalPaid = 0;
     for (final row in rows) {
@@ -277,39 +326,45 @@ class DailyCollectionScreen extends ConsumerWidget {
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
               _SummaryItem(
-                  label: 'Total Due',
-                  value: CurrencyUtils.format(totalDue)),
+                label: 'Total Due',
+                value: CurrencyUtils.format(totalDue),
+              ),
               _SummaryItem(
-                  label: 'Total Paid',
-                  value: CurrencyUtils.format(totalPaid)),
+                label: 'Total Paid',
+                value: CurrencyUtils.format(totalPaid),
+              ),
               _SummaryItem(
-                  label: 'Remaining',
-                  value: CurrencyUtils.format(totalDue - totalPaid)),
+                label: 'Remaining',
+                value: CurrencyUtils.format(totalDue - totalPaid),
+              ),
             ],
           ),
         ),
         Expanded(
-          child: ListView.separated(
-            itemCount: rows.length,
-            separatorBuilder: (_, _) => const Divider(height: 1),
-            itemBuilder: (context, index) {
-              final row = rows[index];
-              // In range mode the payment cap is the first unpaid installment's
-              // remaining amount (amountPaid already aggregates the whole range),
-              // not that amount minus the range's already-paid total — that
-              // double-subtraction would leave an artificially small cap and
-              // push legitimate payment into savings.
-              final installmentDue = isRangeMode
-                  ? row.installmentAmount
-                  : row.installmentAmount - row.amountPaid;
-              return _CollectionRowTile(
-                row: row,
-                installmentDue: installmentDue > 0 ? installmentDue : 0,
-                onPaymentRecorded: () {
-                  ref.invalidate(collectionListProvider);
-                },
-              );
-            },
+          child: KeyboardRefreshable(
+            onRefresh: () async => ref.invalidate(collectionListProvider),
+            child: ListView.separated(
+              itemCount: rows.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final row = rows[index];
+                // In range mode the payment cap is the first unpaid installment's
+                // remaining amount (amountPaid already aggregates the whole range),
+                // not that amount minus the range's already-paid total — that
+                // double-subtraction would leave an artificially small cap and
+                // push legitimate payment into savings.
+                final installmentDue = isRangeMode
+                    ? row.installmentAmount
+                    : row.installmentAmount - row.amountPaid;
+                return _CollectionRowTile(
+                  row: row,
+                  installmentDue: installmentDue > 0 ? installmentDue : 0,
+                  onPaymentRecorded: () {
+                    ref.invalidate(collectionListProvider);
+                  },
+                );
+              },
+            ),
           ),
         ),
       ],
@@ -333,8 +388,9 @@ class _CollectionRowTile extends ConsumerWidget {
     return ListTile(
       title: Text(row.customerName),
       subtitle: Text(
-          '${CurrencyUtils.format(row.amountPaid)} / ${CurrencyUtils.format(row.amountDue)}'
-          '${row.groupName != null ? ' — ${row.groupName}' : ''}'),
+        '${CurrencyUtils.format(row.amountPaid)} / ${CurrencyUtils.format(row.amountDue)}'
+        '${row.groupName != null ? ' — ${row.groupName}' : ''}',
+      ),
       trailing: row.isPaid
           ? const Icon(Icons.check_circle, color: Colors.green)
           : Row(
@@ -371,7 +427,8 @@ class _CollectionRowTile extends ConsumerWidget {
     final amount = installmentDue > 0 ? installmentDue : row.outstandingBalance;
     if (amount <= 0) return;
     final currency =
-        ref.read(currencySymbolProvider).valueOrNull ?? CurrencyUtils.defaultSymbol;
+        ref.read(currencySymbolProvider).valueOrNull ??
+        CurrencyUtils.defaultSymbol;
     final amountCtrl = TextEditingController(text: amount.toStringAsFixed(0));
     // Stable id for THIS payment action: reused if the confirm is retried so a
     // timeout/retry can never double-record the same logical payment (F3).
@@ -399,8 +456,9 @@ class _CollectionRowTile extends ConsumerWidget {
             const SizedBox(height: 12),
             TextField(
               controller: amountCtrl,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               decoration: InputDecoration(
                 labelText: 'Amount',
                 prefixText: currency,
@@ -411,9 +469,9 @@ class _CollectionRowTile extends ConsumerWidget {
             const SizedBox(height: 8),
             Text(
               'Excess over installment goes to customer savings',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.green,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: Colors.green),
             ),
           ],
         ),
@@ -436,8 +494,12 @@ class _CollectionRowTile extends ConsumerWidget {
     );
   }
 
-  Future<void> _recordQuickPayment(BuildContext context, WidgetRef ref,
-      double amount, String requestId) async {
+  Future<void> _recordQuickPayment(
+    BuildContext context,
+    WidgetRef ref,
+    double amount,
+    String requestId,
+  ) async {
     try {
       final repo = await ref.read(paymentRepositoryProvider.future);
       final profileAsync = ref.read(businessProfileProvider);
@@ -451,8 +513,11 @@ class _CollectionRowTile extends ConsumerWidget {
         installmentDue: installmentDue > 0 ? installmentDue : null,
         clientRequestId: requestId,
       );
-      logAuditAction(ref, 'UPDATE',
-          'Payment ${CurrencyUtils.format(amount)} recorded for ${row.customerName} (loan ${row.loanId})');
+      logAuditAction(
+        ref,
+        'UPDATE',
+        'Payment ${CurrencyUtils.format(amount)} recorded for ${row.customerName} (loan ${row.loanId})',
+      );
       ref.invalidate(collectionListProvider);
       ref.invalidate(dashboardDataProvider);
       ref.invalidate(savingsBalanceProvider(row.customerId));
@@ -468,7 +533,9 @@ class _CollectionRowTile extends ConsumerWidget {
       ref.invalidate(activeLoansForCustomerProvider(row.customerId));
       ref.invalidate(allLoansProvider);
 
-      final effectiveInstallment = installmentDue > 0 ? installmentDue : row.outstandingBalance;
+      final effectiveInstallment = installmentDue > 0
+          ? installmentDue
+          : row.outstandingBalance;
       final surplus = amount - effectiveInstallment;
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -482,9 +549,9 @@ class _CollectionRowTile extends ConsumerWidget {
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Payment failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Payment failed: $e')));
       }
     }
   }
@@ -505,18 +572,16 @@ class _DatePickerTile extends StatelessWidget {
       leading: IconButton(
         icon: const Icon(Icons.chevron_left),
         tooltip: 'Previous day',
-        onPressed: () => onDatePicked(
-          selectedDate.subtract(const Duration(days: 1)),
-        ),
+        onPressed: () =>
+            onDatePicked(selectedDate.subtract(const Duration(days: 1))),
       ),
       title: Text(AppDateUtils.formatDate(selectedDate)),
       subtitle: Text(AppDateUtils.formatRelative(selectedDate)),
       trailing: IconButton(
         icon: const Icon(Icons.chevron_right),
         tooltip: 'Next day',
-        onPressed: () => onDatePicked(
-          selectedDate.add(const Duration(days: 1)),
-        ),
+        onPressed: () =>
+            onDatePicked(selectedDate.add(const Duration(days: 1))),
       ),
       onTap: () async {
         final now = DateTime.now();
@@ -542,10 +607,12 @@ class _SummaryItem extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Text(value,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                )),
+        Text(
+          value,
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+        ),
         Text(label, style: Theme.of(context).textTheme.bodySmall),
       ],
     );
@@ -571,20 +638,24 @@ class _DateRangePickerTile extends StatelessWidget {
     return ListTile(
       leading: const Icon(Icons.date_range),
       title: Text(
-          '${AppDateUtils.formatDate(startDate)} — ${AppDateUtils.formatDate(endDate)}'),
+        '${AppDateUtils.formatDate(startDate)} — ${AppDateUtils.formatDate(endDate)}',
+      ),
       subtitle: Text('${endDate.difference(startDate).inDays + 1} days'),
       onTap: () async {
         // Cap the start at the current end date so a range can never be
         // inverted (picking a start after the end would leave start > end if
         // the end picker is then cancelled).
-        final startUpperBound =
-            endDate.isAfter(startDate) ? endDate : startDate;
+        final startUpperBound = endDate.isAfter(startDate)
+            ? endDate
+            : startDate;
         final lastAllowed = DateTime(now.year + 5, now.month, now.day);
         final pickedStart = await showDatePicker(
           context: context,
           initialDate: startDate,
           firstDate: DateTime(2020),
-          lastDate: startUpperBound.isAfter(lastAllowed) ? lastAllowed : startUpperBound,
+          lastDate: startUpperBound.isAfter(lastAllowed)
+              ? lastAllowed
+              : startUpperBound,
         );
         if (pickedStart != null) {
           onStartPicked(pickedStart);

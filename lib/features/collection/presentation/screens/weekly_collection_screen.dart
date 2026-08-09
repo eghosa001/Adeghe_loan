@@ -5,6 +5,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:uuid/uuid.dart';
 import 'package:loantrack/core/widgets/app_drawer.dart';
 import 'package:loantrack/core/widgets/debounced_text_field.dart';
+import 'package:loantrack/core/widgets/keyboard_refreshable.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../../core/utils/currency_utils.dart';
@@ -48,12 +49,19 @@ class WeeklyCollectionScreen extends ConsumerWidget {
           ),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh (F5)',
+            onPressed: () => ref.invalidate(weeklyCollectionListProvider),
+          ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.download),
             tooltip: 'Export',
             onSelected: (value) async {
               try {
-                final repo = await ref.read(collectionRepositoryProvider.future);
+                final repo = await ref.read(
+                  collectionRepositoryProvider.future,
+                );
                 final isRange = ref.read(weeklyCollectionDateRangeModeProvider);
                 final rowsResult = isRange
                     ? await repo.getWeeklyCollectionByDateRange(
@@ -73,50 +81,69 @@ class WeeklyCollectionScreen extends ConsumerWidget {
                     : ref.read(weeklyCollectionDateFilterProvider);
                 final currencySymbol =
                     ref.read(currencySymbolProvider).valueOrNull ??
-                        CurrencyUtils.defaultSymbol;
+                    CurrencyUtils.defaultSymbol;
                 if (value == 'excel') {
-                  final file = await ExportManager
-                      .exportWeeklyCollectionToExcel(rows, selectedDate);
+                  final file =
+                      await ExportManager.exportWeeklyCollectionToExcel(
+                        rows,
+                        selectedDate,
+                      );
                   final opened = await OpenFilex.open(file.path);
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                          content: Text(opened.type == ResultType.done
+                        content: Text(
+                          opened.type == ResultType.done
                               ? 'Excel opened: ${p.basename(file.path)}'
-                              : 'Excel saved to downloads: ${p.basename(file.path)}')),
+                              : 'Excel saved to downloads: ${p.basename(file.path)}',
+                        ),
+                      ),
                     );
                   }
                 } else if (value == 'share_excel') {
-                  await ExportManager.shareWeeklyCollectionExcel(rows, selectedDate);
+                  await ExportManager.shareWeeklyCollectionExcel(
+                    rows,
+                    selectedDate,
+                  );
                 } else if (value == 'pdf') {
                   final file = await ExportManager.exportWeeklyCollectionToPdf(
-                      rows, selectedDate,
-                      currencySymbol: currencySymbol);
+                    rows,
+                    selectedDate,
+                    currencySymbol: currencySymbol,
+                  );
                   final opened = await OpenFilex.open(file.path);
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                          content: Text(opened.type == ResultType.done
+                        content: Text(
+                          opened.type == ResultType.done
                               ? 'PDF opened: ${p.basename(file.path)}'
-                              : 'PDF saved: ${p.basename(file.path)}')),
+                              : 'PDF saved: ${p.basename(file.path)}',
+                        ),
+                      ),
                     );
                   }
                 } else if (value == 'share') {
-                  await ExportManager.shareWeeklyCollectionPdf(rows, selectedDate,
-                      currencySymbol: currencySymbol);
+                  await ExportManager.shareWeeklyCollectionPdf(
+                    rows,
+                    selectedDate,
+                    currencySymbol: currencySymbol,
+                  );
                 }
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Export failed: $e')));
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
                 }
               }
             },
             itemBuilder: (_) => [
+              const PopupMenuItem(value: 'excel', child: Text('Export Excel')),
               const PopupMenuItem(
-                  value: 'excel', child: Text('Export Excel')),
-              const PopupMenuItem(
-                  value: 'share_excel', child: Text('Share Excel')),
+                value: 'share_excel',
+                child: Text('Share Excel'),
+              ),
               const PopupMenuItem(value: 'pdf', child: Text('Open PDF')),
               const PopupMenuItem(value: 'share', child: Text('Share PDF')),
             ],
@@ -139,7 +166,12 @@ class WeeklyCollectionScreen extends ConsumerWidget {
                 Switch(
                   value: isRangeMode,
                   onChanged: (v) {
-                    ref.read(weeklyCollectionDateRangeModeProvider.notifier).state = v;
+                    ref
+                            .read(
+                              weeklyCollectionDateRangeModeProvider.notifier,
+                            )
+                            .state =
+                        v;
                   },
                 ),
               ],
@@ -150,7 +182,8 @@ class WeeklyCollectionScreen extends ConsumerWidget {
             _WeeklyDatePickerTile(
               selectedDate: selectedDate,
               onDatePicked: (date) {
-                ref.read(weeklyCollectionDateFilterProvider.notifier).state = date;
+                ref.read(weeklyCollectionDateFilterProvider.notifier).state =
+                    date;
               },
             )
           else
@@ -158,10 +191,12 @@ class WeeklyCollectionScreen extends ConsumerWidget {
               startDate: rangeStart,
               endDate: rangeEnd,
               onStartPicked: (date) {
-                ref.read(weeklyCollectionRangeStartProvider.notifier).state = date;
+                ref.read(weeklyCollectionRangeStartProvider.notifier).state =
+                    date;
               },
               onEndPicked: (date) {
-                ref.read(weeklyCollectionRangeEndProvider.notifier).state = date;
+                ref.read(weeklyCollectionRangeEndProvider.notifier).state =
+                    date;
               },
             ),
           Padding(
@@ -171,8 +206,10 @@ class WeeklyCollectionScreen extends ConsumerWidget {
                 hintText: 'Search customer...',
                 prefixIcon: Icon(Icons.search, size: 20),
                 isDense: true,
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 border: OutlineInputBorder(),
               ),
               onChanged: (v) =>
@@ -187,35 +224,46 @@ class WeeklyCollectionScreen extends ConsumerWidget {
                 const Text('Sort by:', style: TextStyle(fontSize: 12)),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Consumer(builder: (context, ref, _) {
-                    final sortBy = ref.watch(weeklyCollectionSortByProvider);
-                    return DropdownButtonHideUnderline(
-                      child: DropdownButton<CollectionSortBy>(
-                        value: sortBy,
-                        isDense: true,
-                        items: const [
-                          DropdownMenuItem(
+                  child: Consumer(
+                    builder: (context, ref, _) {
+                      final sortBy = ref.watch(weeklyCollectionSortByProvider);
+                      return DropdownButtonHideUnderline(
+                        child: DropdownButton<CollectionSortBy>(
+                          value: sortBy,
+                          isDense: true,
+                          items: const [
+                            DropdownMenuItem(
                               value: CollectionSortBy.paymentDay,
-                              child: Text('Payment Day')),
-                          DropdownMenuItem(
+                              child: Text('Payment Day'),
+                            ),
+                            DropdownMenuItem(
                               value: CollectionSortBy.name,
-                              child: Text('Name')),
-                          DropdownMenuItem(
+                              child: Text('Name'),
+                            ),
+                            DropdownMenuItem(
                               value: CollectionSortBy.amountDue,
-                              child: Text('Amount Due')),
-                          DropdownMenuItem(
+                              child: Text('Amount Due'),
+                            ),
+                            DropdownMenuItem(
                               value: CollectionSortBy.amountPaid,
-                              child: Text('Amount Paid')),
-                          DropdownMenuItem(
+                              child: Text('Amount Paid'),
+                            ),
+                            DropdownMenuItem(
                               value: CollectionSortBy.outstanding,
-                              child: Text('Remaining')),
-                        ],
-                        onChanged: (value) => ref
-                            .read(weeklyCollectionSortByProvider.notifier)
-                            .state = value!,
-                      ),
-                    );
-                  }),
+                              child: Text('Remaining'),
+                            ),
+                          ],
+                          onChanged: (value) =>
+                              ref
+                                      .read(
+                                        weeklyCollectionSortByProvider.notifier,
+                                      )
+                                      .state =
+                                  value!,
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ],
             ),
@@ -240,7 +288,10 @@ class WeeklyCollectionScreen extends ConsumerWidget {
   }
 
   Widget _buildSummaryAndList(
-      BuildContext context, WidgetRef ref, List<WeeklyCollectionRow> rows) {
+    BuildContext context,
+    WidgetRef ref,
+    List<WeeklyCollectionRow> rows,
+  ) {
     double totalExpected = 0;
     double totalPaid = 0;
     double totalCollectedThisPeriod = 0;
@@ -261,44 +312,48 @@ class WeeklyCollectionScreen extends ConsumerWidget {
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
               _SummaryItem(
-                  label: 'Expected This Week',
-                  value: CurrencyUtils.format(totalExpected)),
+                label: 'Expected This Week',
+                value: CurrencyUtils.format(totalExpected),
+              ),
               _SummaryItem(
-                  label: 'Collected This Week',
-                  value: CurrencyUtils.format(totalCollectedThisPeriod)),
+                label: 'Collected This Week',
+                value: CurrencyUtils.format(totalCollectedThisPeriod),
+              ),
               _SummaryItem(
-                  label: 'Total Paid',
-                  value: CurrencyUtils.format(totalPaid)),
+                label: 'Total Paid',
+                value: CurrencyUtils.format(totalPaid),
+              ),
               _SummaryItem(
-                  label: 'Overdue',
-                  value: overdueCount.toString(),
-                  highlight: overdueCount > 0),
+                label: 'Overdue',
+                value: overdueCount.toString(),
+                highlight: overdueCount > 0,
+              ),
             ],
           ),
         ),
         Expanded(
-          // Lazy list: only the visible day headers/tiles are built (the
-          // section metadata is a small flat list of records). Previously
-          // _buildSectionedRows eagerly materialized every tile up front.
-          child: ListView.builder(
-            itemCount: _sectionItems(rows).length,
-            itemBuilder: (context, index) {
-              final (day, row) = _sectionItems(rows)[index];
-              if (row == null) {
-                return _PaymentDayHeader(day: day ?? '');
-              }
-              return Column(
-                children: [
-                  _WeeklyCollectionRowTile(
-                    row: row,
-                    onPaymentRecorded: () {
-                      ref.invalidate(weeklyCollectionListProvider);
-                    },
-                  ),
-                  const Divider(height: 1),
-                ],
-              );
-            },
+          child: KeyboardRefreshable(
+            onRefresh: () async => ref.invalidate(weeklyCollectionListProvider),
+            child: ListView.builder(
+              itemCount: _sectionItems(rows).length,
+              itemBuilder: (context, index) {
+                final (day, row) = _sectionItems(rows)[index];
+                if (row == null) {
+                  return _PaymentDayHeader(day: day ?? '');
+                }
+                return Column(
+                  children: [
+                    _WeeklyCollectionRowTile(
+                      row: row,
+                      onPaymentRecorded: () {
+                        ref.invalidate(weeklyCollectionListProvider);
+                      },
+                    ),
+                    const Divider(height: 1),
+                  ],
+                );
+              },
+            ),
           ),
         ),
       ],
@@ -311,7 +366,8 @@ class WeeklyCollectionScreen extends ConsumerWidget {
   /// Day (the default) the sections run Monday → Sunday. Each item is a record
   /// `(day, row)` where a null row marks a header and a null day marks a row.
   List<(String?, WeeklyCollectionRow?)> _sectionItems(
-      List<WeeklyCollectionRow> rows) {
+    List<WeeklyCollectionRow> rows,
+  ) {
     final items = <(String?, WeeklyCollectionRow?)>[];
     String? lastDay;
     for (final row in rows) {
@@ -342,8 +398,11 @@ class _PaymentDayHeader extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Row(
         children: [
-          Icon(Icons.calendar_today,
-              size: 14, color: theme.colorScheme.onPrimaryContainer),
+          Icon(
+            Icons.calendar_today,
+            size: 14,
+            color: theme.colorScheme.onPrimaryContainer,
+          ),
           const SizedBox(width: 8),
           Text(
             label,
@@ -367,28 +426,40 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
   final WeeklyCollectionRow row;
   final VoidCallback onPaymentRecorded;
 
-@override
+  @override
   Widget build(BuildContext context, WidgetRef ref) {
     final currency =
         ref.watch(currencySymbolProvider).valueOrNull ??
-            CurrencyUtils.defaultSymbol;
+        CurrencyUtils.defaultSymbol;
     final theme = Theme.of(context);
 
     // Status indicator widget
     Widget statusIndicator;
     String statusText;
-    
+
     if (row.isCurrentInstallmentPaid) {
-      statusIndicator = const Icon(Icons.check_circle, color: Colors.green, size: 20);
+      statusIndicator = const Icon(
+        Icons.check_circle,
+        color: Colors.green,
+        size: 20,
+      );
       statusText = 'Paid';
     } else if (row.isCurrentInstallmentPartial) {
-      statusIndicator = const Icon(Icons.pending, color: Colors.orange, size: 20);
+      statusIndicator = const Icon(
+        Icons.pending,
+        color: Colors.orange,
+        size: 20,
+      );
       statusText = 'Partial';
     } else if (row.isOverdue) {
       statusIndicator = Icon(Icons.warning, color: Colors.red, size: 20);
       statusText = 'Overdue ${row.daysOverdue}d';
     } else {
-      statusIndicator = const Icon(Icons.schedule, color: Colors.blue, size: 20);
+      statusIndicator = const Icon(
+        Icons.schedule,
+        color: Colors.blue,
+        size: 20,
+      );
       statusText = 'Pending';
     }
 
@@ -407,12 +478,18 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Week ${row.currentInstallmentNumber} • ${row.currentInstallmentDueDate}'),
+          Text(
+            'Week ${row.currentInstallmentNumber} • ${row.currentInstallmentDueDate}',
+          ),
           Text(
             '${CurrencyUtils.format(row.currentInstallmentAmount, symbol: currency)}  •  $statusText',
             style: TextStyle(
-              color: row.daysOverdue > 0 ? Colors.red : theme.colorScheme.onSurfaceVariant,
-              fontWeight: row.daysOverdue > 0 ? FontWeight.bold : FontWeight.normal,
+              color: row.daysOverdue > 0
+                  ? Colors.red
+                  : theme.colorScheme.onSurfaceVariant,
+              fontWeight: row.daysOverdue > 0
+                  ? FontWeight.bold
+                  : FontWeight.normal,
             ),
           ),
         ],
@@ -423,7 +500,10 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Icon(Icons.check_circle, color: Colors.green),
-                Text('Paid', style: TextStyle(color: Colors.green, fontSize: 10)),
+                Text(
+                  'Paid',
+                  style: TextStyle(color: Colors.green, fontSize: 10),
+                ),
               ],
             )
           : Row(
@@ -431,7 +511,10 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
               children: [
                 if (row.isOverdue)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.red.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(4),
@@ -473,12 +556,13 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
   }
 
   void _quickPay(BuildContext context, WidgetRef ref) {
-    final amount =
-        row.installmentDue > 0 ? row.installmentDue : row.outstandingBalance;
+    final amount = row.installmentDue > 0
+        ? row.installmentDue
+        : row.outstandingBalance;
     if (amount <= 0) return;
     final currency =
         ref.read(currencySymbolProvider).valueOrNull ??
-            CurrencyUtils.defaultSymbol;
+        CurrencyUtils.defaultSymbol;
     final amountCtrl = TextEditingController(text: amount.toStringAsFixed(0));
     // Stable id for THIS payment action: reused if the confirm is retried so a
     // timeout/retry can never double-record the same logical payment (F3).
@@ -506,8 +590,9 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
             const SizedBox(height: 12),
             TextField(
               controller: amountCtrl,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               decoration: InputDecoration(
                 labelText: 'Amount',
                 prefixText: currency,
@@ -518,9 +603,9 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
             const SizedBox(height: 8),
             Text(
               'Excess over installment goes to customer savings',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.green,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: Colors.green),
             ),
           ],
         ),
@@ -543,8 +628,12 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
     );
   }
 
-  Future<void> _recordQuickPayment(BuildContext context, WidgetRef ref,
-      double amount, String requestId) async {
+  Future<void> _recordQuickPayment(
+    BuildContext context,
+    WidgetRef ref,
+    double amount,
+    String requestId,
+  ) async {
     try {
       final repo = await ref.read(paymentRepositoryProvider.future);
       final profileAsync = ref.read(businessProfileProvider);
@@ -558,8 +647,11 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
         installmentDue: row.installmentDue > 0 ? row.installmentDue : null,
         clientRequestId: requestId,
       );
-      logAuditAction(ref, 'UPDATE',
-          'Payment ${CurrencyUtils.format(amount)} recorded for ${row.customerName} (loan ${row.loanId})');
+      logAuditAction(
+        ref,
+        'UPDATE',
+        'Payment ${CurrencyUtils.format(amount)} recorded for ${row.customerName} (loan ${row.loanId})',
+      );
       ref.invalidate(weeklyCollectionListProvider);
       ref.invalidate(dashboardDataProvider);
       ref.invalidate(savingsBalanceProvider(row.customerId));
@@ -575,8 +667,9 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
       ref.invalidate(activeLoansForCustomerProvider(row.customerId));
       ref.invalidate(allLoansProvider);
 
-      final effectiveInstallment =
-          row.installmentDue > 0 ? row.installmentDue : row.outstandingBalance;
+      final effectiveInstallment = row.installmentDue > 0
+          ? row.installmentDue
+          : row.outstandingBalance;
       final surplus = amount - effectiveInstallment;
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -590,9 +683,9 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Payment failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Payment failed: $e')));
       }
     }
   }
@@ -616,9 +709,9 @@ class _SummaryItem extends StatelessWidget {
         Text(
           value,
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: highlight ? Colors.red : null,
-              ),
+            fontWeight: FontWeight.bold,
+            color: highlight ? Colors.red : null,
+          ),
         ),
         Text(label, style: Theme.of(context).textTheme.bodySmall),
       ],
@@ -642,18 +735,16 @@ class _WeeklyDatePickerTile extends StatelessWidget {
       leading: IconButton(
         icon: const Icon(Icons.chevron_left),
         tooltip: 'Previous day',
-        onPressed: () => onDatePicked(
-          selectedDate.subtract(const Duration(days: 1)),
-        ),
+        onPressed: () =>
+            onDatePicked(selectedDate.subtract(const Duration(days: 1))),
       ),
       title: Text(AppDateUtils.formatDate(selectedDate)),
       subtitle: Text(AppDateUtils.formatRelative(selectedDate)),
       trailing: IconButton(
         icon: const Icon(Icons.chevron_right),
         tooltip: 'Next day',
-        onPressed: () => onDatePicked(
-          selectedDate.add(const Duration(days: 1)),
-        ),
+        onPressed: () =>
+            onDatePicked(selectedDate.add(const Duration(days: 1))),
       ),
       onTap: () async {
         final now = DateTime.now();
@@ -689,20 +780,24 @@ class _WeeklyDateRangePickerTile extends StatelessWidget {
     return ListTile(
       leading: const Icon(Icons.date_range),
       title: Text(
-          '${AppDateUtils.formatDate(startDate)} — ${AppDateUtils.formatDate(endDate)}'),
+        '${AppDateUtils.formatDate(startDate)} — ${AppDateUtils.formatDate(endDate)}',
+      ),
       subtitle: Text('${endDate.difference(startDate).inDays + 1} days'),
       onTap: () async {
         // Cap the start at the current end date so a range can never be
         // inverted (picking a start after the end would leave start > end if
         // the end picker is then cancelled).
-        final startUpperBound =
-            endDate.isAfter(startDate) ? endDate : startDate;
+        final startUpperBound = endDate.isAfter(startDate)
+            ? endDate
+            : startDate;
         final lastAllowed = DateTime(now.year + 5, now.month, now.day);
         final pickedStart = await showDatePicker(
           context: context,
           initialDate: startDate,
           firstDate: DateTime(2020),
-          lastDate: startUpperBound.isAfter(lastAllowed) ? lastAllowed : startUpperBound,
+          lastDate: startUpperBound.isAfter(lastAllowed)
+              ? lastAllowed
+              : startUpperBound,
         );
         if (pickedStart != null) {
           onStartPicked(pickedStart);

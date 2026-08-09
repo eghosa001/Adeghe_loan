@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/utils/currency_utils.dart';
 import '../../../../core/utils/date_utils.dart';
+import '../../../../core/widgets/keyboard_refreshable.dart';
 import '../../../../features/customers/data/models/customer_entity.dart';
 import '../../../../features/customers/presentation/providers/customer_providers.dart';
 import '../../../../features/collection/presentation/providers/collection_provider.dart';
@@ -63,8 +64,14 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
         title: const Text('Remove member?'),
         content: Text('Remove ${customer.fullName} from this group?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remove'),
+          ),
         ],
       ),
     );
@@ -91,10 +98,9 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
   Future<void> _addMembers() async {
     final repo = await ref.read(customerRepositoryProvider.future);
     final allCustomers = await repo.search('');
-    final available = allCustomers
-        .where((c) => c.groupId != widget.groupId)
-        .toList()
-      ..sort((a, b) => a.fullName.compareTo(b.fullName));
+    final available =
+        allCustomers.where((c) => c.groupId != widget.groupId).toList()
+          ..sort((a, b) => a.fullName.compareTo(b.fullName));
 
     if (!mounted) return;
     final selected = await showDialog<Set<String>>(
@@ -131,10 +137,12 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
       builder: (ctx) => SimpleDialog(
         title: const Text('Move to group'),
         children: [
-          ...otherGroups.map((g) => SimpleDialogOption(
-                onPressed: () => Navigator.pop(ctx, g),
-                child: Text(g.name),
-              )),
+          ...otherGroups.map(
+            (g) => SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, g),
+              child: Text(g.name),
+            ),
+          ),
           if (otherGroups.isEmpty)
             const Padding(
               padding: EdgeInsets.all(16),
@@ -165,7 +173,9 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
     });
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$movedCount member(s) moved to ${target.name}')),
+        SnackBar(
+          content: Text('$movedCount member(s) moved to ${target.name}'),
+        ),
       );
     }
   }
@@ -193,7 +203,9 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final groupsAsync = ref.watch(groupListProvider);
-    final group = groupsAsync.valueOrNull?.where((g) => g.id == widget.groupId).firstOrNull;
+    final group = groupsAsync.valueOrNull
+        ?.where((g) => g.id == widget.groupId)
+        .firstOrNull;
 
     return Scaffold(
       appBar: AppBar(
@@ -221,7 +233,7 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
+          : KeyboardRefreshable(
               onRefresh: _loadData,
               child: ListView.builder(
                 padding: const EdgeInsets.only(bottom: 88),
@@ -236,8 +248,9 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
                     if (_members.isEmpty) {
                       return const Padding(
                         padding: EdgeInsets.all(32),
-                        child:
-                            Center(child: Text('No members in this group yet.')),
+                        child: Center(
+                          child: Text('No members in this group yet.'),
+                        ),
                       );
                     }
                     return _buildMemberHeader();
@@ -257,8 +270,10 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Row(
         children: [
-          Text('Members (${_members.length})',
-              style: Theme.of(context).textTheme.titleMedium),
+          Text(
+            'Members (${_members.length})',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
           const Spacer(),
           if (_members.isNotEmpty)
             TextButton(
@@ -281,9 +296,11 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
               onChanged: (_) => _toggleSelection(customer.id),
             )
           : CircleAvatar(
-              child: Text(customer.fullName.isNotEmpty
-                  ? customer.fullName[0].toUpperCase()
-                  : '?'),
+              child: Text(
+                customer.fullName.isNotEmpty
+                    ? customer.fullName[0].toUpperCase()
+                    : '?',
+              ),
             ),
       title: Text(customer.fullName),
       subtitle: Text(customer.phone),
@@ -297,10 +314,11 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
                 }
               },
               itemBuilder: (_) => [
+                const PopupMenuItem(value: 'view', child: Text('View profile')),
                 const PopupMenuItem(
-                    value: 'view', child: Text('View profile')),
-                const PopupMenuItem(
-                    value: 'remove', child: Text('Remove from group')),
+                  value: 'remove',
+                  child: Text('Remove from group'),
+                ),
               ],
             ),
       onTap: _selectionMode
@@ -345,32 +363,42 @@ class _GroupInfoCard extends StatelessWidget {
             Row(
               children: [
                 CircleAvatar(
-                  backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                  backgroundColor: Theme.of(
+                    context,
+                  ).colorScheme.primaryContainer,
                   child: Text(
-                      (group!.name.isEmpty ? '?' : group!.name[0])
-                          .toUpperCase(),
-                      style: TextStyle(
-                          color: Theme.of(context).colorScheme.onPrimaryContainer)),
+                    (group!.name.isEmpty ? '?' : group!.name[0]).toUpperCase(),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onPrimaryContainer,
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(group!.name,
-                          style: Theme.of(context).textTheme.titleLarge),
+                      Text(
+                        group!.name,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
                       if (created != null)
-                        Text('Created ${AppDateUtils.formatDate(created)}',
-                            style: Theme.of(context).textTheme.bodySmall),
+                        Text(
+                          'Created ${AppDateUtils.formatDate(created)}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
                     ],
                   ),
                 ),
               ],
             ),
-            if (group!.description != null && group!.description!.isNotEmpty) ...[
+            if (group!.description != null &&
+                group!.description!.isNotEmpty) ...[
               const SizedBox(height: 8),
-              Text(group!.description!,
-                  style: Theme.of(context).textTheme.bodyMedium),
+              Text(
+                group!.description!,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
             ],
           ],
         ),
@@ -406,13 +434,17 @@ class _StatsCards extends StatelessWidget {
           ),
           _StatCard(
             label: 'Outstanding',
-            value: CurrencyUtils.format((stats!['totalOutstanding'] as num).toDouble()),
+            value: CurrencyUtils.format(
+              (stats!['totalOutstanding'] as num).toDouble(),
+            ),
             icon: Icons.account_balance,
             color: Colors.red,
           ),
           _StatCard(
             label: 'Total Savings',
-            value: CurrencyUtils.format((stats!['totalSavings'] as num).toDouble()),
+            value: CurrencyUtils.format(
+              (stats!['totalSavings'] as num).toDouble(),
+            ),
             icon: Icons.savings,
             color: Colors.green,
           ),
@@ -446,10 +478,12 @@ class _StatCard extends StatelessWidget {
             children: [
               Icon(icon, color: color, size: 20),
               const SizedBox(height: 8),
-              Text(value,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      )),
+              Text(
+                value,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
               Text(label, style: Theme.of(context).textTheme.bodySmall),
             ],
           ),
@@ -476,15 +510,20 @@ class _CollectionSummaryCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text("Today's Collection",
-                style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              "Today's Collection",
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _SummaryCol(label: 'Due', value: CurrencyUtils.format(due)),
                 _SummaryCol(label: 'Paid', value: CurrencyUtils.format(paid)),
-                _SummaryCol(label: 'Remaining', value: CurrencyUtils.format(remaining)),
+                _SummaryCol(
+                  label: 'Remaining',
+                  value: CurrencyUtils.format(remaining),
+                ),
               ],
             ),
           ],
@@ -503,11 +542,12 @@ class _SummaryCol extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Text(value,
-            style: Theme.of(context)
-                .textTheme
-                .titleSmall
-                ?.copyWith(fontWeight: FontWeight.bold)),
+        Text(
+          value,
+          style: Theme.of(
+            context,
+          ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+        ),
         Text(label, style: Theme.of(context).textTheme.bodySmall),
       ],
     );
@@ -529,10 +569,12 @@ class _MemberPickerDialogState extends State<_MemberPickerDialog> {
   @override
   Widget build(BuildContext context) {
     final filtered = widget.customers
-        .where((c) =>
-            _search.isEmpty ||
-            c.fullName.toLowerCase().contains(_search.toLowerCase()) ||
-            c.phone.contains(_search))
+        .where(
+          (c) =>
+              _search.isEmpty ||
+              c.fullName.toLowerCase().contains(_search.toLowerCase()) ||
+              c.phone.contains(_search),
+        )
         .toList();
 
     return AlertDialog(

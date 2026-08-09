@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as path;
 import 'package:loantrack/core/widgets/empty_state.dart';
+import 'package:loantrack/core/widgets/keyboard_refreshable.dart';
 
 import '../../../../core/database/database_service.dart';
 import '../../../../core/di/providers.dart';
@@ -49,15 +50,16 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text('Backup created: ${path.basename(backup.path)}')),
+            content: Text('Backup created: ${path.basename(backup.path)}'),
+          ),
         );
       }
       await _refreshBackups();
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Backup failed: $error')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Backup failed: $error')));
       }
     } finally {
       if (mounted) setState(() => _isBackupRunning = false);
@@ -70,14 +72,17 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Restore backup?'),
         content: Text(
-            'This will overwrite current app data with ${path.basename(backupFile.path)}.'),
+          'This will overwrite current app data with ${path.basename(backupFile.path)}.',
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Restore'))
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Restore'),
+          ),
         ],
       ),
     );
@@ -85,20 +90,25 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
     try {
       final dbService = await ref.read(databaseServiceProvider.future);
       await _backupService(dbService).restoreBackup(backupFile);
-      logAuditAction(ref, 'RESTORE',
-          'Backup restored from ${path.basename(backupFile.path)}');
+      logAuditAction(
+        ref,
+        'RESTORE',
+        'Backup restored from ${path.basename(backupFile.path)}',
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-              content:
-                  Text('Backup restored successfully. Restart app to apply changes.')),
+            content: Text(
+              'Backup restored successfully. Restart app to apply changes.',
+            ),
+          ),
         );
       }
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Restore failed: $error')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Restore failed: $error')));
       }
     }
   }
@@ -116,7 +126,8 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
               icon: _isBackupRunning
                   ? const SizedBox.square(
                       dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2))
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
                   : const Icon(Icons.cloud_upload),
               label: const Text('Create backup'),
               onPressed: _isBackupRunning ? null : _createBackup,
@@ -131,18 +142,19 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
                   }
                   if (snapshot.hasError) {
                     return Center(
-                        child:
-                            Text('Unable to list backups: ${snapshot.error}'));
+                      child: Text('Unable to list backups: ${snapshot.error}'),
+                    );
                   }
                   final files = snapshot.data ?? [];
                   if (files.isEmpty) {
                     return const EmptyState(
                       icon: Icons.cloud_upload_outlined,
                       title: 'No backups available',
-                      subtitle: 'Create your first backup to keep your data safe.',
+                      subtitle:
+                          'Create your first backup to keep your data safe.',
                     );
                   }
-                  return RefreshIndicator(
+                  return KeyboardRefreshable(
                     onRefresh: _refreshBackups,
                     child: ListView.separated(
                       itemCount: files.length,
@@ -154,7 +166,10 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
                           title: Text(path.basename(file.path)),
                           subtitle: Text(() {
                             try {
-                              return file.lastModifiedSync().toLocal().toString();
+                              return file
+                                  .lastModifiedSync()
+                                  .toLocal()
+                                  .toString();
                             } catch (_) {
                               return 'Unknown date';
                             }

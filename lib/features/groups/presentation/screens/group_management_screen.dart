@@ -5,6 +5,7 @@ import 'package:loantrack/core/constants/app_constants.dart';
 import 'package:loantrack/core/utils/input_formatters.dart';
 import 'package:loantrack/core/widgets/app_drawer.dart';
 import 'package:loantrack/core/widgets/empty_state.dart';
+import 'package:loantrack/core/widgets/keyboard_refreshable.dart';
 
 import '../providers/group_providers.dart';
 import '../../../collection/presentation/providers/collection_provider.dart';
@@ -16,7 +17,8 @@ class GroupManagementScreen extends ConsumerStatefulWidget {
   const GroupManagementScreen({super.key});
 
   @override
-  ConsumerState<GroupManagementScreen> createState() => _GroupManagementScreenState();
+  ConsumerState<GroupManagementScreen> createState() =>
+      _GroupManagementScreenState();
 }
 
 class _GroupManagementScreenState extends ConsumerState<GroupManagementScreen> {
@@ -65,13 +67,16 @@ class _GroupManagementScreenState extends ConsumerState<GroupManagementScreen> {
                 if (_searchQuery.isNotEmpty) {
                   final term = _searchQuery.toLowerCase();
                   filtered = groups
-                      .where((g) =>
-                          g.name.toLowerCase().contains(term) ||
-                          (g.description?.toLowerCase().contains(term) ?? false))
+                      .where(
+                        (g) =>
+                            g.name.toLowerCase().contains(term) ||
+                            (g.description?.toLowerCase().contains(term) ??
+                                false),
+                      )
                       .toList();
                 }
                 if (filtered.isEmpty) {
-                  return RefreshIndicator(
+                  return KeyboardRefreshable(
                     onRefresh: () async => ref.invalidate(groupListProvider),
                     child: ListView(
                       children: const [
@@ -90,7 +95,7 @@ class _GroupManagementScreenState extends ConsumerState<GroupManagementScreen> {
                     ),
                   );
                 }
-                return RefreshIndicator(
+                return KeyboardRefreshable(
                   onRefresh: () async => ref.invalidate(groupListProvider),
                   child: ListView.separated(
                     padding: const EdgeInsets.only(bottom: 88),
@@ -101,8 +106,9 @@ class _GroupManagementScreenState extends ConsumerState<GroupManagementScreen> {
                       return ListTile(
                         leading: CircleAvatar(
                           child: Text(
-                              (group.name.isEmpty ? '?' : group.name[0])
-                                  .toUpperCase()),
+                            (group.name.isEmpty ? '?' : group.name[0])
+                                .toUpperCase(),
+                          ),
                         ),
                         title: Text(group.name),
                         subtitle: group.description != null
@@ -139,11 +145,12 @@ class _GroupManagementScreenState extends ConsumerState<GroupManagementScreen> {
   }
 
   Future<void> _showGroupDialog(
-      BuildContext context, WidgetRef ref, CustomerGroup? existing) async {
-    final nameCtrl =
-        TextEditingController(text: existing?.name ?? '');
-    final descCtrl =
-        TextEditingController(text: existing?.description ?? '');
+    BuildContext context,
+    WidgetRef ref,
+    CustomerGroup? existing,
+  ) async {
+    final nameCtrl = TextEditingController(text: existing?.name ?? '');
+    final descCtrl = TextEditingController(text: existing?.description ?? '');
     final formKey = GlobalKey<FormState>();
 
     final confirmed = await showDialog<bool>(
@@ -159,34 +166,39 @@ class _GroupManagementScreenState extends ConsumerState<GroupManagementScreen> {
                 controller: nameCtrl,
                 decoration: const InputDecoration(labelText: 'Group name'),
                 autofocus: true,
-                inputFormatters:
-                    textFormatters(maxLength: AppConstants.maxGroupNameLength),
+                inputFormatters: textFormatters(
+                  maxLength: AppConstants.maxGroupNameLength,
+                ),
                 validator: (v) =>
                     v == null || v.trim().isEmpty ? 'Name is required' : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: descCtrl,
-                decoration:
-                    const InputDecoration(labelText: 'Description (optional)'),
+                decoration: const InputDecoration(
+                  labelText: 'Description (optional)',
+                ),
                 maxLines: 2,
-                inputFormatters:
-                    textFormatters(maxLength: AppConstants.maxGroupDescriptionLength),
+                inputFormatters: textFormatters(
+                  maxLength: AppConstants.maxGroupDescriptionLength,
+                ),
               ),
             ],
           ),
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
-              onPressed: () {
-                if (formKey.currentState!.validate()) {
-                  Navigator.pop(ctx, true);
-                }
-              },
-              child: const Text('Save')),
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                Navigator.pop(ctx, true);
+              }
+            },
+            child: const Text('Save'),
+          ),
         ],
       ),
     );
@@ -196,14 +208,16 @@ class _GroupManagementScreenState extends ConsumerState<GroupManagementScreen> {
     final repo = await ref.read(groupRepositoryProvider.future);
     try {
       if (existing == null) {
-        await repo.create(
-            name: nameCtrl.text, description: descCtrl.text);
+        await repo.create(name: nameCtrl.text, description: descCtrl.text);
       } else {
-        await repo.update(existing.copyWith(
+        await repo.update(
+          existing.copyWith(
             name: nameCtrl.text.trim(),
             description: descCtrl.text.trim().isEmpty
                 ? null
-                : descCtrl.text.trim()));
+                : descCtrl.text.trim(),
+          ),
+        );
       }
       ref.invalidate(groupListProvider);
       ref.invalidate(customerListProvider);
@@ -211,27 +225,34 @@ class _GroupManagementScreenState extends ConsumerState<GroupManagementScreen> {
       ref.invalidate(dashboardDataProvider);
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     }
   }
 
   Future<void> _confirmDelete(
-      BuildContext context, WidgetRef ref, CustomerGroup group) async {
+    BuildContext context,
+    WidgetRef ref,
+    CustomerGroup group,
+  ) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete group?'),
         content: Text(
-            'Customers in "${group.name}" will be unassigned from this group.'),
+          'Customers in "${group.name}" will be unassigned from this group.',
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Delete')),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
@@ -251,7 +272,9 @@ class _GroupManagementScreenState extends ConsumerState<GroupManagementScreen> {
             onPressed: () async {
               final repo = await ref.read(groupRepositoryProvider.future);
               final restored = await repo.create(
-                  name: group.name, description: group.description);
+                name: group.name,
+                description: group.description,
+              );
               if (memberIds.isNotEmpty) {
                 await repo.moveMembers(memberIds, restored.id);
               }
@@ -270,18 +293,18 @@ class _GroupManagementScreenState extends ConsumerState<GroupManagementScreen> {
     final groups = ref.read(groupListProvider).valueOrNull;
     if (groups == null || groups.isEmpty) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No groups to export')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('No groups to export')));
       return;
     }
     try {
       final headers = ['Group Name', 'Description', 'Created Date'];
-      final rows = groups.map((g) => [
-        g.name,
-        g.description ?? '-',
-        g.createdAt.split('T').first,
-      ]).toList();
+      final rows = groups
+          .map(
+            (g) => [g.name, g.description ?? '-', g.createdAt.split('T').first],
+          )
+          .toList();
       final file = await ExcelExportService.buildXlsx(
         headers: headers,
         rows: rows,
@@ -291,9 +314,9 @@ class _GroupManagementScreenState extends ConsumerState<GroupManagementScreen> {
       await ExcelExportService.shareXlsx(file, 'Groups Report');
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Export failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
       }
     }
   }

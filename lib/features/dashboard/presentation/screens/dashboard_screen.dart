@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:loantrack/core/widgets/app_drawer.dart';
+import 'package:loantrack/core/widgets/keyboard_refreshable.dart';
 
 import '../../../../core/utils/currency_utils.dart';
 import '../../data/models/dashboard_data.dart';
@@ -16,7 +17,8 @@ class DashboardScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final dashboardAsync = ref.watch(dashboardDataProvider);
     final currency =
-        ref.watch(currencySymbolProvider).valueOrNull ?? CurrencyUtils.defaultSymbol;
+        ref.watch(currencySymbolProvider).valueOrNull ??
+        CurrencyUtils.defaultSymbol;
 
     return Scaffold(
       appBar: AppBar(
@@ -29,6 +31,11 @@ class DashboardScreen extends ConsumerWidget {
           ),
         ),
         actions: [
+          IconButton(
+            tooltip: 'Refresh (F5)',
+            icon: const Icon(Icons.refresh),
+            onPressed: () => ref.invalidate(dashboardDataProvider),
+          ),
           Consumer(
             builder: (context, ref, _) {
               final notificationCount =
@@ -37,8 +44,10 @@ class DashboardScreen extends ConsumerWidget {
                 tooltip: 'Notifications',
                 icon: Badge(
                   isLabelVisible: notificationCount > 0,
-                  label: Text('$notificationCount',
-                      style: const TextStyle(fontSize: 10)),
+                  label: Text(
+                    '$notificationCount',
+                    style: const TextStyle(fontSize: 10),
+                  ),
                   child: const Icon(Icons.notifications_outlined),
                 ),
                 onPressed: () => context.push('/notifications'),
@@ -51,7 +60,7 @@ class DashboardScreen extends ConsumerWidget {
       body: dashboardAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
-        data: (data) => RefreshIndicator(
+        data: (data) => KeyboardRefreshable(
           onRefresh: () async {
             ref.invalidate(dashboardDataProvider);
           },
@@ -62,9 +71,9 @@ class DashboardScreen extends ConsumerWidget {
               const SizedBox(height: 24),
               Text(
                 'Quick Actions',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 12),
               _QuickActionsSection(),
@@ -73,23 +82,31 @@ class DashboardScreen extends ConsumerWidget {
                 Text(
                   'Recent Loans',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 8),
-                ...data.recentLoans.take(5).map((loan) => Card(
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          child: Text(loan.loanType.name.characters.first
-                              .toUpperCase()),
+                ...data.recentLoans
+                    .take(5)
+                    .map(
+                      (loan) => Card(
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            child: Text(
+                              loan.loanType.name.characters.first.toUpperCase(),
+                            ),
+                          ),
+                          title: Text(
+                            CurrencyUtils.format(loan.amount, symbol: currency),
+                          ),
+                          subtitle: Text(
+                            'Outstanding: ${CurrencyUtils.format(loan.outstandingBalance, symbol: currency)}',
+                          ),
+                          trailing: _StatusChip(status: loan.status.name),
+                          onTap: () => context.push('/loans/${loan.id}'),
                         ),
-                        title: Text(CurrencyUtils.format(loan.amount, symbol: currency)),
-                        subtitle: Text(
-                            'Outstanding: ${CurrencyUtils.format(loan.outstandingBalance, symbol: currency)}'),
-                        trailing: _StatusChip(status: loan.status.name),
-                        onTap: () => context.push('/loans/${loan.id}'),
                       ),
-                    )),
+                    ),
               ],
               if (data.recentLoans.isNotEmpty && data.recentPayments.isNotEmpty)
                 const SizedBox(height: 24),
@@ -97,66 +114,81 @@ class DashboardScreen extends ConsumerWidget {
                 Text(
                   'Recent Payments',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 8),
-                ...data.recentPayments.take(5).map((payment) => Card(
-                      child: ListTile(
-                        leading: const CircleAvatar(
-                          child: Icon(Icons.payment),
+                ...data.recentPayments
+                    .take(5)
+                    .map(
+                      (payment) => Card(
+                        child: ListTile(
+                          leading: const CircleAvatar(
+                            child: Icon(Icons.payment),
+                          ),
+                          title: Text(
+                            CurrencyUtils.format(
+                              payment.amount,
+                              symbol: currency,
+                            ),
+                          ),
+                          subtitle: Text(
+                            '${payment.method.name} — ${payment.collector}',
+                          ),
+                          trailing: Text(
+                            payment.paymentDate
+                                .toIso8601String()
+                                .split('T')
+                                .first,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          onTap: () => context.push('/collections'),
                         ),
-                        title: Text(CurrencyUtils.format(payment.amount, symbol: currency)),
-                        subtitle: Text(
-                            '${payment.method.name} — ${payment.collector}'),
-                        trailing: Text(
-                          payment.paymentDate
-                              .toIso8601String()
-                              .split('T')
-                              .first,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                        onTap: () => context.push('/collections'),
                       ),
-                    )),
+                    ),
               ],
               if (data.recentSavingsTransactions.isNotEmpty) ...[
                 const SizedBox(height: 24),
                 Text(
                   'Recent Savings',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 8),
-                ...data.recentSavingsTransactions.take(5).map((txn) => Card(
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: txn.isCredit
-                              ? Colors.green.withValues(alpha: 0.1)
-                              : Colors.red.withValues(alpha: 0.1),
-                          child: Icon(
-                            txn.isCredit
-                                ? Icons.arrow_downward
-                                : Icons.arrow_upward,
-                            color: txn.isCredit ? Colors.green : Colors.red,
-                            size: 18,
+                ...data.recentSavingsTransactions
+                    .take(5)
+                    .map(
+                      (txn) => Card(
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: txn.isCredit
+                                ? Colors.green.withValues(alpha: 0.1)
+                                : Colors.red.withValues(alpha: 0.1),
+                            child: Icon(
+                              txn.isCredit
+                                  ? Icons.arrow_downward
+                                  : Icons.arrow_upward,
+                              color: txn.isCredit ? Colors.green : Colors.red,
+                              size: 18,
+                            ),
                           ),
-                        ),
-                        title: Text(txn.customerName),
-                        subtitle: Text(
-                          '${txn.typeLabel} — ${txn.createdAt.split('T').first}',
-                        ),
-                        trailing: Text(
-                          CurrencyUtils.format(txn.amount, symbol: currency),
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: txn.isCredit ? Colors.green : Colors.red,
+                          title: Text(txn.customerName),
+                          subtitle: Text(
+                            '${txn.typeLabel} — ${txn.createdAt.split('T').first}',
                           ),
+                          trailing: Text(
+                            CurrencyUtils.format(txn.amount, symbol: currency),
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: txn.isCredit ? Colors.green : Colors.red,
+                            ),
+                          ),
+                          onTap: () =>
+                              context.push('/customers/${txn.customerId}'),
                         ),
-                        onTap: () => context.push('/customers/${txn.customerId}'),
                       ),
-                    )),
+                    ),
               ],
             ],
           ),
@@ -190,7 +222,10 @@ class _MinimalStatCards extends StatelessWidget {
             Expanded(
               child: _StatCard(
                 label: 'Outstanding',
-                value: CurrencyUtils.format(data.outstandingBalance, symbol: currency),
+                value: CurrencyUtils.format(
+                  data.outstandingBalance,
+                  symbol: currency,
+                ),
                 icon: Icons.account_balance,
                 color: Colors.red,
                 onTap: () => context.go('/reports'),
@@ -204,7 +239,10 @@ class _MinimalStatCards extends StatelessWidget {
             Expanded(
               child: _StatCard(
                 label: 'Collected',
-                value: CurrencyUtils.format(data.totalCollected, symbol: currency),
+                value: CurrencyUtils.format(
+                  data.totalCollected,
+                  symbol: currency,
+                ),
                 icon: Icons.savings,
                 color: Colors.teal,
                 onTap: () => context.go('/reports'),
@@ -214,7 +252,10 @@ class _MinimalStatCards extends StatelessWidget {
             Expanded(
               child: _StatCard(
                 label: 'Disbursed',
-                value: CurrencyUtils.format(data.totalDisbursed, symbol: currency),
+                value: CurrencyUtils.format(
+                  data.totalDisbursed,
+                  symbol: currency,
+                ),
                 icon: Icons.trending_up,
                 color: Colors.orange,
                 onTap: () => context.go('/reports'),
@@ -228,7 +269,10 @@ class _MinimalStatCards extends StatelessWidget {
             Expanded(
               child: _StatCard(
                 label: 'Savings',
-                value: CurrencyUtils.format(data.totalSavingsBalance, symbol: currency),
+                value: CurrencyUtils.format(
+                  data.totalSavingsBalance,
+                  symbol: currency,
+                ),
                 icon: Icons.account_balance_wallet,
                 color: Colors.indigo,
                 onTap: () => context.go('/savings'),
@@ -291,16 +335,19 @@ class _StatCard extends StatelessWidget {
             const SizedBox(height: 8),
             FittedBox(
               fit: BoxFit.scaleDown,
-              child: Text(value,
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(fontWeight: FontWeight.bold)),
+              child: Text(
+                value,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
             ),
             const SizedBox(height: 2),
-            Text(label,
-                style: Theme.of(context).textTheme.bodySmall,
-                textAlign: TextAlign.center),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.bodySmall,
+              textAlign: TextAlign.center,
+            ),
           ],
         ),
       ),
@@ -328,8 +375,10 @@ class _StatusChip extends StatelessWidget {
       _ => Colors.grey,
     };
     return Chip(
-      label: Text(status.toUpperCase(),
-          style: const TextStyle(fontSize: 10, color: Colors.white)),
+      label: Text(
+        status.toUpperCase(),
+        style: const TextStyle(fontSize: 10, color: Colors.white),
+      ),
       backgroundColor: color,
       padding: EdgeInsets.zero,
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -404,16 +453,20 @@ class _QuickAction extends StatelessWidget {
           children: [
             CircleAvatar(
               radius: 22,
-              backgroundColor:
-                  Theme.of(context).colorScheme.primaryContainer,
-              child: Icon(icon,
-                  size: 20, color: Theme.of(context).colorScheme.primary),
+              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+              child: Icon(
+                icon,
+                size: 20,
+                color: Theme.of(context).colorScheme.primary,
+              ),
             ),
             const SizedBox(height: 6),
             Text(
               label,
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(fontSize: 11),
             ),
           ],
         ),

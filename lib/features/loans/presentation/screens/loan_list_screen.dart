@@ -6,6 +6,7 @@ import '../../../../core/utils/currency_utils.dart';
 import '../../../../core/widgets/app_drawer.dart';
 import '../../../../core/widgets/debounced_text_field.dart';
 import '../../../../core/widgets/empty_state.dart';
+import '../../../../core/widgets/keyboard_refreshable.dart';
 import '../../data/models/loan_entity.dart';
 import '../../../reports/services/excel_export_service.dart';
 import '../providers/loan_providers.dart';
@@ -13,8 +14,20 @@ import '../providers/loan_providers.dart';
 class LoanListScreen extends ConsumerWidget {
   const LoanListScreen({super.key});
 
-  static const _statusTabs = <String?>[null, 'active', 'completed', 'defaulted', 'cancelled'];
-  static const _statusLabels = <String>['All', 'Active', 'Completed', 'Defaulted', 'Cancelled'];
+  static const _statusTabs = <String?>[
+    null,
+    'active',
+    'completed',
+    'defaulted',
+    'cancelled',
+  ];
+  static const _statusLabels = <String>[
+    'All',
+    'Active',
+    'Completed',
+    'Defaulted',
+    'Cancelled',
+  ];
   static const _typeTabs = <String?>[null, 'daily', 'weekly'];
   static const _typeLabels = <String>['All', 'Daily', 'Weekly'];
 
@@ -36,6 +49,11 @@ class LoanListScreen extends ConsumerWidget {
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh (F5)',
+            onPressed: () => ref.invalidate(allLoansProvider),
+          ),
+          IconButton(
             icon: const Icon(Icons.file_download),
             tooltip: 'Export to Excel',
             onPressed: () async {
@@ -47,18 +65,30 @@ class LoanListScreen extends ConsumerWidget {
                 return;
               }
               try {
-                final headers = ['Customer Name', 'Amount',
-                    'Outstanding', 'Rate', 'Status', 'Type', 'Date', 'Notes'];
-                final rows = loans.map((l) => [
-                  l.customerName ?? l.id,
-                  CurrencyUtils.format(l.amount),
-                  CurrencyUtils.format(l.outstandingBalance),
-                  '${l.interestRate}%',
-                  l.status.name,
-                  l.loanType.name,
-                  l.loanDate.toIso8601String().split('T').first,
-                  l.notes ?? '-',
-                ]).toList();
+                final headers = [
+                  'Customer Name',
+                  'Amount',
+                  'Outstanding',
+                  'Rate',
+                  'Status',
+                  'Type',
+                  'Date',
+                  'Notes',
+                ];
+                final rows = loans
+                    .map(
+                      (l) => [
+                        l.customerName ?? l.id,
+                        CurrencyUtils.format(l.amount),
+                        CurrencyUtils.format(l.outstandingBalance),
+                        '${l.interestRate}%',
+                        l.status.name,
+                        l.loanType.name,
+                        l.loanDate.toIso8601String().split('T').first,
+                        l.notes ?? '-',
+                      ],
+                    )
+                    .toList();
                 final file = await ExcelExportService.buildXlsx(
                   headers: headers,
                   rows: rows,
@@ -68,9 +98,9 @@ class LoanListScreen extends ConsumerWidget {
                 await ExcelExportService.shareXlsx(file, 'Loan Report');
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Export failed: $e')),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
                 }
               }
             },
@@ -83,7 +113,8 @@ class LoanListScreen extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: DebouncedTextField(
-              onChanged: (value) => ref.read(loanSearchQueryProvider.notifier).state = value,
+              onChanged: (value) =>
+                  ref.read(loanSearchQueryProvider.notifier).state = value,
               decoration: const InputDecoration(
                 labelText: 'Search loans',
                 hintText: 'Loan ID, customer name, or phone',
@@ -142,17 +173,19 @@ class LoanListScreen extends ConsumerWidget {
               error: (e, _) => Center(child: Text('Error: $e')),
               data: (loans) {
                 if (loans.isEmpty) {
-                  final statusLabel = _statusLabels[
-                      _statusTabs.indexOf(statusFilter)].toLowerCase();
+                  final statusLabel =
+                      _statusLabels[_statusTabs.indexOf(statusFilter)]
+                          .toLowerCase();
                   return EmptyState(
                     icon: Icons.monetization_on_outlined,
-                    title: 'No ${statusFilter != null ? statusLabel : ''} loans found',
+                    title:
+                        'No ${statusFilter != null ? statusLabel : ''} loans found',
                     subtitle: searchQuery.isNotEmpty
                         ? 'Try a different search term.'
                         : 'Loans will appear here once created.',
                   );
                 }
-                return RefreshIndicator(
+                return KeyboardRefreshable(
                   onRefresh: () async => ref.invalidate(allLoansProvider),
                   child: ListView.separated(
                     itemCount: loans.length,
@@ -164,7 +197,10 @@ class LoanListScreen extends ConsumerWidget {
                           backgroundColor: _statusColor(loan.status),
                           child: Text(
                             loan.loanType == LoanType.daily ? 'D' : 'W',
-                            style: const TextStyle(color: Colors.white, fontSize: 12),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                            ),
                           ),
                         ),
                         title: Text(
@@ -180,10 +216,16 @@ class LoanListScreen extends ConsumerWidget {
                           mainAxisAlignment: MainAxisAlignment.center,
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
-                            Text(CurrencyUtils.format(loan.outstandingBalance),
-                                style: const TextStyle(fontWeight: FontWeight.bold)),
-                            Text('outstanding',
-                                style: Theme.of(context).textTheme.bodySmall),
+                            Text(
+                              CurrencyUtils.format(loan.outstandingBalance),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              'outstanding',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
                           ],
                         ),
                         onTap: () => context.push('/loans/${loan.id}'),

@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../../../core/utils/currency_utils.dart';
 import '../../../../core/utils/date_utils.dart';
+import '../../../../core/widgets/keyboard_refreshable.dart';
 import '../../../business/presentation/providers/business_providers.dart';
 import '../../../customers/presentation/providers/customer_providers.dart';
 import '../../../dashboard/presentation/providers/dashboard_provider.dart';
@@ -24,9 +25,7 @@ class FutureScheduleScreen extends ConsumerWidget {
     final scheduleAsync = ref.watch(futureScheduleProvider);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Future Collection Schedule'),
-      ),
+      appBar: AppBar(title: const Text('Future Collection Schedule')),
       body: scheduleAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
@@ -36,11 +35,18 @@ class FutureScheduleScreen extends ConsumerWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.event_available, size: 80,
-                      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3)),
+                  Icon(
+                    Icons.event_available,
+                    size: 80,
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.primary.withValues(alpha: 0.3),
+                  ),
                   const SizedBox(height: 16),
-                  Text('No upcoming collections in the next 30 days.',
-                      style: Theme.of(context).textTheme.bodyLarge),
+                  Text(
+                    'No upcoming collections in the next 30 days.',
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
                 ],
               ),
             );
@@ -55,7 +61,10 @@ class FutureScheduleScreen extends ConsumerWidget {
 
           double grandTotal = 0;
           for (final row in rows) {
-            grandTotal += (row.amountDue - row.amountPaid).clamp(0, double.infinity);
+            grandTotal += (row.amountDue - row.amountPaid).clamp(
+              0,
+              double.infinity,
+            );
           }
 
           // Flatten day headers + rows so the lazy builder only materializes
@@ -91,31 +100,39 @@ class FutureScheduleScreen extends ConsumerWidget {
                 ),
               ),
               Expanded(
-                child: RefreshIndicator(
-                  onRefresh: () async =>
-                      ref.invalidate(futureScheduleProvider),
+                child: KeyboardRefreshable(
+                  onRefresh: () async => ref.invalidate(futureScheduleProvider),
                   child: ListView.builder(
                     itemCount: items.length,
                     itemBuilder: (context, index) {
                       final (date, row) = items[index];
                       if (row == null) {
-                        return _buildDayHeaderCard(context, date!, grouped[date]!);
+                        return _buildDayHeaderCard(
+                          context,
+                          date!,
+                          grouped[date]!,
+                        );
                       }
                       return Card(
                         margin: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 2),
+                          horizontal: 12,
+                          vertical: 2,
+                        ),
                         child: ListTile(
                           dense: true,
                           title: Text(row.customerName),
                           subtitle: Text(
-                              '${row.loanType}${row.groupName != null ? ' — ${row.groupName}' : ''}'
-                              '${row.amountPaid > 0 ? '  ·  ${CurrencyUtils.format(row.amountPaid)} already paid' : ''}'),
+                            '${row.loanType}${row.groupName != null ? ' — ${row.groupName}' : ''}'
+                            '${row.amountPaid > 0 ? '  ·  ${CurrencyUtils.format(row.amountPaid)} already paid' : ''}',
+                          ),
                           trailing: Text(
                             CurrencyUtils.format(
-                                (row.amountDue - row.amountPaid)
-                                    .clamp(0, double.infinity)),
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold),
+                              (row.amountDue - row.amountPaid).clamp(
+                                0,
+                                double.infinity,
+                              ),
+                            ),
+                            style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                           onTap: () {
                             _quickPay(context, ref, row);
@@ -137,7 +154,8 @@ class FutureScheduleScreen extends ConsumerWidget {
     final remaining = row.amountDue - row.amountPaid;
     if (remaining <= 0) return;
     final currency =
-        ref.read(currencySymbolProvider).valueOrNull ?? CurrencyUtils.defaultSymbol;
+        ref.read(currencySymbolProvider).valueOrNull ??
+        CurrencyUtils.defaultSymbol;
     final ctrl = TextEditingController(text: remaining.toStringAsFixed(0));
     // Stable id for THIS payment action: reused if the confirm is retried so a
     // timeout/retry can never double-record the same logical payment (F3).
@@ -151,15 +169,21 @@ class FutureScheduleScreen extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Amount due: ${CurrencyUtils.format(row.amountDue)}',
-                style: Theme.of(context).textTheme.bodySmall),
+            Text(
+              'Amount due: ${CurrencyUtils.format(row.amountDue)}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
             if (row.amountPaid > 0)
-              Text('Already paid: ${CurrencyUtils.format(row.amountPaid)}',
-                  style: Theme.of(context).textTheme.bodySmall),
+              Text(
+                'Already paid: ${CurrencyUtils.format(row.amountPaid)}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
             const SizedBox(height: 12),
             TextField(
               controller: ctrl,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               decoration: InputDecoration(
                 labelText: 'Amount',
                 prefixText: currency,
@@ -188,8 +212,13 @@ class FutureScheduleScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _doQuickPay(BuildContext context, WidgetRef ref,
-      CollectionRow row, double amount, String requestId) async {
+  Future<void> _doQuickPay(
+    BuildContext context,
+    WidgetRef ref,
+    CollectionRow row,
+    double amount,
+    String requestId,
+  ) async {
     try {
       final repo = await ref.read(paymentRepositoryProvider.future);
       final profileAsync = ref.read(businessProfileProvider);
@@ -222,23 +251,30 @@ class FutureScheduleScreen extends ConsumerWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Paid ${CurrencyUtils.format(amount)} for ${row.customerName}'),
+            content: Text(
+              'Paid ${CurrencyUtils.format(amount)} for ${row.customerName}',
+            ),
           ),
         );
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Payment failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Payment failed: $e')));
       }
     }
   }
 
   Widget _buildDayHeaderCard(
-      BuildContext context, String date, List<CollectionRow> dayRows) {
-    final dayTotal = dayRows.fold<double>(0, (s, r) =>
-        s + (r.amountDue - r.amountPaid).clamp(0, double.infinity));
+    BuildContext context,
+    String date,
+    List<CollectionRow> dayRows,
+  ) {
+    final dayTotal = dayRows.fold<double>(
+      0,
+      (s, r) => s + (r.amountDue - r.amountPaid).clamp(0, double.infinity),
+    );
     final parsed = DateTime.tryParse(date);
     final label = parsed != null
         ? '${AppDateUtils.formatDate(parsed)}  ·  ${DateFormat('EEEE').format(parsed)}'
@@ -251,8 +287,11 @@ class FutureScheduleScreen extends ConsumerWidget {
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
         child: Row(
           children: [
-            Icon(Icons.calendar_today,
-                size: 16, color: Theme.of(context).colorScheme.primary),
+            Icon(
+              Icons.calendar_today,
+              size: 16,
+              color: Theme.of(context).colorScheme.primary,
+            ),
             const SizedBox(width: 8),
             Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
             const Spacer(),
@@ -279,10 +318,12 @@ class _StatItem extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Text(value,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                )),
+        Text(
+          value,
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+        ),
         Text(label, style: Theme.of(context).textTheme.bodySmall),
       ],
     );

@@ -5,6 +5,7 @@ import 'package:loantrack/core/utils/date_utils.dart';
 import 'package:loantrack/core/utils/input_formatters.dart';
 import 'package:loantrack/core/widgets/app_drawer.dart';
 import 'package:loantrack/core/widgets/empty_state.dart';
+import 'package:loantrack/core/widgets/keyboard_refreshable.dart';
 import 'package:loantrack/features/collection/presentation/providers/collection_provider.dart';
 import 'package:loantrack/features/dashboard/presentation/providers/dashboard_provider.dart';
 import 'package:loantrack/features/holidays/data/models/holiday_entity.dart';
@@ -49,9 +50,12 @@ class _HolidayManagementScreenState
           final filtered = _searchQuery.isEmpty
               ? holidays
               : holidays
-                  .where((h) =>
-                      h.name.toLowerCase().contains(_searchQuery.toLowerCase()))
-                  .toList();
+                    .where(
+                      (h) => h.name.toLowerCase().contains(
+                        _searchQuery.toLowerCase(),
+                      ),
+                    )
+                    .toList();
 
           if (_showCalendar) {
             return _buildCalendarView(context, filtered, holidays);
@@ -71,7 +75,10 @@ class _HolidayManagementScreenState
   }
 
   Widget _buildListView(
-      BuildContext context, List<Holiday> filtered, List<Holiday> allHolidays) {
+    BuildContext context,
+    List<Holiday> filtered,
+    List<Holiday> allHolidays,
+  ) {
     return Column(
       children: [
         Padding(
@@ -88,7 +95,7 @@ class _HolidayManagementScreenState
         ),
         Expanded(
           child: filtered.isEmpty
-              ? RefreshIndicator(
+              ? KeyboardRefreshable(
                   onRefresh: () async => ref.invalidate(holidayListProvider),
                   child: ListView(
                     children: const [
@@ -101,7 +108,7 @@ class _HolidayManagementScreenState
                     ],
                   ),
                 )
-              : RefreshIndicator(
+              : KeyboardRefreshable(
                   onRefresh: () async => ref.invalidate(holidayListProvider),
                   child: ListView.builder(
                     itemCount: filtered.length,
@@ -117,7 +124,10 @@ class _HolidayManagementScreenState
   }
 
   Widget _buildCalendarView(
-      BuildContext context, List<Holiday> filtered, List<Holiday> allHolidays) {
+    BuildContext context,
+    List<Holiday> filtered,
+    List<Holiday> allHolidays,
+  ) {
     final now = DateTime.now();
     final firstDay = DateTime(_calendarYear, _calendarMonth, 1);
     final lastDay = DateTime(_calendarYear, _calendarMonth + 1, 0);
@@ -134,8 +144,12 @@ class _HolidayManagementScreenState
         }
       } else {
         if (h.date.year == _calendarYear && h.date.month == _calendarMonth) {
-          holidayDates.putIfAbsent(
-              DateTime(h.date.year, h.date.month, h.date.day), () => []).add(h);
+          holidayDates
+              .putIfAbsent(
+                DateTime(h.date.year, h.date.month, h.date.day),
+                () => [],
+              )
+              .add(h);
         }
       }
     }
@@ -164,7 +178,9 @@ class _HolidayManagementScreenState
               Text(
                 '${_monthName(_calendarMonth)} $_calendarYear',
                 style: const TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.w600),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               TextButton.icon(
                 onPressed: () {
@@ -193,17 +209,25 @@ class _HolidayManagementScreenState
             children: [
               for (final day in ['M', 'T', 'W', 'T', 'F', 'S', 'S'])
                 Center(
-                  child: Text(day,
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Theme.of(context).colorScheme.primary)),
+                  child: Text(
+                    day,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
                 ),
-              for (int i = 1; i < startWeekday; i++)
-                const SizedBox.shrink(),
+              for (int i = 1; i < startWeekday; i++) const SizedBox.shrink(),
               for (int day = 1; day <= daysInMonth; day++) ...[
-                _buildDayCell(day, _calendarYear, _calendarMonth, holidayDates,
-                    now, allHolidays),
+                _buildDayCell(
+                  day,
+                  _calendarYear,
+                  _calendarMonth,
+                  holidayDates,
+                  now,
+                  allHolidays,
+                ),
               ],
             ],
           ),
@@ -217,8 +241,7 @@ class _HolidayManagementScreenState
               const SizedBox(width: 6),
               const Text('Holiday', style: TextStyle(fontSize: 12)),
               const SizedBox(width: 16),
-              Icon(Icons.circle,
-                  size: 12, color: Colors.grey.shade300),
+              Icon(Icons.circle, size: 12, color: Colors.grey.shade300),
               const SizedBox(width: 6),
               const Text('Weekend', style: TextStyle(fontSize: 12)),
             ],
@@ -232,9 +255,10 @@ class _HolidayManagementScreenState
               child: Text(
                 'Holidays this month: ${holidayDates.length}',
                 style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.red.shade700),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.red.shade700,
+                ),
               ),
             ),
           ),
@@ -242,13 +266,17 @@ class _HolidayManagementScreenState
     );
   }
 
-  Widget _buildDayCell(int day, int year, int month,
-      Map<DateTime, List<Holiday>> holidayDates, DateTime now,
-      List<Holiday> allHolidays) {
+  Widget _buildDayCell(
+    int day,
+    int year,
+    int month,
+    Map<DateTime, List<Holiday>> holidayDates,
+    DateTime now,
+    List<Holiday> allHolidays,
+  ) {
     final date = DateTime(year, month, day);
-    final isToday = date.year == now.year &&
-        date.month == now.month &&
-        date.day == now.day;
+    final isToday =
+        date.year == now.year && date.month == now.month && date.day == now.day;
     final isWeekend = date.weekday == 6 || date.weekday == 7;
     final hasHoliday = holidayDates.containsKey(date);
     final holidaysOnDay = holidayDates[date];
@@ -274,7 +302,10 @@ class _HolidayManagementScreenState
           color: bgColor,
           borderRadius: BorderRadius.circular(4),
           border: isToday
-              ? Border.all(color: Theme.of(context).colorScheme.primary, width: 2)
+              ? Border.all(
+                  color: Theme.of(context).colorScheme.primary,
+                  width: 2,
+                )
               : null,
         ),
         child: Center(
@@ -286,8 +317,8 @@ class _HolidayManagementScreenState
               color: hasHoliday
                   ? Colors.red.shade800
                   : isWeekend
-                      ? Colors.grey
-                      : null,
+                  ? Colors.grey
+                  : null,
             ),
           ),
         ),
@@ -297,8 +328,18 @@ class _HolidayManagementScreenState
 
   String _monthName(int month) {
     const names = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
     ];
     return names[month - 1];
   }
@@ -315,10 +356,12 @@ class _HolidayManagementScreenState
           Switch(
             value: holiday.isEnabled,
             onChanged: (isEnabled) async {
-              final holidayRepository =
-                  await ref.read(holidayRepositoryProvider.future);
-              final result = await holidayRepository
-                  .saveHoliday(holiday.copyWith(isEnabled: isEnabled));
+              final holidayRepository = await ref.read(
+                holidayRepositoryProvider.future,
+              );
+              final result = await holidayRepository.saveHoliday(
+                holiday.copyWith(isEnabled: isEnabled),
+              );
               result.when(
                 success: (_) {
                   ref.invalidate(holidayListProvider);
@@ -358,7 +401,9 @@ class _HolidayManagementScreenState
   /// blocks the holiday save itself.
   Future<void> _regenSchedules(WidgetRef ref) async {
     try {
-      final scheduleService = await ref.read(loanScheduleServiceProvider.future);
+      final scheduleService = await ref.read(
+        loanScheduleServiceProvider.future,
+      );
       await scheduleService.rebuildAllSchedules();
       ref.invalidate(collectionListProvider);
       ref.invalidate(dashboardDataProvider);
@@ -367,7 +412,10 @@ class _HolidayManagementScreenState
   }
 
   Future<void> _deleteHoliday(
-      BuildContext context, WidgetRef ref, Holiday holiday) async {
+    BuildContext context,
+    WidgetRef ref,
+    Holiday holiday,
+  ) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -387,8 +435,9 @@ class _HolidayManagementScreenState
     );
 
     if (confirmed == true) {
-      final holidayRepository =
-          await ref.read(holidayRepositoryProvider.future);
+      final holidayRepository = await ref.read(
+        holidayRepositoryProvider.future,
+      );
       final result = await holidayRepository.deleteHoliday(holiday.id);
       if (context.mounted) {
         result.when(
@@ -401,7 +450,9 @@ class _HolidayManagementScreenState
                 action: SnackBarAction(
                   label: 'Undo',
                   onPressed: () async {
-                    final repo = await ref.read(holidayRepositoryProvider.future);
+                    final repo = await ref.read(
+                      holidayRepositoryProvider.future,
+                    );
                     await repo.saveHoliday(holiday);
                     ref.invalidate(holidayListProvider);
                     _regenSchedules(ref);
@@ -420,8 +471,12 @@ class _HolidayManagementScreenState
     }
   }
 
-  void _showHolidayDialog(BuildContext context, WidgetRef ref,
-      {Holiday? holiday, DateTime? prefillDate}) {
+  void _showHolidayDialog(
+    BuildContext context,
+    WidgetRef ref, {
+    Holiday? holiday,
+    DateTime? prefillDate,
+  }) {
     final formKey = GlobalKey<FormState>();
     final nameController = TextEditingController(text: holiday?.name);
     DateTime selectedDate = holiday?.date ?? prefillDate ?? DateTime.now();
@@ -441,10 +496,12 @@ class _HolidayManagementScreenState
                   children: [
                     TextFormField(
                       controller: nameController,
-                      decoration:
-                          const InputDecoration(labelText: 'Holiday Name'),
-                      inputFormatters:
-                          textFormatters(maxLength: AppConstants.maxNameLength),
+                      decoration: const InputDecoration(
+                        labelText: 'Holiday Name',
+                      ),
+                      inputFormatters: textFormatters(
+                        maxLength: AppConstants.maxNameLength,
+                      ),
                       validator: (value) {
                         if (value == null || value.isEmpty) {
                           return 'Please enter a name';
@@ -473,8 +530,7 @@ class _HolidayManagementScreenState
                     CheckboxListTile(
                       contentPadding: EdgeInsets.zero,
                       title: const Text('Recurring Holiday'),
-                      subtitle:
-                          const Text('Repeats on this date every year'),
+                      subtitle: const Text('Repeats on this date every year'),
                       value: isRecurring,
                       onChanged: (value) =>
                           setState(() => isRecurring = value ?? false),
@@ -497,10 +553,12 @@ class _HolidayManagementScreenState
                         isRecurring: isRecurring,
                         isEnabled: holiday?.isEnabled ?? true,
                       );
-                      final holidayRepository =
-                          await ref.read(holidayRepositoryProvider.future);
-                      final result =
-                          await holidayRepository.saveHoliday(newHoliday);
+                      final holidayRepository = await ref.read(
+                        holidayRepositoryProvider.future,
+                      );
+                      final result = await holidayRepository.saveHoliday(
+                        newHoliday,
+                      );
                       if (context.mounted) {
                         result.when(
                           success: (_) {
@@ -510,9 +568,10 @@ class _HolidayManagementScreenState
                           },
                           failure: (failure) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                    content:
-                                        Text('Error: ${failure.message}')));
+                              SnackBar(
+                                content: Text('Error: ${failure.message}'),
+                              ),
+                            );
                           },
                         );
                       }
