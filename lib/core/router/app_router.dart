@@ -57,7 +57,8 @@ import '../../features/notifications/presentation/screens/notification_screen.da
 /// the current location is not allowed for the given auth state.
 String? authRedirect(AuthState auth, String location) {
   if (auth == AuthState.unlocked) return null;
-  final isPublic = location == '/splash' ||
+  final isPublic =
+      location == '/splash' ||
       location == '/onboarding' ||
       location == '/auth/pin' ||
       location == '/auth/setup_pin' ||
@@ -86,271 +87,267 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
-    GoRoute(
-      path: '/splash',
-      builder: (context, state) => const SplashScreen(),
-    ),
-    GoRoute(
-      path: '/onboarding',
-      builder: (context, state) => const OnboardingScreen(),
-    ),
-    GoRoute(
-      path: '/auth/pin',
-      builder: (context, state) => const PinLoginScreen(),
-    ),
-    GoRoute(
-      path: '/auth/setup_pin',
-      builder: (context, state) => const PinSetupScreen(),
-    ),
-    GoRoute(
-      path: '/auth/forgot_pin',
-      builder: (context, state) => const ForgotPinScreen(),
-    ),
-    GoRoute(
-      path: '/auth/change_pin',
-      builder: (context, state) => const ChangePinScreen(),
-    ),
-
-    // Main shell with bottom navigation
-    ShellRoute(
-      builder: (context, state, child) {
-        return ScaffoldWithNavBar(
-          currentPath: state.uri.toString(),
-          child: child,
-        );
-      },
-      routes: [
-        GoRoute(
-          path: '/dashboard',
-          builder: (context, state) => const DashboardScreen(),
-        ),
-        GoRoute(
-          path: '/collections',
-          builder: (context, state) => const DailyCollectionScreen(),
-          routes: [
-            GoRoute(
-              path: 'weekly',
-              builder: (context, state) => const WeeklyCollectionScreen(),
-            ),
-          ],
-        ),
-        GoRoute(
-          path: '/reports',
-          builder: (context, state) => const ReportScreen(),
-          routes: [
-            GoRoute(
-              path: 'daily-loans',
-              builder: (context, state) => const DailyLoanReportScreen(),
-            ),
-            GoRoute(
-              path: 'weekly-loans',
-              builder: (context, state) => const WeeklyLoanReportScreen(),
-            ),
-            GoRoute(
-              path: 'overdue',
-              builder: (context, state) => const OverdueReportScreen(),
-            ),
-            GoRoute(
-              path: 'customers',
-              builder: (context, state) => const CustomerReportScreen(),
-            ),
-            GoRoute(
-              path: 'savings-report',
-              builder: (context, state) => const SavingsReportScreen(),
-            ),
-            GoRoute(
-              path: 'profit',
-              builder: (context, state) => const ProfitReportScreen(),
-            ),
-          ],
-        ),
-        GoRoute(
-          path: '/savings',
-          builder: (context, state) => const SavingsOverviewScreen(),
-        ),
-      ],
-    ),
-
-    // Standalone routes (pushed on top of the shell)
-    GoRoute(
-      path: '/groups',
-      builder: (context, state) => const GroupManagementScreen(),
-      routes: [
-        GoRoute(
-          path: ':id',
-          builder: (context, state) =>
-              GroupDetailScreen(groupId: state.pathParameters['id']!),
-        ),
-      ],
-    ),
-    GoRoute(
-      path: '/customers',
-      builder: (context, state) => const CustomerListScreen(),
-      routes: [
-        GoRoute(
-          path: 'new',
-          builder: (context, state) => const CustomerFormScreen(),
-        ),
-        GoRoute(
-          path: ':id',
-          builder: (context, state) =>
-              CustomerDetailScreen(customerId: state.pathParameters['id']!),
-          routes: [
-            GoRoute(
-              path: 'edit',
-              builder: (context, state) =>
-                  CustomerFormScreen(customer: state.extra as Customer?),
-            ),
-            GoRoute(
-              path: 'documents',
-              builder: (context, state) => DocumentListScreen(
-                customerId: state.pathParameters['id']!,
-              ),
-            ),
-            GoRoute(
-              path: 'documents/upload',
-              builder: (context, state) => DocumentUploadScreen(
-                customerId: state.pathParameters['id']!,
-              ),
-            ),
-            GoRoute(
-              path: 'loans/new',
-              builder: (context, state) => LoanCreationScreen(
-                customerId: state.pathParameters['id']!,
-              ),
-            ),
-          ],
-        ),
-      ],
-    ),
-    GoRoute(
-      path: '/loans/:id',
-      builder: (context, state) => LoanDetailsScreen(
-        loanId: state.pathParameters['id']!,
+      GoRoute(
+        path: '/splash',
+        builder: (context, state) => const SplashScreen(),
       ),
-      routes: [
-        GoRoute(
-          path: 'edit',
-          builder: (context, state) {
-            final loan = state.extra as Loan?;
-            return LoanCreationScreen(
-              customerId: loan?.customerId ?? '',
-              existingLoan: loan,
-            );
-          },
-        ),
-        GoRoute(
-          path: 'repayment-calendar',
-          builder: (context, state) => RepaymentCalendarView(
-            loanId: state.pathParameters['id']!,
-          ),
-        ),
-        GoRoute(
-          path: 'payments',
-          builder: (context, state) => PaymentHistoryScreen(
-            loanId: state.pathParameters['id']!,
-            customerId: (state.extra as Map<String, dynamic>?)?['customerId'] as String? ?? '',
-          ),
-        ),
-        GoRoute(
-          path: 'record-payment',
-          builder: (context, state) {
-            final extra = state.extra as Map<String, dynamic>? ?? {};
-            return RecordPaymentScreen(
-              loanId: state.pathParameters['id']!,
-              customerId: extra['customerId'] as String? ?? '',
-              currentBalance:
-                  (extra['currentBalance'] as num?)?.toDouble() ?? 0.0,
-              installmentDue:
-                  (extra['installmentDue'] as num?)?.toDouble(),
-              initialAmount:
-                  (extra['initialAmount'] as num?)?.toDouble(),
-            );
-          },
-        ),
-      ],
-    ),
-    GoRoute(
-      path: '/documents/preview',
-      builder: (context, state) {
-        final extra = state.extra;
-        if (extra is! CustomerDocument) {
-          // Never navigate to the preview without a document object.
-          return const Scaffold(
-            body: Center(child: Text('No document to preview')),
+      GoRoute(
+        path: '/onboarding',
+        builder: (context, state) => const OnboardingScreen(),
+      ),
+      GoRoute(
+        path: '/auth/pin',
+        builder: (context, state) => const PinLoginScreen(),
+      ),
+      GoRoute(
+        path: '/auth/setup_pin',
+        builder: (context, state) => const PinSetupScreen(),
+      ),
+      GoRoute(
+        path: '/auth/forgot_pin',
+        builder: (context, state) => const ForgotPinScreen(),
+      ),
+      GoRoute(
+        path: '/auth/change_pin',
+        builder: (context, state) => const ChangePinScreen(),
+      ),
+
+      // Main shell with bottom navigation
+      ShellRoute(
+        builder: (context, state, child) {
+          return ScaffoldWithNavBar(
+            currentPath: state.uri.toString(),
+            child: child,
           );
-        }
-        return SecurePreviewScreen(document: extra);
-      },
-    ),
-    GoRoute(
-      path: '/holidays',
-      builder: (context, state) => const HolidayManagementScreen(),
-    ),
-    GoRoute(
-      path: '/audit-log',
-      builder: (context, state) => const AuditLogScreen(),
-    ),
-    GoRoute(
-      path: '/settings',
-      builder: (context, state) => const SettingsScreen(),
-    ),
-    GoRoute(
-      path: '/settings/security',
-      builder: (context, state) => const SecuritySettingsScreen(),
-    ),
-    GoRoute(
-      path: '/settings/business',
-      builder: (context, state) => const BusinessDetailsTab(),
-    ),
-    GoRoute(
-      path: '/settings/business/financial_defaults',
-      builder: (context, state) => const FinancialSettingsTab(),
-    ),
-    GoRoute(
-      path: '/settings/backup',
-      builder: (context, state) => const BackupScreen(),
-    ),
-    GoRoute(
-      path: '/settings/cloud_sync',
-      builder: (context, state) => const CloudSyncScreen(),
-    ),
-    GoRoute(
-      path: '/cloud-gate',
-      builder: (context, state) => const CloudGateScreen(),
-    ),
-    GoRoute(
-      path: '/loans',
-      builder: (context, state) => const LoanListScreen(),
-    ),
-    GoRoute(
-      path: '/statements/loan',
-      builder: (context, state) => const LoanStatementScreen(),
-    ),
-    GoRoute(
-      path: '/statements/savings',
-      builder: (context, state) => const SavingsStatementScreen(),
-    ),
-    GoRoute(
-      path: '/statements/collection',
-      builder: (context, state) => const CollectionStatementScreen(),
-    ),
-    GoRoute(
-      path: '/collections/future-schedule',
-      builder: (context, state) => const FutureScheduleScreen(),
-    ),
-    GoRoute(
-      path: '/search',
-      builder: (context, state) => const GlobalSearchScreen(),
-    ),
-    GoRoute(
-      path: '/notifications',
-      builder: (context, state) => const NotificationScreen(),
-    ),
-  ],
-  errorBuilder: (context, state) => Scaffold(
-    body: Center(child: Text('Route error: ${state.error}')),
-  ),
+        },
+        routes: [
+          GoRoute(
+            path: '/dashboard',
+            builder: (context, state) => const DashboardScreen(),
+          ),
+          GoRoute(
+            path: '/collections',
+            builder: (context, state) => const DailyCollectionScreen(),
+            routes: [
+              GoRoute(
+                path: 'weekly',
+                builder: (context, state) => const WeeklyCollectionScreen(),
+              ),
+            ],
+          ),
+          GoRoute(
+            path: '/reports',
+            builder: (context, state) => const ReportScreen(),
+            routes: [
+              GoRoute(
+                path: 'daily-loans',
+                builder: (context, state) => const DailyLoanReportScreen(),
+              ),
+              GoRoute(
+                path: 'weekly-loans',
+                builder: (context, state) => const WeeklyLoanReportScreen(),
+              ),
+              GoRoute(
+                path: 'overdue',
+                builder: (context, state) => const OverdueReportScreen(),
+              ),
+              GoRoute(
+                path: 'customers',
+                builder: (context, state) => const CustomerReportScreen(),
+              ),
+              GoRoute(
+                path: 'savings-report',
+                builder: (context, state) => const SavingsReportScreen(),
+              ),
+              GoRoute(
+                path: 'profit',
+                builder: (context, state) => const ProfitReportScreen(),
+              ),
+            ],
+          ),
+          GoRoute(
+            path: '/savings',
+            builder: (context, state) => const SavingsOverviewScreen(),
+          ),
+        ],
+      ),
+
+      // Standalone routes (pushed on top of the shell)
+      GoRoute(
+        path: '/groups',
+        builder: (context, state) => const GroupManagementScreen(),
+        routes: [
+          GoRoute(
+            path: ':id',
+            builder: (context, state) =>
+                GroupDetailScreen(groupId: state.pathParameters['id']!),
+          ),
+        ],
+      ),
+      GoRoute(
+        path: '/customers',
+        builder: (context, state) => const CustomerListScreen(),
+        routes: [
+          GoRoute(
+            path: 'new',
+            builder: (context, state) => const CustomerFormScreen(),
+          ),
+          GoRoute(
+            path: ':id',
+            builder: (context, state) =>
+                CustomerDetailScreen(customerId: state.pathParameters['id']!),
+            routes: [
+              GoRoute(
+                path: 'edit',
+                builder: (context, state) =>
+                    CustomerFormScreen(customer: state.extra as Customer?),
+              ),
+              GoRoute(
+                path: 'documents',
+                builder: (context, state) =>
+                    DocumentListScreen(customerId: state.pathParameters['id']!),
+              ),
+              GoRoute(
+                path: 'documents/upload',
+                builder: (context, state) => DocumentUploadScreen(
+                  customerId: state.pathParameters['id']!,
+                ),
+              ),
+              GoRoute(
+                path: 'loans/new',
+                builder: (context, state) =>
+                    LoanCreationScreen(customerId: state.pathParameters['id']!),
+              ),
+            ],
+          ),
+        ],
+      ),
+      GoRoute(
+        path: '/loans/:id',
+        builder: (context, state) =>
+            LoanDetailsScreen(loanId: state.pathParameters['id']!),
+        routes: [
+          GoRoute(
+            path: 'edit',
+            builder: (context, state) {
+              final loan = state.extra as Loan?;
+              return LoanCreationScreen(
+                customerId: loan?.customerId ?? '',
+                existingLoan: loan,
+              );
+            },
+          ),
+          GoRoute(
+            path: 'repayment-calendar',
+            builder: (context, state) =>
+                RepaymentCalendarView(loanId: state.pathParameters['id']!),
+          ),
+          GoRoute(
+            path: 'payments',
+            builder: (context, state) => PaymentHistoryScreen(
+              loanId: state.pathParameters['id']!,
+              customerId:
+                  (state.extra as Map<String, dynamic>?)?['customerId']
+                      as String? ??
+                  '',
+            ),
+          ),
+          GoRoute(
+            path: 'record-payment',
+            builder: (context, state) {
+              final extra = state.extra as Map<String, dynamic>? ?? {};
+              return RecordPaymentScreen(
+                loanId: state.pathParameters['id']!,
+                customerId: extra['customerId'] as String? ?? '',
+                currentBalance:
+                    (extra['currentBalance'] as num?)?.toDouble() ?? 0.0,
+                installmentDue: (extra['installmentDue'] as num?)?.toDouble(),
+                initialAmount: (extra['initialAmount'] as num?)?.toDouble(),
+              );
+            },
+          ),
+        ],
+      ),
+      GoRoute(
+        path: '/documents/preview',
+        builder: (context, state) {
+          final extra = state.extra;
+          if (extra is! CustomerDocument) {
+            // Never navigate to the preview without a document object.
+            return const Scaffold(
+              body: Center(child: Text('No document to preview')),
+            );
+          }
+          return SecurePreviewScreen(document: extra);
+        },
+      ),
+      GoRoute(
+        path: '/holidays',
+        builder: (context, state) => const HolidayManagementScreen(),
+      ),
+      GoRoute(
+        path: '/audit-log',
+        builder: (context, state) => const AuditLogScreen(),
+      ),
+      GoRoute(
+        path: '/settings',
+        builder: (context, state) => const SettingsScreen(),
+      ),
+      GoRoute(
+        path: '/settings/security',
+        builder: (context, state) => const SecuritySettingsScreen(),
+      ),
+      GoRoute(
+        path: '/settings/business',
+        builder: (context, state) => const BusinessDetailsTab(),
+      ),
+      GoRoute(
+        path: '/settings/business/financial_defaults',
+        builder: (context, state) => const FinancialSettingsTab(),
+      ),
+      GoRoute(
+        path: '/settings/backup',
+        builder: (context, state) => const BackupScreen(),
+      ),
+      GoRoute(
+        path: '/settings/cloud_sync',
+        builder: (context, state) => const CloudSyncScreen(),
+      ),
+      GoRoute(
+        path: '/cloud-gate',
+        builder: (context, state) => const CloudGateScreen(),
+      ),
+      GoRoute(
+        path: '/loans',
+        builder: (context, state) => const LoanListScreen(),
+      ),
+      GoRoute(
+        path: '/statements/loan',
+        builder: (context, state) => const LoanStatementScreen(),
+      ),
+      GoRoute(
+        path: '/statements/savings',
+        builder: (context, state) => const SavingsStatementScreen(),
+      ),
+      GoRoute(
+        path: '/statements/collection',
+        builder: (context, state) => const CollectionStatementScreen(),
+      ),
+      GoRoute(
+        path: '/collections/future-schedule',
+        builder: (context, state) => const FutureScheduleScreen(),
+      ),
+      GoRoute(
+        path: '/search',
+        builder: (context, state) => const GlobalSearchScreen(),
+      ),
+      GoRoute(
+        path: '/notifications',
+        builder: (context, state) => const NotificationScreen(),
+      ),
+    ],
+    errorBuilder: (context, state) =>
+        Scaffold(body: Center(child: Text('Route error: ${state.error}'))),
   );
 });
 
@@ -387,6 +384,14 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
 
+  /// Set when secure storage could not be read after several attempts. The
+  /// splash then shows a Retry panel instead of spinning forever — on Windows
+  /// the Credential Manager (flutter_secure_storage) can transiently fail at
+  /// cold start, which previously stranded the user on this screen.
+  bool _initFailed = false;
+
+  static const int _maxInitAttempts = 3;
+
   @override
   void initState() {
     super.initState();
@@ -394,23 +399,51 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     );
-    _fadeAnimation = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
+    _fadeAnimation = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
     _controller.forward();
 
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final secure = ref.read(secureStorageProvider);
-      await secure.migrateToFourDigitPin();
-      final hasPin = await secure.hasPin();
-      await Future.delayed(const Duration(milliseconds: 1500));
-      if (!mounted) return;
-      if (!hasPin) {
-        GoRouter.of(context).go('/auth/setup_pin');
-      } else {
-        GoRouter.of(context).go('/auth/pin');
+    WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
+  }
+
+  Future<void> _bootstrap() async {
+    if (mounted) setState(() => _initFailed = false);
+    final startedAt = DateTime.now();
+    var hasPin = false;
+    var ok = false;
+
+    for (var attempt = 0; attempt < _maxInitAttempts; attempt++) {
+      try {
+        final secure = ref.read(secureStorageProvider);
+        await secure.migrateToFourDigitPin();
+        hasPin = await secure.hasPin();
+        ok = true;
+        break;
+      } catch (e) {
+        debugPrint('Splash init attempt ${attempt + 1} failed: $e');
+        if (!mounted) return;
+        if (attempt < _maxInitAttempts - 1) {
+          await Future.delayed(const Duration(milliseconds: 400));
+          if (!mounted) return;
+        }
       }
-    });
+    }
+
+    if (!mounted) return;
+    if (!ok) {
+      setState(() => _initFailed = true);
+      return;
+    }
+
+    // Keep a minimum splash display time so the logo is not a flash.
+    final elapsed = DateTime.now().difference(startedAt);
+    if (elapsed < const Duration(milliseconds: 1500)) {
+      await Future.delayed(const Duration(milliseconds: 1500) - elapsed);
+    }
+    if (!mounted) return;
+    GoRouter.of(context).go(hasPin ? '/auth/pin' : '/auth/setup_pin');
   }
 
   @override
@@ -432,82 +465,122 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
             end: Alignment.bottomRight,
           ),
         ),
-        child: FadeTransition(
-          opacity: _fadeAnimation,
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFFD4A847), Color(0xFFF5D77A)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFFD4A847).withValues(alpha: 0.3),
-                        blurRadius: 32,
-                        offset: const Offset(0, 12),
-                      ),
-                    ],
-                  ),
-                  child: const Center(
-                    child: Text(
-                      'A',
-                      style: TextStyle(
-                        fontSize: 48,
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFF0A1628),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                const Text(
-                  'Adeghe Professional Services',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Created by AIGHEWI EGHOSA',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFFD4A847),
-                    letterSpacing: 0.5,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Professional Services Management',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Colors.white.withValues(alpha: 0.5),
-                  ),
-                ),
-                const SizedBox(height: 48),
-                SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.5,
-                    color: const Color(0xFFD4A847).withValues(alpha: 0.8),
-                  ),
-                ),
-              ],
+        child: _initFailed ? _buildInitError() : _buildSplash(),
+      ),
+    );
+  }
+
+  Widget _buildInitError() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.lock_outline, size: 56, color: Color(0xFFD4A847)),
+            const SizedBox(height: 16),
+            const Text(
+              'Unable to open secure storage',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+              ),
             ),
-          ),
+            const SizedBox(height: 8),
+            const Text(
+              'This usually means the Windows Credential Manager is temporarily '
+              'unavailable. Retry, or close and reopen the app.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: Colors.white70),
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: _bootstrap,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSplash() {
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const LinearGradient(
+                  colors: [Color(0xFFD4A847), Color(0xFFF5D77A)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFD4A847).withValues(alpha: 0.3),
+                    blurRadius: 32,
+                    offset: const Offset(0, 12),
+                  ),
+                ],
+              ),
+              child: const Center(
+                child: Text(
+                  'A',
+                  style: TextStyle(
+                    fontSize: 48,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF0A1628),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Adeghe Professional Services',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+                letterSpacing: 1.2,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Created by AIGHEWI EGHOSA',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFFD4A847),
+                letterSpacing: 0.5,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Professional Services Management',
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.white.withValues(alpha: 0.5),
+              ),
+            ),
+            const SizedBox(height: 48),
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: const Color(0xFFD4A847).withValues(alpha: 0.8),
+              ),
+            ),
+          ],
         ),
       ),
     );
