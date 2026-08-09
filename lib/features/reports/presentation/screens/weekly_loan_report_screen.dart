@@ -151,7 +151,7 @@ class _WeeklyLoanReportScreenState
                     'Phone',
                     'Guarantor',
                     'G. Phone',
-                    'Start Date',
+                    'Disbursement Date',
                     'Amount',
                     'Interest',
                     'Savings',
@@ -180,6 +180,8 @@ class _WeeklyLoanReportScreenState
 
   List<String> _row(ClientReport r, String symbol) {
     final date = DateTime.tryParse(r.loanDate) ?? DateTime.now();
+    // For weekly loans, the loanDate is already calculated as disbursement date (start_date - 7 days)
+    // in the repository query. For daily loans, it's the loan_date.
     final dateStr = AppDateUtils.formatDate(date, format: 'dd MMMM yyyy (EEEE)');
     return [
       r.customerName,
@@ -269,7 +271,7 @@ class _WeeklyLoanReportScreenState
         'Phone',
         'Guarantor',
         'G. Phone',
-        'Start Date',
+        'Disbursement Date',
         'Amount',
         'Interest',
         'Savings',
