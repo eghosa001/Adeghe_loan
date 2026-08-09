@@ -245,4 +245,89 @@ void main() {
     final customers = await unchanged.query('customers', orderBy: 'id');
     expect(customers.map((c) => c['id']), ['c1', 'c2']);
   });
+
+  test('restore reconciles secure_documents to exactly the backup set',
+      () async {
+    final (backup, service) = await buildHarness('test-db-key');
+    addTearDown(service.closeDb);
+    addTearDown(() {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {
+        // A lingering handle must not fail the test.
+      }
+    });
+
+    final docsDir = Directory(p.join(tempDir.path, 'secure_documents'));
+    await docsDir.create(recursive: true);
+    await File(p.join(docsDir.path, 'a.enc'))
+        .writeAsBytes(List.filled(8, 1), flush: true);
+    final file = await backup.createBackup();
+
+    // A document added AFTER the backup must not survive the restore — the
+    // restored DB never references it, so it would be stale orphan data.
+    await File(p.join(docsDir.path, 'b.enc'))
+        .writeAsBytes(List.filled(8, 2), flush: true);
+
+    await backup.restoreBackup(file);
+
+    expect(File(p.join(docsDir.path, 'a.enc')).existsSync(), isTrue);
+    expect(File(p.join(docsDir.path, 'b.enc')).existsSync(), isFalse);
+  });
+
+  test('restore of a document-free backup clears stale local documents',
+      () async {
+    final (backup, service) = await buildHarness('test-db-key');
+    addTearDown(service.closeDb);
+    addTearDown(() {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {
+        // A lingering handle must not fail the test.
+      }
+    });
+
+    // Backup taken with NO documents.
+    final file = await backup.createBackup();
+
+    // The device holds an encrypted document from a previous dataset.
+    final docsDir = Directory(p.join(tempDir.path, 'secure_documents'));
+    await docsDir.create(recursive: true);
+    await File(p.join(docsDir.path, 'stale-customer.enc'))
+        .writeAsBytes(List.filled(32, 7), flush: true);
+
+    await backup.restoreBackup(file);
+
+    expect(File(p.join(docsDir.path, 'stale-customer.enc')).existsSync(),
+        isFalse);
+  });
+
+  test('deleteBackup refuses names that escape the backup folder', () async {
+    final (backup, service) = await buildHarness('test-db-key');
+    addTearDown(service.closeDb);
+
+    await expectLater(backup.deleteBackup('../other.ltbackup'),
+        throwsA(isA<Exception>()));
+    await expectLater(backup.deleteBackup(p.join('sub', 'nested.ltbackup')),
+        throwsA(isA<Exception>()));
+    await expectLater(backup.deleteBackup('name/with\\slashes.ltbackup'),
+        throwsA(isA<Exception>()));
+  });
+
+  test('deleteBackup removes a legitimate backup file', () async {
+    final (backup, service) = await buildHarness('test-db-key');
+    addTearDown(service.closeDb);
+    addTearDown(() {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {
+        // A lingering handle must not fail the test.
+      }
+    });
+
+    final file = await backup.createBackup();
+    final name = p.basename(file.path);
+    await backup.deleteBackup(name);
+    expect(File(file.path).existsSync(), isFalse);
+  });
 }

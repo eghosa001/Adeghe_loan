@@ -11,6 +11,7 @@ import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/providers.dart';
 import '../../../../core/utils/date_utils.dart';
 import '../../../../core/utils/input_formatters.dart';
+import '../../../../core/utils/platform_utils.dart';
 import '../../data/customer_repository.dart';
 import '../../data/models/customer_entity.dart';
 import '../providers/customer_providers.dart';
@@ -93,7 +94,7 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
     };
     _fields = {
       for (final key in _keys)
-        key: TextEditingController(text: values[key] ?? '')
+        key: TextEditingController(text: values[key] ?? ''),
     };
   }
 
@@ -115,9 +116,14 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
 
   Future<void> _pickPassport(ImageSource source) async {
     final image = await _picker.pickImage(
-        source: source, imageQuality: 85, maxWidth: 1200);
+      source: source,
+      imageQuality: 85,
+      maxWidth: 1200,
+    );
     if (image == null) return;
-    final saved = await ref.read(storageServiceProvider).saveDocument(
+    final saved = await ref
+        .read(storageServiceProvider)
+        .saveDocument(
           File(image.path),
           'customer_passports',
           'passport_${DateTime.now().millisecondsSinceEpoch}.jpg',
@@ -179,7 +185,8 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
       signaturePath: existing?.signaturePath,
       notes: _optional('notes'),
       dateRegistered:
-          existing?.dateRegistered ?? AppDateUtils.formatForStorage(DateTime.now()),
+          existing?.dateRegistered ??
+          AppDateUtils.formatForStorage(DateTime.now()),
       status: _status,
       creditScore: existing?.creditScore ?? 0,
       groupId: _selectedGroupId,
@@ -208,19 +215,23 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
 
   void _showMessage(String message) {
     if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(message)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
-  Widget _field(String key, String label,
-      {bool required = false,
-      int maxLines = 1,
-      TextInputType? type,
-      VoidCallback? onTap,
-      int? maxLength,
-      List<TextInputFormatter>? inputFormatters,
-      String? Function(String?)? validator}) {
+  Widget _field(
+    String key,
+    String label, {
+    bool required = false,
+    int maxLines = 1,
+    TextInputType? type,
+    VoidCallback? onTap,
+    int? maxLength,
+    List<TextInputFormatter>? inputFormatters,
+    String? Function(String?)? validator,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: TextFormField(
@@ -229,25 +240,28 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
         keyboardType: type,
         readOnly: onTap != null,
         onTap: onTap,
-        inputFormatters: inputFormatters ??
+        inputFormatters:
+            inputFormatters ??
             (maxLength != null ? textFormatters(maxLength: maxLength) : null),
         decoration: InputDecoration(labelText: label),
-        validator: validator ??
+        validator:
+            validator ??
             (required
                 ? (value) => value == null || value.trim().isEmpty
-                    ? '$label is required'
-                    : null
+                      ? '$label is required'
+                      : null
                 : null),
       ),
     );
   }
 
   List<TextInputFormatter> _nameFormatters() => [
-        TextInputFormatter.withFunction(
-            (oldValue, newValue) =>
-                newValue.copyWith(text: newValue.text.toUpperCase())),
-        ...textFormatters(maxLength: AppConstants.maxNameLength),
-      ];
+    TextInputFormatter.withFunction(
+      (oldValue, newValue) =>
+          newValue.copyWith(text: newValue.text.toUpperCase()),
+    ),
+    ...textFormatters(maxLength: AppConstants.maxNameLength),
+  ];
 
   String? _validatePhone(String? value) {
     final v = value?.trim() ?? '';
@@ -275,26 +289,36 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
     };
   }
 
-  Widget _imagePicker() => Column(children: [
-        CircleAvatar(
-          radius: 48,
-          backgroundImage:
-              _passportPath == null ? null : FileImage(File(_passportPath!)),
-          child:
-              _passportPath == null ? const Icon(Icons.person, size: 42) : null,
-        ),
-        const SizedBox(height: 8),
-        Wrap(spacing: 8, children: [
-          OutlinedButton.icon(
+  Widget _imagePicker() => Column(
+    children: [
+      CircleAvatar(
+        radius: 48,
+        backgroundImage: _passportPath == null
+            ? null
+            : FileImage(File(_passportPath!)),
+        child: _passportPath == null
+            ? const Icon(Icons.person, size: 42)
+            : null,
+      ),
+      const SizedBox(height: 8),
+      Wrap(
+        spacing: 8,
+        children: [
+          if (canUseCamera)
+            OutlinedButton.icon(
               onPressed: () => _pickPassport(ImageSource.camera),
               icon: const Icon(Icons.photo_camera),
-              label: const Text('Camera')),
+              label: const Text('Camera'),
+            ),
           OutlinedButton.icon(
-              onPressed: () => _pickPassport(ImageSource.gallery),
-              icon: const Icon(Icons.photo_library),
-              label: const Text('Gallery')),
-        ]),
-      ]);
+            onPressed: () => _pickPassport(ImageSource.gallery),
+            icon: const Icon(Icons.photo_library),
+            label: const Text('Gallery'),
+          ),
+        ],
+      ),
+    ],
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -314,137 +338,229 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
               _save();
             }
           },
-          onStepCancel:
-              _step == 0 ? () => context.pop() : () => setState(() => _step--),
+          onStepCancel: _step == 0
+              ? () => context.pop()
+              : () => setState(() => _step--),
           controlsBuilder: (context, details) => Padding(
             padding: const EdgeInsets.only(top: 12),
-            child: Row(children: [
-              FilledButton(
+            child: Row(
+              children: [
+                FilledButton(
                   onPressed: _saving ? null : details.onStepContinue,
-                  child: Text(_step == 2 ? 'Save customer' : 'Continue')),
-              const SizedBox(width: 8),
-              TextButton(
+                  child: Text(_step == 2 ? 'Save customer' : 'Continue'),
+                ),
+                const SizedBox(width: 8),
+                TextButton(
                   onPressed: _saving ? null : details.onStepCancel,
-                  child: Text(_step == 0 ? 'Cancel' : 'Back')),
-            ]),
+                  child: Text(_step == 0 ? 'Cancel' : 'Back'),
+                ),
+              ],
+            ),
           ),
           steps: [
             Step(
-                title: const Text('Personal'),
-                isActive: _step >= 0,
-                content: Column(children: [
+              title: const Text('Personal'),
+              isActive: _step >= 0,
+              content: Column(
+                children: [
                   _imagePicker(),
                   const SizedBox(height: 16),
-                  _field('fullName', 'Full name',
-                      required: true,
-                      maxLength: AppConstants.maxNameLength,
-                      inputFormatters: _nameFormatters()),
+                  _field(
+                    'fullName',
+                    'Full name',
+                    required: true,
+                    maxLength: AppConstants.maxNameLength,
+                    inputFormatters: _nameFormatters(),
+                  ),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: DropdownButtonFormField<String>(
-                      initialValue: _value('gender').isEmpty ? null : _value('gender'),
+                      initialValue: _value('gender').isEmpty
+                          ? null
+                          : _value('gender'),
                       decoration: const InputDecoration(labelText: 'Gender'),
                       items: const [
                         DropdownMenuItem(value: 'Male', child: Text('Male')),
-                        DropdownMenuItem(value: 'Female', child: Text('Female')),
+                        DropdownMenuItem(
+                          value: 'Female',
+                          child: Text('Female'),
+                        ),
                       ],
                       onChanged: (value) =>
                           setState(() => _fields['gender']!.text = value ?? ''),
                     ),
                   ),
-                  _field('dateOfBirth', 'Date of birth',
-                      onTap: _selectDateOfBirth),
-                  _field('phone', 'Phone number',
-                      required: true,
-                      type: TextInputType.phone,
-                      maxLength: AppConstants.maxPhoneLength,
-                      validator: _validatePhone),
-                  _field('altPhone', 'Alternative phone',
-                      type: TextInputType.phone,
-                      maxLength: AppConstants.maxPhoneLength,
-                      validator: _validatePhone),
-                  _field('email', 'Email address',
-                      type: TextInputType.emailAddress,
-                      maxLength: AppConstants.maxEmailLength,
-                      validator: _validateEmail),
+                  _field(
+                    'dateOfBirth',
+                    'Date of birth',
+                    onTap: _selectDateOfBirth,
+                  ),
+                  _field(
+                    'phone',
+                    'Phone number',
+                    required: true,
+                    type: TextInputType.phone,
+                    maxLength: AppConstants.maxPhoneLength,
+                    validator: _validatePhone,
+                  ),
+                  _field(
+                    'altPhone',
+                    'Alternative phone',
+                    type: TextInputType.phone,
+                    maxLength: AppConstants.maxPhoneLength,
+                    validator: _validatePhone,
+                  ),
+                  _field(
+                    'email',
+                    'Email address',
+                    type: TextInputType.emailAddress,
+                    maxLength: AppConstants.maxEmailLength,
+                    validator: _validateEmail,
+                  ),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: DropdownButtonFormField<String>(
-                      initialValue: _value('maritalStatus').isEmpty ? null : _value('maritalStatus'),
-                      decoration: const InputDecoration(labelText: 'Marital status'),
+                      initialValue: _value('maritalStatus').isEmpty
+                          ? null
+                          : _value('maritalStatus'),
+                      decoration: const InputDecoration(
+                        labelText: 'Marital status',
+                      ),
                       items: const [
-                        DropdownMenuItem(value: 'Single', child: Text('Single')),
-                        DropdownMenuItem(value: 'Married', child: Text('Married')),
-                        DropdownMenuItem(value: 'Divorced', child: Text('Divorced')),
+                        DropdownMenuItem(
+                          value: 'Single',
+                          child: Text('Single'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Married',
+                          child: Text('Married'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Divorced',
+                          child: Text('Divorced'),
+                        ),
                       ],
-                      onChanged: (value) =>
-                          setState(() => _fields['maritalStatus']!.text = value ?? ''),
+                      onChanged: (value) => setState(
+                        () => _fields['maritalStatus']!.text = value ?? '',
+                      ),
                     ),
                   ),
-                ])),
+                ],
+              ),
+            ),
             Step(
-                title: const Text('Address & identity'),
-                isActive: _step >= 1,
-                content: Column(children: [
-                  _field('residentialAddress', 'Residential address',
-                      maxLines: 2, maxLength: AppConstants.maxAddressLength),
-                  _field('businessAddress', 'Business address',
-                      maxLines: 2, maxLength: AppConstants.maxAddressLength),
-                  _field('occupation', 'Occupation',
-                      maxLength: AppConstants.maxNameLength),
-                  _field('state', 'State',
-                      maxLength: AppConstants.maxNameLength),
+              title: const Text('Address & identity'),
+              isActive: _step >= 1,
+              content: Column(
+                children: [
+                  _field(
+                    'residentialAddress',
+                    'Residential address',
+                    maxLines: 2,
+                    maxLength: AppConstants.maxAddressLength,
+                  ),
+                  _field(
+                    'businessAddress',
+                    'Business address',
+                    maxLines: 2,
+                    maxLength: AppConstants.maxAddressLength,
+                  ),
+                  _field(
+                    'occupation',
+                    'Occupation',
+                    maxLength: AppConstants.maxNameLength,
+                  ),
+                  _field(
+                    'state',
+                    'State',
+                    maxLength: AppConstants.maxNameLength,
+                  ),
                   _field('lga', 'LGA', maxLength: AppConstants.maxNameLength),
-                  _field('nin', 'NIN',
-                      type: TextInputType.number,
-                      maxLength: AppConstants.maxIdentifierLength,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(
-                            AppConstants.maxIdentifierLength),
-                      ],
-                      validator: _validateNinBvn('NIN')),
-                  _field('bvn', 'BVN',
-                      type: TextInputType.number,
-                      maxLength: AppConstants.maxIdentifierLength,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(
-                            AppConstants.maxIdentifierLength),
-                      ],
-                      validator: _validateNinBvn('BVN')),
-                ])),
+                  _field(
+                    'nin',
+                    'NIN',
+                    type: TextInputType.number,
+                    maxLength: AppConstants.maxIdentifierLength,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(
+                        AppConstants.maxIdentifierLength,
+                      ),
+                    ],
+                    validator: _validateNinBvn('NIN'),
+                  ),
+                  _field(
+                    'bvn',
+                    'BVN',
+                    type: TextInputType.number,
+                    maxLength: AppConstants.maxIdentifierLength,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(
+                        AppConstants.maxIdentifierLength,
+                      ),
+                    ],
+                    validator: _validateNinBvn('BVN'),
+                  ),
+                ],
+              ),
+            ),
             Step(
-                title: const Text('Guarantors & review'),
-                isActive: _step >= 2,
-                content: Column(children: [
-                  Text('Guarantor 1',
-                      style: Theme.of(context).textTheme.titleSmall),
+              title: const Text('Guarantors & review'),
+              isActive: _step >= 2,
+              content: Column(
+                children: [
+                  Text(
+                    'Guarantor 1',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
                   const SizedBox(height: 8),
-                  _field('guarantor1Name', 'Name',
-                      maxLength: AppConstants.maxNameLength,
-                      inputFormatters: _nameFormatters()),
-                  _field('guarantor1Phone', 'Phone',
-                      type: TextInputType.phone,
-                      maxLength: AppConstants.maxPhoneLength,
-                      validator: _validatePhone),
-                  _field('guarantor1Address', 'Address',
-                      maxLines: 2, maxLength: AppConstants.maxAddressLength),
+                  _field(
+                    'guarantor1Name',
+                    'Name',
+                    maxLength: AppConstants.maxNameLength,
+                    inputFormatters: _nameFormatters(),
+                  ),
+                  _field(
+                    'guarantor1Phone',
+                    'Phone',
+                    type: TextInputType.phone,
+                    maxLength: AppConstants.maxPhoneLength,
+                    validator: _validatePhone,
+                  ),
+                  _field(
+                    'guarantor1Address',
+                    'Address',
+                    maxLines: 2,
+                    maxLength: AppConstants.maxAddressLength,
+                  ),
                   const SizedBox(height: 16),
                   const Divider(),
                   const SizedBox(height: 8),
-                  Text('Guarantor 2',
-                      style: Theme.of(context).textTheme.titleSmall),
+                  Text(
+                    'Guarantor 2',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
                   const SizedBox(height: 8),
-                  _field('guarantor2Name', 'Name',
-                      maxLength: AppConstants.maxNameLength,
-                      inputFormatters: _nameFormatters()),
-                  _field('guarantor2Phone', 'Phone',
-                      type: TextInputType.phone,
-                      maxLength: AppConstants.maxPhoneLength,
-                      validator: _validatePhone),
-                  _field('guarantor2Address', 'Address',
-                      maxLines: 2, maxLength: AppConstants.maxAddressLength),
+                  _field(
+                    'guarantor2Name',
+                    'Name',
+                    maxLength: AppConstants.maxNameLength,
+                    inputFormatters: _nameFormatters(),
+                  ),
+                  _field(
+                    'guarantor2Phone',
+                    'Phone',
+                    type: TextInputType.phone,
+                    maxLength: AppConstants.maxPhoneLength,
+                    validator: _validatePhone,
+                  ),
+                  _field(
+                    'guarantor2Address',
+                    'Address',
+                    maxLines: 2,
+                    maxLength: AppConstants.maxAddressLength,
+                  ),
                   const SizedBox(height: 20),
                   const Divider(),
                   const SizedBox(height: 8),
@@ -455,13 +571,20 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                       error: (_, _) => const SizedBox.shrink(),
                       data: (groups) => DropdownButtonFormField<String?>(
                         initialValue: _selectedGroupId,
-                        decoration:
-                            const InputDecoration(labelText: 'Customer group'),
+                        decoration: const InputDecoration(
+                          labelText: 'Customer group',
+                        ),
                         items: [
                           const DropdownMenuItem(
-                              value: null, child: Text('— No group —')),
-                          ...groups.map((g) => DropdownMenuItem(
-                              value: g.id, child: Text(g.name))),
+                            value: null,
+                            child: Text('— No group —'),
+                          ),
+                          ...groups.map(
+                            (g) => DropdownMenuItem(
+                              value: g.id,
+                              child: Text(g.name),
+                            ),
+                          ),
                         ],
                         onChanged: (value) =>
                             setState(() => _selectedGroupId = value),
@@ -469,18 +592,28 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                     ),
                   ),
                   DropdownButtonFormField<CustomerStatus>(
-                      initialValue: _status,
-                      decoration: const InputDecoration(labelText: 'Status'),
-                      items: CustomerStatus.values
-                          .map((status) => DropdownMenuItem(
-                              value: status, child: Text(status.name)))
-                          .toList(),
-                      onChanged: (status) =>
-                          setState(() => _status = status!)),
+                    initialValue: _status,
+                    decoration: const InputDecoration(labelText: 'Status'),
+                    items: CustomerStatus.values
+                        .map(
+                          (status) => DropdownMenuItem(
+                            value: status,
+                            child: Text(status.name),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (status) => setState(() => _status = status!),
+                  ),
                   const SizedBox(height: 12),
-                  _field('notes', 'Notes',
-                      maxLines: 4, maxLength: AppConstants.maxNotesLength),
-                ])),
+                  _field(
+                    'notes',
+                    'Notes',
+                    maxLines: 4,
+                    maxLength: AppConstants.maxNotesLength,
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),

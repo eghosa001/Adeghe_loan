@@ -1,9 +1,9 @@
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, File;
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart'
-    show databaseFactoryFfi, sqfliteFfiInit;
+    show databaseFactoryFfi, sqfliteFfiInit, DatabaseException;
 import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
@@ -23,8 +23,9 @@ class DatabaseService {
 
   @visibleForTesting
   DatabaseService.withOpenOverride(
-      this._secureStorage, Future<Database> Function() open)
-      : _openOverride = open;
+    this._secureStorage,
+    Future<Database> Function() open,
+  ) : _openOverride = open;
 
   /// Memoized open future. Every caller shares ONE in-flight open, so
   /// concurrent `await database` calls (many providers at unlock) can never
@@ -151,11 +152,9 @@ class DatabaseService {
     Database? db;
     try {
       if (Platform.isWindows) {
-        db = await _openWindowsDatabaseRaw(path, encryptionKey,
-            readOnly: true);
+        db = await _openWindowsDatabaseRaw(path, encryptionKey, readOnly: true);
       } else {
-        db = await openDatabase(path,
-            password: encryptionKey, readOnly: true);
+        db = await openDatabase(path, password: encryptionKey, readOnly: true);
       }
       final version = await db.getVersion();
       // A candidate from a NEWER app version (higher schema) must not be
@@ -195,27 +194,61 @@ class DatabaseService {
   /// sqflite runs before the `user_version` check — the same SQLCipher 4 file
   /// format the mobile sqflite_sqlcipher plugin uses, so DBs are portable.
   Future<Database> _openWindowsDatabase(
-      String path, String encryptionKey) async {
+    String path,
+    String encryptionKey,
+  ) async {
     sqfliteFfiInit();
-    return databaseFactoryFfi.openDatabase(
-      path,
-      options: OpenDatabaseOptions(
-        version: _databaseVersion,
-        onCreate: _onCreate,
-        onConfigure: (db) async {
-          await db.execute(_cipherKeySql(encryptionKey));
-          await _onConfigure(db);
-        },
-        onUpgrade: _onUpgrade,
-        onOpen: _onOpen,
-      ),
-    );
+    try {
+      return await databaseFactoryFfi.openDatabase(
+        path,
+        options: OpenDatabaseOptions(
+          version: _databaseVersion,
+          onCreate: _onCreate,
+          onConfigure: (db) async {
+            await db.execute(_cipherKeySql(encryptionKey));
+            await _onConfigure(db);
+          },
+          onUpgrade: _onUpgrade,
+          onOpen: _onOpen,
+        ),
+      );
+    } on DatabaseException catch (e) {
+      // Sqlite error 26 = "file is not a database". This happens when the
+      // encryption key doesn't match the one used to create the database
+      // (e.g. after a secure storage reset but the DB file remains).
+      // The data is unrecoverable with the wrong key, so we delete the corrupt
+      // file and let the next open create a fresh database.
+      final message = e.toString();
+      if (message.contains('SqliteException(26)') ||
+          message.contains('file is not a database')) {
+        final file = File(path);
+        if (await file.exists()) {
+          await file.delete();
+        }
+        return databaseFactoryFfi.openDatabase(
+          path,
+          options: OpenDatabaseOptions(
+            version: _databaseVersion,
+            onCreate: _onCreate,
+            onConfigure: (db) async {
+              await db.execute(_cipherKeySql(encryptionKey));
+              await _onConfigure(db);
+            },
+            onUpgrade: _onUpgrade,
+            onOpen: _onOpen,
+          ),
+        );
+      }
+      rethrow;
+    }
   }
 
   /// Raw open used by [verifyDatabaseFile] for candidate backup files.
   Future<Database> _openWindowsDatabaseRaw(
-      String path, String encryptionKey,
-      {bool readOnly = false}) async {
+    String path,
+    String encryptionKey, {
+    bool readOnly = false,
+  }) async {
     sqfliteFfiInit();
     return databaseFactoryFfi.openDatabase(
       path,
@@ -468,61 +501,85 @@ class DatabaseService {
 
   Future<void> _createIndexes(Database db) async {
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(full_name)');
+      'CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(full_name)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)');
+      'CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)',
+    );
     // Partial unique indexes (v21): dedupe applies only to NON-archived
     // customers, so a customer can be re-registered after archiving (the repo
     // check already excludes archived rows; these replace the former column
     // UNIQUE constraints that contradicted it and blocked re-registration).
     await db.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_phone_unique ON customers(phone) WHERE status != 'archived'");
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_phone_unique ON customers(phone) WHERE status != 'archived'",
+    );
     await db.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_nin_unique ON customers(nin) WHERE status != 'archived'");
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_nin_unique ON customers(nin) WHERE status != 'archived'",
+    );
     await db.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_bvn_unique ON customers(bvn) WHERE status != 'archived'");
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_bvn_unique ON customers(bvn) WHERE status != 'archived'",
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_customers_group ON customers(group_id)');
+      'CREATE INDEX IF NOT EXISTS idx_customers_group ON customers(group_id)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_loans_customer ON loans(customer_id)');
+      'CREATE INDEX IF NOT EXISTS idx_loans_customer ON loans(customer_id)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_payments_loan ON payments(loan_id)');
+      'CREATE INDEX IF NOT EXISTS idx_payments_loan ON payments(loan_id)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_documents_customer ON documents(customer_id)');
+      'CREATE INDEX IF NOT EXISTS idx_documents_customer ON documents(customer_id)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_repayment_schedule_loan ON repayment_schedule(loan_id)');
+      'CREATE INDEX IF NOT EXISTS idx_repayment_schedule_loan ON repayment_schedule(loan_id)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp)');
+      'CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_customer_groups_name ON customer_groups(name)');
+      'CREATE INDEX IF NOT EXISTS idx_customer_groups_name ON customer_groups(name)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_savings_accounts_customer ON savings_accounts(customer_id)');
+      'CREATE INDEX IF NOT EXISTS idx_savings_accounts_customer ON savings_accounts(customer_id)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_savings_transactions_account ON savings_transactions(savings_account_id)');
+      'CREATE INDEX IF NOT EXISTS idx_savings_transactions_account ON savings_transactions(savings_account_id)',
+    );
     // Composite indexes for common query patterns
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_payments_loan_date ON payments(loan_id, payment_date)');
+      'CREATE INDEX IF NOT EXISTS idx_payments_loan_date ON payments(loan_id, payment_date)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_repayment_schedule_loan_date ON repayment_schedule(loan_id, due_date)');
+      'CREATE INDEX IF NOT EXISTS idx_repayment_schedule_loan_date ON repayment_schedule(loan_id, due_date)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_loans_type_status ON loans(loan_type, status)');
+      'CREATE INDEX IF NOT EXISTS idx_loans_type_status ON loans(loan_type, status)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_loans_type_date ON loans(loan_type, loan_date)');
+      'CREATE INDEX IF NOT EXISTS idx_loans_type_date ON loans(loan_type, loan_date)',
+    );
     // Indexes backing the money-rule join and the most common date/range
     // filters (v20). The money rule's
     // `LEFT JOIN savings_transactions st ON st.reference_loan_payment_id = p.id`
     // otherwise full-scans savings_transactions for every payment aggregate.
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_savings_txns_ref_payment ON savings_transactions(reference_loan_payment_id)');
+      'CREATE INDEX IF NOT EXISTS idx_savings_txns_ref_payment ON savings_transactions(reference_loan_payment_id)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_payments_customer ON payments(customer_id)');
+      'CREATE INDEX IF NOT EXISTS idx_payments_customer ON payments(customer_id)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(payment_date)');
+      'CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(payment_date)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_savings_txns_created ON savings_transactions(created_at)');
+      'CREATE INDEX IF NOT EXISTS idx_savings_txns_created ON savings_transactions(created_at)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_holidays_date ON holidays(date)');
+      'CREATE INDEX IF NOT EXISTS idx_holidays_date ON holidays(date)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_documents_loan ON documents(loan_id)');
+      'CREATE INDEX IF NOT EXISTS idx_documents_loan ON documents(loan_id)',
+    );
   }
 }

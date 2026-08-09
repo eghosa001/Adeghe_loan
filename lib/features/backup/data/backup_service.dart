@@ -75,16 +75,23 @@ class BackupService {
   /// Deterministic 32-byte AES key derived from the app's database key, so the
   /// backup container uses the same secret already held in secure storage.
   Future<encrypt.Key> _containerKey() async => encrypt.Key(
-      Uint8List.fromList(
-          sha256.convert(utf8.encode(await _secureStorage.getDatabaseKey())).bytes));
+    Uint8List.fromList(
+      sha256.convert(utf8.encode(await _secureStorage.getDatabaseKey())).bytes,
+    ),
+  );
 
   /// Encrypts [plaintext] as `LTBK1 + IV + AES-GCM ciphertext`.
   Future<Uint8List> _encryptContainer(Uint8List plaintext) async {
     final iv = encrypt.IV.fromSecureRandom(_ivLength);
     final encrypter = encrypt.Encrypter(
-        encrypt.AES(await _containerKey(), mode: encrypt.AESMode.gcm));
+      encrypt.AES(await _containerKey(), mode: encrypt.AESMode.gcm),
+    );
     final cipher = encrypter.encryptBytes(plaintext, iv: iv);
-    return Uint8List.fromList([..._containerHeader, ...iv.bytes, ...cipher.bytes]);
+    return Uint8List.fromList([
+      ..._containerHeader,
+      ...iv.bytes,
+      ...cipher.bytes,
+    ]);
   }
 
   /// Decrypts an [encrypt.ContainerFormat] ([_encryptContainer]) payload back to
@@ -97,14 +104,16 @@ class BackupService {
     }
     final ivStart = _containerHeader.length;
     final iv = encrypt.IV(
-        Uint8List.fromList(bytes.sublist(ivStart, ivStart + _ivLength)));
-    final ciphertext =
-        Uint8List.fromList(bytes.sublist(ivStart + _ivLength));
+      Uint8List.fromList(bytes.sublist(ivStart, ivStart + _ivLength)),
+    );
+    final ciphertext = Uint8List.fromList(bytes.sublist(ivStart + _ivLength));
     try {
       final encrypter = encrypt.Encrypter(
-          encrypt.AES(await _containerKey(), mode: encrypt.AESMode.gcm));
+        encrypt.AES(await _containerKey(), mode: encrypt.AESMode.gcm),
+      );
       return Uint8List.fromList(
-          encrypter.decryptBytes(encrypt.Encrypted(ciphertext), iv: iv));
+        encrypter.decryptBytes(encrypt.Encrypted(ciphertext), iv: iv),
+      );
     } catch (_) {
       return null;
     }
@@ -122,7 +131,8 @@ class BackupService {
   Future<Directory> _secureDocumentsDirectory() async {
     final root = await getApplicationDocumentsDirectory();
     final directory = Directory(
-        '${root.path}${Platform.pathSeparator}secure_documents');
+      '${root.path}${Platform.pathSeparator}secure_documents',
+    );
     if (!await directory.exists()) {
       await directory.create(recursive: true);
     }
@@ -157,10 +167,13 @@ class BackupService {
             .toList();
         for (final doc in docFiles) {
           final bytes = await doc.readAsBytes();
-          archive.addFile(ArchiveFile(
+          archive.addFile(
+            ArchiveFile(
               '$_documentsArchivePrefix${basename(doc.path)}',
               bytes.length,
-              bytes));
+              bytes,
+            ),
+          );
         }
 
         final zipBytes = ZipEncoder().encode(archive);
@@ -186,7 +199,12 @@ class BackupService {
           try {
             final user = Platform.environment['USERNAME'] ?? '';
             if (user.isNotEmpty) {
-              await Process.run('icacls', [target.path, '/inheritance:r', '/grant:r', '$user:R']);
+              await Process.run('icacls', [
+                target.path,
+                '/inheritance:r',
+                '/grant:r',
+                '$user:R',
+              ]);
             }
           } catch (_) {
             // Ignore failures; backup creation succeeded regardless of ACL.
@@ -206,17 +224,24 @@ class BackupService {
   Future<void> maybeAutoBackup() async {
     try {
       final db = await _databaseService.database;
-      final enabledRows = await db.query('settings',
-          where: "key = 'auto_backup_enabled'", limit: 1);
+      final enabledRows = await db.query(
+        'settings',
+        where: "key = 'auto_backup_enabled'",
+        limit: 1,
+      );
       // A missing row means "default on" — the settings screen renders the
       // toggle as enabled when no value exists (`?? '1'`). Previously the two
       // disagreed, so a fresh install silently never auto-backed-up.
-      final enabledValue =
-          enabledRows.isEmpty ? '1' : enabledRows.first['value'];
+      final enabledValue = enabledRows.isEmpty
+          ? '1'
+          : enabledRows.first['value'];
       if (enabledValue != '1') return;
 
-      final lastRows = await db.query('settings',
-          where: "key = 'last_backup_date'", limit: 1);
+      final lastRows = await db.query(
+        'settings',
+        where: "key = 'last_backup_date'",
+        limit: 1,
+      );
       final last = lastRows.isEmpty
           ? null
           : DateTime.tryParse(lastRows.first['value'] as String? ?? '');
@@ -224,14 +249,10 @@ class BackupService {
 
       await createBackup();
       final reopened = await _databaseService.database;
-      await reopened.insert(
-        'settings',
-        {
-          'key': 'last_backup_date',
-          'value': DateTime.now().toIso8601String(),
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      await reopened.insert('settings', {
+        'key': 'last_backup_date',
+        'value': DateTime.now().toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     } catch (_) {
       // Auto-backup is best-effort; never surface errors here.
     }
@@ -241,15 +262,25 @@ class BackupService {
     final directory = await backupDirectory;
     final backups = await directory
         .list()
-        .where((entry) =>
-            entry is File && entry.path.endsWith(AppConstants.backupFileExtension))
+        .where(
+          (entry) =>
+              entry is File &&
+              entry.path.endsWith(AppConstants.backupFileExtension),
+        )
         .cast<File>()
         .toList();
-    backups.sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+    backups.sort(
+      (a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()),
+    );
     return backups;
   }
 
   Future<void> deleteBackup(String fileName) async {
+    // Guard against path traversal: `fileName` may come from user-typed input
+    // or a stale list entry and must never resolve outside the backup folder.
+    if (basename(fileName) != fileName) {
+      throw Exception('Invalid backup file name.');
+    }
     final file = File(join((await backupDirectory).path, fileName));
     if (await file.exists()) {
       await file.delete();
@@ -259,122 +290,142 @@ class BackupService {
   Future<void> restoreBackup(File backupFile) async {
     if (_transferInProgress) {
       throw Exception(
-          'A backup or restore is already in progress. Please wait.');
+        'A backup or restore is already in progress. Please wait.',
+      );
     }
     _transferInProgress = true;
     try {
-    if (!await backupFile.exists()) {
-      throw Exception('Selected backup file does not exist.');
-    }
+      if (!await backupFile.exists()) {
+        throw Exception('Selected backup file does not exist.');
+      }
 
-    var bytes = await backupFile.readAsBytes();
-    if (bytes.isEmpty) {
-      throw Exception('Selected backup file is empty.');
-    }
+      var bytes = await backupFile.readAsBytes();
+      if (bytes.isEmpty) {
+        throw Exception('Selected backup file is empty.');
+      }
 
-    // Three supported formats:
-    //  - encrypted container (current): LTBK1 + AES-GCM-encrypted ZIP
-    //  - legacy: a raw (encrypted) SQLite database copy
-    //  - legacy: a plain ZIP holding the DB plus secure_documents/
-    final isEncrypted = BackupService.isEncryptedContainer(bytes);
-    final isLegacyRaw = !isEncrypted && BackupService.isSqliteFile(bytes.take(16).toList());
-    final isLegacyZip = !isEncrypted && BackupService.isZipArchive(bytes);
-    if (isEncrypted) {
-      // Decrypt back to ZIP bytes using the current DB key. A backup taken on
-      // a device with a different DB key cannot be decrypted.
-      final decrypted = await _decryptContainer(bytes);
-      if (decrypted == null) {
-        throw Exception(
+      // Three supported formats:
+      //  - encrypted container (current): LTBK1 + AES-GCM-encrypted ZIP
+      //  - legacy: a raw (encrypted) SQLite database copy
+      //  - legacy: a plain ZIP holding the DB plus secure_documents/
+      final isEncrypted = BackupService.isEncryptedContainer(bytes);
+      final isLegacyRaw =
+          !isEncrypted && BackupService.isSqliteFile(bytes.take(16).toList());
+      final isLegacyZip = !isEncrypted && BackupService.isZipArchive(bytes);
+      if (isEncrypted) {
+        // Decrypt back to ZIP bytes using the current DB key. A backup taken on
+        // a device with a different DB key cannot be decrypted.
+        final decrypted = await _decryptContainer(bytes);
+        if (decrypted == null) {
+          throw Exception(
             'This backup was encrypted with a different app key and cannot be '
-            'restored on this device.');
-      }
-      bytes = decrypted;
-      if (!isZipArchive(bytes)) {
-        throw Exception('Decrypted backup is not a valid archive.');
-      }
-    } else if (!isLegacyRaw && !isLegacyZip) {
-      throw Exception('Selected file is not a valid database backup.');
-    }
-
-    // Extract candidate DB bytes into a temp file BEFORE touching the live DB.
-    final targetPath = await _databaseService.databasePath;
-    final tempPath = '$targetPath.restore.tmp';
-    final tempFile = File(tempPath);
-    if (await tempFile.exists()) await tempFile.delete();
-
-    Map<String, Uint8List> documentFiles = {};
-    if (isLegacyRaw) {
-      await backupFile.copy(tempPath);
-    } else {
-      final archive = ZipDecoder().decodeBytes(bytes);
-      Uint8List? dbContent;
-      for (final entry in archive.files) {
-        if (entry.isFile && entry.name == _dbArchiveEntry) {
-          dbContent = entry.content;
-        } else if (entry.isFile &&
-            entry.name.startsWith(_documentsArchivePrefix)) {
-          documentFiles[basename(entry.name)] = entry.content ?? Uint8List(0);
+            'restored on this device.',
+          );
         }
+        bytes = decrypted;
+        if (!isZipArchive(bytes)) {
+          throw Exception('Decrypted backup is not a valid archive.');
+        }
+      } else if (!isLegacyRaw && !isLegacyZip) {
+        throw Exception('Selected file is not a valid database backup.');
       }
-      if (dbContent == null || dbContent.isEmpty) {
-        if (await tempFile.exists()) await tempFile.delete();
-        throw Exception('Backup archive does not contain a database.');
-      }
-      await tempFile.writeAsBytes(dbContent, flush: true);
-    }
 
-    // Verify the candidate DB opens with the app key. The live database is NOT
-    // touched until verification succeeds.
-    final verified = await _databaseService.verifyDatabaseFile(tempPath);
-    if (!verified) {
+      // Extract candidate DB bytes into a temp file BEFORE touching the live DB.
+      final targetPath = await _databaseService.databasePath;
+      final tempPath = '$targetPath.restore.tmp';
+      final tempFile = File(tempPath);
       if (await tempFile.exists()) await tempFile.delete();
-      throw Exception(
-          'Backup could not be opened with the app key. Restore aborted — '
-          'your current data is unchanged.');
-    }
 
-    // Swap: close the live DB, move the current one aside, move the verified
-    // backup into place. Roll back on any failure. The swap runs under
-    // exclusive access so no concurrent caller can open the DB mid-swap, and
-    // the database is reopened (or the old file rolled back) before any caller
-    // proceeds (M14).
-    final rollbackPath = '$targetPath.old';
-    final rollbackFile = File(rollbackPath);
-    final targetFile = File(targetPath);
-    await _databaseService.withExclusiveAccess(() async {
-      try {
-        if (await rollbackFile.exists()) await rollbackFile.delete();
-        if (await targetFile.exists()) {
-          await targetFile.rename(rollbackPath);
+      Map<String, Uint8List> documentFiles = {};
+      if (isLegacyRaw) {
+        await backupFile.copy(tempPath);
+      } else {
+        final archive = ZipDecoder().decodeBytes(bytes);
+        Uint8List? dbContent;
+        for (final entry in archive.files) {
+          if (entry.isFile && entry.name == _dbArchiveEntry) {
+            dbContent = entry.content;
+          } else if (entry.isFile &&
+              entry.name.startsWith(_documentsArchivePrefix)) {
+            // A missing/null entry payload is corruption, not an empty document —
+            // restoring it would write a zero-byte file that can never decrypt.
+            final content = entry.content;
+            if (content == null) {
+              if (await tempFile.exists()) await tempFile.delete();
+              throw Exception(
+                'A document inside the backup could not be read.',
+              );
+            }
+            final name = basename(entry.name);
+            if (name.isNotEmpty && name != '.' && name != '..') {
+              documentFiles[name] = content;
+            }
+          }
         }
-        await tempFile.rename(targetPath);
-      } catch (_) {
-        if (await rollbackFile.exists() && !await targetFile.exists()) {
-          await rollbackFile.rename(targetPath);
+        if (dbContent == null || dbContent.isEmpty) {
+          if (await tempFile.exists()) await tempFile.delete();
+          throw Exception('Backup archive does not contain a database.');
         }
+        await tempFile.writeAsBytes(dbContent, flush: true);
+      }
+
+      // Verify the candidate DB opens with the app key. The live database is NOT
+      // touched until verification succeeds.
+      final verified = await _databaseService.verifyDatabaseFile(tempPath);
+      if (!verified) {
         if (await tempFile.exists()) await tempFile.delete();
-        rethrow;
-      } finally {
-        if (await rollbackFile.exists()) await rollbackFile.delete();
+        throw Exception(
+          'Backup could not be opened with the app key. Restore aborted — '
+          'your current data is unchanged.',
+        );
       }
-    });
 
-    // Replace the encrypted document files that came with the backup.
-    if (documentFiles.isNotEmpty) {
-      final docsDirectory = await _secureDocumentsDirectory();
-      final existing = await docsDirectory
-          .list()
-          .where((e) => e is File)
-          .cast<File>()
-          .toList();
-      for (final file in existing) {
-        if (await file.exists()) await file.delete();
-      }
-      for (final entry in documentFiles.entries) {
-        await File(join(docsDirectory.path, entry.key))
-            .writeAsBytes(entry.value, flush: true);
-      }
-    }
+      // Swap: close the live DB, move the current one aside, move the verified
+      // backup into place. Roll back on any failure. The swap runs under
+      // exclusive access so no concurrent caller can open the DB mid-swap, and
+      // the database is reopened (or the old file rolled back) before any caller
+      // proceeds (M14).
+      final rollbackPath = '$targetPath.old';
+      final rollbackFile = File(rollbackPath);
+      final targetFile = File(targetPath);
+      await _databaseService.withExclusiveAccess(() async {
+        try {
+          if (await rollbackFile.exists()) await rollbackFile.delete();
+          if (await targetFile.exists()) {
+            await targetFile.rename(rollbackPath);
+          }
+          await tempFile.rename(targetPath);
+
+          // Replace the encrypted document files so they match the restored DB.
+          // This runs inside the exclusive block (atomic with the DB swap) and
+          // ALWAYS reconciles: any local document file not present in the backup
+          // is removed, so a backup that contains no documents cannot leave stale
+          // files from another dataset behind, and a failed reconcile triggers
+          // the same rollback that protects the database file.
+          final docsDirectory = await _secureDocumentsDirectory();
+          final existing = await docsDirectory
+              .list()
+              .where((e) => e is File)
+              .cast<File>()
+              .toList();
+          for (final file in existing) {
+            if (await file.exists()) await file.delete();
+          }
+          for (final entry in documentFiles.entries) {
+            await File(
+              join(docsDirectory.path, entry.key),
+            ).writeAsBytes(entry.value, flush: true);
+          }
+        } catch (_) {
+          if (await rollbackFile.exists() && !await targetFile.exists()) {
+            await rollbackFile.rename(targetPath);
+          }
+          if (await tempFile.exists()) await tempFile.delete();
+          rethrow;
+        } finally {
+          if (await rollbackFile.exists()) await rollbackFile.delete();
+        }
+      });
     } finally {
       _transferInProgress = false;
     }

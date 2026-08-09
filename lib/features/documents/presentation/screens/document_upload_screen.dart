@@ -1,12 +1,12 @@
 import 'dart:io';
 
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 
+import '../../../../core/utils/platform_utils.dart';
 import '../../data/document_repository.dart';
 import '../../data/models/document_entity.dart';
 import '../providers/document_providers.dart';
@@ -36,18 +36,21 @@ class _DocumentUploadScreenState extends ConsumerState<DocumentUploadScreen> {
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(
-        child: Wrap(children: [
-          ListTile(
-            leading: const Icon(Icons.upload_file),
-            title: const Text('Choose image or PDF'),
-            onTap: () => Navigator.pop(context, false),
-          ),
-          ListTile(
-            leading: const Icon(Icons.photo_camera),
-            title: const Text('Scan with camera'),
-            onTap: () => Navigator.pop(context, true),
-          ),
-        ]),
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.upload_file),
+              title: const Text('Choose image or PDF'),
+              onTap: () => Navigator.pop(context, false),
+            ),
+            if (canUseCamera)
+              ListTile(
+                leading: const Icon(Icons.photo_camera),
+                title: const Text('Scan with camera'),
+                onTap: () => Navigator.pop(context, true),
+              ),
+          ],
+        ),
       ),
     );
     if (source == null) return;
@@ -74,7 +77,9 @@ class _DocumentUploadScreenState extends ConsumerState<DocumentUploadScreen> {
     if (_selectedType == null || _selectedFile == null) return;
     setState(() => _uploading = true);
     try {
-      await ref.read(documentRepositoryProvider).add(
+      await ref
+          .read(documentRepositoryProvider)
+          .add(
             customerId: widget.customerId,
             type: _selectedType!,
             source: _selectedFile!,
@@ -84,14 +89,15 @@ class _DocumentUploadScreenState extends ConsumerState<DocumentUploadScreen> {
       if (mounted) Navigator.of(context).pop(true);
     } on DocumentFileException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.message)));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Upload failed. Please try again.'),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Upload failed. Please try again.')),
+        );
       }
     } finally {
       if (mounted) setState(() => _uploading = false);
@@ -128,7 +134,9 @@ class _DocumentUploadScreenState extends ConsumerState<DocumentUploadScreen> {
                 borderRadius: BorderRadius.circular(12),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 24, vertical: 40),
+                    horizontal: 24,
+                    vertical: 40,
+                  ),
                   child: Column(
                     children: [
                       Icon(
@@ -163,7 +171,9 @@ class _DocumentUploadScreenState extends ConsumerState<DocumentUploadScreen> {
             if (_selectedFile != null) ...[
               const SizedBox(height: 12),
               TextButton.icon(
-                onPressed: _uploading ? null : () => setState(() => _selectedFile = null),
+                onPressed: _uploading
+                    ? null
+                    : () => setState(() => _selectedFile = null),
                 icon: const Icon(Icons.close),
                 label: const Text('Clear selection'),
               ),
@@ -174,7 +184,10 @@ class _DocumentUploadScreenState extends ConsumerState<DocumentUploadScreen> {
               const SizedBox(height: 12),
             ],
             FilledButton.icon(
-              onPressed: (_selectedType != null && _selectedFile != null && !_uploading)
+              onPressed:
+                  (_selectedType != null &&
+                      _selectedFile != null &&
+                      !_uploading)
                   ? _upload
                   : null,
               icon: _uploading

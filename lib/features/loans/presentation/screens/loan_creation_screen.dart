@@ -10,7 +10,11 @@ import 'package:loantrack/features/loans/presentation/providers/loan_providers.d
 class LoanCreationScreen extends ConsumerStatefulWidget {
   final String customerId;
   final Loan? existingLoan;
-  const LoanCreationScreen({super.key, required this.customerId, this.existingLoan});
+  const LoanCreationScreen({
+    super.key,
+    required this.customerId,
+    this.existingLoan,
+  });
 
   @override
   ConsumerState<LoanCreationScreen> createState() => _LoanCreationScreenState();
@@ -91,8 +95,11 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
       repaymentStartDate: loan.repaymentStartDate,
       notes: loan.notes ?? '',
     );
-    if (loan.customCollectionAmount != null && loan.customCollectionAmount! > 0) {
-      notifier.updateField(customInstallmentAmount: loan.customCollectionAmount);
+    if (loan.customCollectionAmount != null &&
+        loan.customCollectionAmount! > 0) {
+      notifier.updateField(
+        customInstallmentAmount: loan.customCollectionAmount,
+      );
     }
     setState(() => _hasLoaded = true);
   }
@@ -119,13 +126,20 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
             onPressed: () async {
               try {
                 if (isEdit) {
-                  await formNotifier.updateLoan(widget.existingLoan!, widget.customerId);
+                  await formNotifier.updateLoan(
+                    widget.existingLoan!,
+                    widget.customerId,
+                  );
                 } else {
                   await formNotifier.saveLoan(widget.customerId);
                 }
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(isEdit ? 'Loan updated!' : 'Loan created successfully!')),
+                    SnackBar(
+                      content: Text(
+                        isEdit ? 'Loan updated!' : 'Loan created successfully!',
+                      ),
+                    ),
                   );
                   Navigator.pop(context);
                 }
@@ -137,7 +151,7 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
                 }
               }
             },
-          )
+          ),
         ],
       ),
       body: ListView(
@@ -161,14 +175,16 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
             label: 'Loan Amount (Principal)',
             controller: _principalCtrl,
             onChanged: (value) => formNotifier.updateField(
-                principal: CurrencyUtils.tryParseAmount(value) ?? 0.0,
-                clearCustomInstallment: true),
+              principal: CurrencyUtils.tryParseAmount(value) ?? 0.0,
+              clearCustomInstallment: true,
+            ),
           ),
           _buildTextField(
             label: 'Interest Rate (%)',
             controller: _interestCtrl,
             onChanged: (value) => formNotifier.updateField(
-                interestRatePercent: CurrencyUtils.tryParseAmount(value) ?? 0.0),
+              interestRatePercent: CurrencyUtils.tryParseAmount(value) ?? 0.0,
+            ),
           ),
           _buildTextField(
             label: formState.loanType == LoanType.daily
@@ -178,7 +194,8 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
             onChanged: (value) {
               final parsedDuration = int.tryParse(value);
               formNotifier.updateField(
-                duration: (parsedDuration != null &&
+                duration:
+                    (parsedDuration != null &&
                         parsedDuration > 0 &&
                         parsedDuration <= AppConstants.maxLoanDuration)
                     ? parsedDuration
@@ -194,33 +211,37 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
                 label: 'Insurance fee (%)',
                 controller: _insuranceCtrl,
                 onChanged: (value) => formNotifier.updateField(
-                    insuranceFeePercent:
-                        CurrencyUtils.tryParseAmount(value) ?? 0.0),
+                  insuranceFeePercent:
+                      CurrencyUtils.tryParseAmount(value) ?? 0.0,
+                ),
               ),
               _buildTextField(
                 label: 'Commission (%)',
                 controller: _commissionCtrl,
                 onChanged: (value) => formNotifier.updateField(
-                    commissionPercent: CurrencyUtils.tryParseAmount(value) ?? 0.0),
+                  commissionPercent: CurrencyUtils.tryParseAmount(value) ?? 0.0,
+                ),
               ),
               _buildTextField(
                 label: 'Processing fee',
                 controller: _processingCtrl,
                 onChanged: (value) => formNotifier.updateField(
-                    processingFee: CurrencyUtils.tryParseAmount(value) ?? 0.0),
+                  processingFee: CurrencyUtils.tryParseAmount(value) ?? 0.0,
+                ),
               ),
               _buildTextField(
                 label: 'Administrative fee',
                 controller: _adminCtrl,
                 onChanged: (value) => formNotifier.updateField(
-                    administrativeFee:
-                        CurrencyUtils.tryParseAmount(value) ?? 0.0),
+                  administrativeFee: CurrencyUtils.tryParseAmount(value) ?? 0.0,
+                ),
               ),
               _buildTextField(
                 label: 'Other charges',
                 controller: _otherCtrl,
                 onChanged: (value) => formNotifier.updateField(
-                    otherCharges: CurrencyUtils.tryParseAmount(value) ?? 0.0),
+                  otherCharges: CurrencyUtils.tryParseAmount(value) ?? 0.0,
+                ),
               ),
             ],
           ),
@@ -229,9 +250,12 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
           _buildTextField(
             label: 'Collection amount per period (optional)',
             controller: _customCtrl,
-            hint: 'Amount to collect per period (default: ${CurrencyUtils.format(formState.calculationResult?.installmentAmount ?? 0)})',
+            hint:
+                'Amount to collect per period (default: ${CurrencyUtils.format(formState.calculationResult?.installmentAmount ?? 0)})',
             onChanged: (value) => formNotifier.updateField(
-              customInstallmentAmount: CurrencyUtils.tryParsePositiveAmount(value),
+              customInstallmentAmount: CurrencyUtils.tryParsePositiveAmount(
+                value,
+              ),
             ),
           ),
 
@@ -256,13 +280,15 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
           ListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Repayment Start Date'),
-            subtitle: Text(AppDateUtils.formatDate(formState.repaymentStartDate)),
+            subtitle: Text(
+              AppDateUtils.formatDate(formState.repaymentStartDate),
+            ),
             trailing: const Icon(Icons.calendar_today),
             onTap: () async {
               final pickedDate = await showDatePicker(
                 context: context,
                 initialDate: formState.repaymentStartDate,
-                firstDate: DateTime.now().subtract(const Duration(days: 30)),
+                firstDate: DateTime.now().subtract(const Duration(days: 180)),
                 lastDate: DateTime.now().add(const Duration(days: 365)),
               );
               if (pickedDate != null) {
@@ -273,18 +299,18 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
           const Divider(height: 32),
 
           // Calculation Summary
-          if (formState.calculationResult != null)
-            _buildSummary(formState),
+          if (formState.calculationResult != null) _buildSummary(formState),
         ],
       ),
     );
   }
 
-  Widget _buildTextField(
-      {required String label,
-      required TextEditingController controller,
-      required ValueChanged<String> onChanged,
-      String? hint}) {
+  Widget _buildTextField({
+    required String label,
+    required TextEditingController controller,
+    required ValueChanged<String> onChanged,
+    String? hint,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),
       child: TextFormField(
@@ -307,22 +333,36 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Loan Summary',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+              'Loan Summary',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 12),
-            _summaryRow('Interest:', CurrencyUtils.format(result.interestAmount)),
-            _summaryRow('Total Charges:', CurrencyUtils.format(result.totalCharges)),
-            const Divider(),
-            _summaryRow('Total Repayment:',
-                CurrencyUtils.format(result.totalRepayment),
-                isBold: true),
             _summaryRow(
-                'Installment:', CurrencyUtils.format(calculatedInstallment),
-                isBold: true),
+              'Interest:',
+              CurrencyUtils.format(result.interestAmount),
+            ),
+            _summaryRow(
+              'Total Charges:',
+              CurrencyUtils.format(result.totalCharges),
+            ),
+            const Divider(),
+            _summaryRow(
+              'Total Repayment:',
+              CurrencyUtils.format(result.totalRepayment),
+              isBold: true,
+            ),
+            _summaryRow(
+              'Installment:',
+              CurrencyUtils.format(calculatedInstallment),
+              isBold: true,
+            ),
             if (formState.customInstallmentAmount != null &&
                 formState.customInstallmentAmount! > 0)
               _summaryRow(
-                  'Collection amount:', CurrencyUtils.format(formState.customInstallmentAmount!)),
+                'Collection amount:',
+                CurrencyUtils.format(formState.customInstallmentAmount!),
+              ),
           ],
         ),
       ),
@@ -330,7 +370,10 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
   }
 
   Widget _summaryRow(String label, String value, {bool isBold = false}) {
-    final style = TextStyle(fontWeight: isBold ? FontWeight.bold : FontWeight.normal, fontSize: 16);
+    final style = TextStyle(
+      fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+      fontSize: 16,
+    );
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(

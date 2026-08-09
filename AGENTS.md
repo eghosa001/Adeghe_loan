@@ -266,6 +266,17 @@ Desktop/UX hardening (2026-08-06):
 - **Dead code removed:** Unused `AuditLogRepository.getByDateRange` and `getRecent` methods.
 - **Tests:** Full suite 205 passing; analyzer clean.
 
+## Audit fixes (2026-08-09)
+- **Restore document reconciliation (F-14):** `restoreBackup` now replaces `secure_documents/` INSIDE the `withExclusiveAccess` block (atomic with the DB swap, so a document-write failure triggers the same rollback that protects the DB file) and ALWAYS reconciles — any local encrypted document not present in the backup is deleted, so a backup taken with no documents can no longer leave stale files from another dataset behind. Previously the replacement ran after the exclusive block and was skipped entirely when the backup contained no documents (`backup_service.dart`).
+- **deleteBackup path traversal (F-15):** `deleteBackup(fileName)` now rejects any name where `basename(fileName) != fileName` — user-typed names can no longer escape the backup folder (e.g. `../other.ltbackup`).
+- **Null ZIP entry payload (F-17):** a `secure_documents/` archive entry whose content is null (corrupt container) now aborts the restore with a clear error instead of silently restoring a zero-byte document that can never decrypt.
+- **Regression tests:** `test/backup/backup_roundtrip_test.dart` adds: restore reconciles `secure_documents/` to exactly the backup set; restore of a document-free backup clears stale local documents; `deleteBackup` refuses traversal names; `deleteBackup` removes a legitimate file. Full suite 220 passing; analyzer clean.
+
+## Windows audit (2026-08-09) — desktop camera gating
+- **Camera pickers crash on desktop (CRITICAL):** `image_picker_windows-0.2.2` `getImageFromSource(ImageSource.camera)` extends `CameraDelegatingImagePickerPlatform` with NO camera delegate → throws `StateError` on Windows/Linux/macOS. Three entry points offered a camera action unconditionally, so clicking it on Windows crashed the app: `document_upload_screen.dart` ("Scan with camera" sheet tile), `document_list_screen.dart` (same), and `customer_form_screen.dart` passport picker ("Camera" button). All are now gated by `canUseCamera` (`lib/core/utils/platform_utils.dart`, `!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)` → false on desktop). Android/iOS keep the camera option per the design (FilePicker for files, ImagePicker only for camera). New helper file `lib/core/utils/platform_utils.dart` exposes `isDesktopPlatform` / `canUseCamera` — use these for any future desktop-gated UI rather than inlining `Platform.isWindows`.
+- **Verified, no change:** `share_plus` 12.0.2 is Windows-capable (native WinRT share UI via `GetAncestor` + `DataTransferManager.ShowShareUIForWindow`); printing `DownloadableFont.getFont()` falls back to Helvetica offline so PDF exports/statements don't crash when the google_fonts HTTP fetch fails.
+- **Verification:** full suite 220 passing; `flutter analyze --no-pub` clean; `flutter build windows --release` succeeds and the exe launches and stays alive; `flutter build apk --debug` succeeds (Android regression).
+
 ## Windows desktop build (packaged with Inno Setup)
 
 First-class desktop port added 2026-08-02. Same encrypted SQLite + PIN/biometric auth as mobile; the DB file lives in the user's Documents folder (`getApplicationDocumentsDirectory()`), key in Windows DPAPI via `flutter_secure_storage`.
