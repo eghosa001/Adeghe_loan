@@ -98,9 +98,42 @@ class LoanFormData {
 
 class LoanFormNotifier extends StateNotifier<LoanFormData> {
   LoanFormNotifier(this._ref)
-      : super(LoanFormData(repaymentStartDate: DateTime.now()));
+    : super(LoanFormData(repaymentStartDate: DateTime.now())) {
+    // New-loan defaults for the initial type (daily).
+    selectLoanType(LoanType.daily);
+  }
 
   final Ref _ref;
+
+  /// Switches the form to [type] and applies that type's default interest
+  /// rate and duration. The user can still edit both afterwards.
+  void selectLoanType(LoanType type) {
+    final defaults = _defaultsFor(type);
+    state = state.copyWith(
+      loanType: type,
+      interestRatePercent: defaults.$1,
+      duration: defaults.$2,
+      clearCustomInstallment: true,
+    );
+    _recalculate();
+  }
+
+  static (double, int) _defaultsFor(LoanType type) => switch (type) {
+    LoanType.daily => (
+      AppConstants.defaultDailyInterestRate,
+      AppConstants.defaultDailyDurationDays,
+    ),
+    LoanType.weekly => (
+      AppConstants.defaultWeeklyInterestRate,
+      AppConstants.defaultWeeklyDurationWeeks,
+    ),
+  };
+
+  /// Resets the form back to the fresh daily defaults (used after a successful
+  /// save) so the next loan the operator creates starts clean again.
+  void _resetToDefaults() {
+    selectLoanType(LoanType.daily);
+  }
 
   void updateField({
     LoanType? loanType,
@@ -132,10 +165,15 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
       clearCustomInstallment: clearCustomInstallment,
       notes: notes,
     );
-    if (loanType != null || principal != null || interestRatePercent != null ||
-        insuranceFeePercent != null || commissionPercent != null ||
-        processingFee != null || administrativeFee != null ||
-        otherCharges != null || duration != null) {
+    if (loanType != null ||
+        principal != null ||
+        interestRatePercent != null ||
+        insuranceFeePercent != null ||
+        commissionPercent != null ||
+        processingFee != null ||
+        administrativeFee != null ||
+        otherCharges != null ||
+        duration != null) {
       _recalculate();
     }
   }
@@ -162,14 +200,17 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
   ///   `customAmount × duration`, and
   /// - per-installment amounts come from `CurrencyUtils.splitEvenly` so any
   ///   rounding remainder is distributed instead of silently dropped.
-  Future<({Loan loan, List<RepaymentInstallment> schedule})>
-      _buildLoanFromForm(String customerId, String loanId) async {
+  Future<({Loan loan, List<RepaymentInstallment> schedule})> _buildLoanFromForm(
+    String customerId,
+    String loanId,
+  ) async {
     if (state.calculationResult == null || state.duration <= 0) {
       throw Exception("Cannot save loan with invalid data.");
     }
     if (state.duration > AppConstants.maxLoanDuration) {
       throw Exception(
-          'Loan duration cannot exceed ${AppConstants.maxLoanDuration} installments.');
+        'Loan duration cannot exceed ${AppConstants.maxLoanDuration} installments.',
+      );
     }
     if (!state.principal.isFinite || state.principal <= 0) {
       throw Exception('Loan amount must be a valid number greater than zero.');
@@ -241,34 +282,44 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
         _ref.invalidate(reportSummaryProvider);
         _ref.invalidate(activeLoansForCustomerProvider(customerId));
         _ref.invalidate(allLoansProvider);
-        logAuditAction(_ref, 'CREATE',
-            'Loan $loanId created for customer $customerId — ${state.loanType.name}, ${state.principal}');
-        state = LoanFormData(repaymentStartDate: DateTime.now());
+        logAuditAction(
+          _ref,
+          'CREATE',
+          'Loan $loanId created for customer $customerId — ${state.loanType.name}, ${state.principal}',
+        );
+        _resetToDefaults();
       },
       failure: (f) => throw f,
     );
   }
 
   Future<void> updateLoan(Loan existingLoan, String customerId) async {
-    final (:loan, :schedule) =
-        await _buildLoanFromForm(customerId, existingLoan.id);
+    final (:loan, :schedule) = await _buildLoanFromForm(
+      customerId,
+      existingLoan.id,
+    );
     final loanRepo = await _ref.read(loanRepositoryProvider.future);
 
     // Preserve the original loan date and credit any amount already paid.
-    final paidSoFar = (existingLoan.totalRepayment -
-            existingLoan.outstandingBalance)
-        .clamp(0.0, double.infinity);
+    final paidSoFar =
+        (existingLoan.totalRepayment - existingLoan.outstandingBalance).clamp(
+          0.0,
+          double.infinity,
+        );
     if (paidSoFar > loan.totalRepayment + 0.005) {
       // Editing the loan smaller than what was already collected would silently
       // write off the difference (newOutstanding clamps to 0 while the collected
       // money stays counted). Refuse instead of letting money disappear.
       throw ValidationFailure(
-          'Total repayment cannot be reduced below the '
-          '${CurrencyUtils.format(paidSoFar)} already collected. '
-          'Reverse some payments first.');
+        'Total repayment cannot be reduced below the '
+        '${CurrencyUtils.format(paidSoFar)} already collected. '
+        'Reverse some payments first.',
+      );
     }
-    final newOutstanding =
-        (loan.totalRepayment - paidSoFar).clamp(0.0, double.infinity);
+    final newOutstanding = (loan.totalRepayment - paidSoFar).clamp(
+      0.0,
+      double.infinity,
+    );
     final status = existingLoan.status == LoanStatus.active
         ? (newOutstanding <= 0.005 ? LoanStatus.completed : LoanStatus.active)
         : existingLoan.status;
@@ -278,9 +329,11 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
       status: status,
     );
 
-    final result =
-        await loanRepo.updateLoanAndSchedule(updatedLoan, schedule,
-            paidSoFar: paidSoFar);
+    final result = await loanRepo.updateLoanAndSchedule(
+      updatedLoan,
+      schedule,
+      paidSoFar: paidSoFar,
+    );
     result.when(
       success: (_) {
         _ref.invalidate(loanDetailsProvider(existingLoan.id));
@@ -292,17 +345,21 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
         _ref.invalidate(reportSummaryProvider);
         _ref.invalidate(activeLoansForCustomerProvider(customerId));
         _ref.invalidate(allLoansProvider);
-        logAuditAction(_ref, 'UPDATE',
-            'Loan ${existingLoan.id} updated for customer $customerId');
-        state = LoanFormData(repaymentStartDate: DateTime.now());
+        logAuditAction(
+          _ref,
+          'UPDATE',
+          'Loan ${existingLoan.id} updated for customer $customerId',
+        );
+        _resetToDefaults();
       },
       failure: (f) => throw f,
     );
   }
 }
 
-final loanFormProvider =
-    StateNotifierProvider<LoanFormNotifier, LoanFormData>((ref) {
+final loanFormProvider = StateNotifierProvider<LoanFormNotifier, LoanFormData>((
+  ref,
+) {
   return LoanFormNotifier(ref);
 });
 
@@ -310,50 +367,48 @@ final loanFormProvider =
 // Loan Details
 // ---------------------------------------------------------------------------
 
-final loanDetailsProvider =
-    FutureProvider.family<Loan, String>((ref, loanId) async {
+final loanDetailsProvider = FutureProvider.family<Loan, String>((
+  ref,
+  loanId,
+) async {
   final repo = await ref.watch(loanRepositoryProvider.future);
   final result = await repo.getLoanById(loanId);
-  return result.when(
-    success: (loan) => loan,
-    failure: (f) => throw f,
-  );
+  return result.when(success: (loan) => loan, failure: (f) => throw f);
 });
 
 final loanScheduleProvider =
-    FutureProvider.family<List<RepaymentInstallment>, String>((ref, loanId) async {
-  // Re-read whenever any schedule rebuild finishes (payment recorded/reversed,
-  // holiday change, loan edit, cloud pull) so open screens auto-refresh without
-  // every caller needing to `ref.invalidate` explicitly.
-  ref.watch(loanScheduleVersionProvider);
-  final repo = await ref.watch(loanRepositoryProvider.future);
-  final result = await repo.getScheduleForLoan(loanId);
-  return result.when(
-    success: (schedule) => schedule,
-    failure: (f) => throw f,
-  );
-});
+    FutureProvider.family<List<RepaymentInstallment>, String>((
+      ref,
+      loanId,
+    ) async {
+      // Re-read whenever any schedule rebuild finishes (payment recorded/reversed,
+      // holiday change, loan edit, cloud pull) so open screens auto-refresh without
+      // every caller needing to `ref.invalidate` explicitly.
+      ref.watch(loanScheduleVersionProvider);
+      final repo = await ref.watch(loanRepositoryProvider.future);
+      final result = await repo.getScheduleForLoan(loanId);
+      return result.when(
+        success: (schedule) => schedule,
+        failure: (f) => throw f,
+      );
+    });
 
 final activeLoansForCustomerProvider =
     FutureProvider.family<List<Loan>, String>((ref, customerId) async {
-  final repo = await ref.watch(loanRepositoryProvider.future);
-  final result = await repo.getActiveLoansForCustomer(customerId);
-  return result.when(
-    success: (loans) => loans,
-    failure: (f) => throw f,
-  );
-});
+      final repo = await ref.watch(loanRepositoryProvider.future);
+      final result = await repo.getActiveLoansForCustomer(customerId);
+      return result.when(success: (loans) => loans, failure: (f) => throw f);
+    });
 
 /// All loans for a customer (any status) — used by statements so history is
 /// not hidden once a loan is completed.
-final allLoansForCustomerProvider =
-    FutureProvider.family<List<Loan>, String>((ref, customerId) async {
+final allLoansForCustomerProvider = FutureProvider.family<List<Loan>, String>((
+  ref,
+  customerId,
+) async {
   final repo = await ref.watch(loanRepositoryProvider.future);
   final result = await repo.getLoansForCustomer(customerId);
-  return result.when(
-    success: (loans) => loans,
-    failure: (f) => throw f,
-  );
+  return result.when(success: (loans) => loans, failure: (f) => throw f);
 });
 
 // ---------------------------------------------------------------------------
@@ -372,6 +427,9 @@ final allLoansProvider = FutureProvider<List<Loan>>((ref) async {
   final statusFilter = ref.watch(loanStatusFilterProvider);
   final loanType = ref.watch(loanTypeFilterProvider);
   final result = await repo.getAllLoans(
-      query: query, statusFilter: statusFilter, loanType: loanType);
+    query: query,
+    statusFilter: statusFilter,
+    loanType: loanType,
+  );
   return result.when(success: (l) => l, failure: (f) => throw f);
 });

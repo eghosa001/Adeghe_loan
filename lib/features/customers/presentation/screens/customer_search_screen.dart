@@ -7,6 +7,8 @@ import 'package:loantrack/core/widgets/empty_state.dart';
 import 'package:loantrack/core/widgets/keyboard_refreshable.dart';
 
 import '../../../../core/constants/app_constants.dart';
+import '../../../../core/utils/currency_utils.dart';
+import '../../../business/presentation/providers/business_providers.dart';
 import '../../data/customer_repository.dart';
 import '../../data/models/customer_entity.dart';
 import '../providers/customer_providers.dart';
@@ -258,13 +260,48 @@ class CustomerListScreen extends ConsumerWidget {
   }
 }
 
-class _CustomerTile extends StatelessWidget {
+class _CustomerTile extends ConsumerWidget {
   const _CustomerTile({required this.customer});
   final Customer customer;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final isArchived = customer.status == CustomerStatus.archived;
+    final currencySymbol =
+        ref.watch(currencySymbolProvider).valueOrNull ??
+        CurrencyUtils.defaultSymbol;
+
+    final Widget? subtitle;
+    if (isArchived) {
+      subtitle = Text(
+        'Tap to unarchive or delete permanently',
+        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+      );
+    } else if (customer.totalOwed > 0) {
+      subtitle = Row(
+        children: [
+          Icon(
+            Icons.account_balance_wallet,
+            size: 12,
+            color: Colors.orange.shade700,
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              'On loan: ${CurrencyUtils.format(customer.totalOwed, symbol: currencySymbol)}',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.orange.shade700,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      );
+    } else {
+      subtitle = null;
+    }
+
     return ListTile(
       leading: CircleAvatar(
         child: Text(
@@ -292,12 +329,7 @@ class _CustomerTile extends StatelessWidget {
             ),
         ],
       ),
-      subtitle: isArchived
-          ? Text(
-              'Tap to unarchive or delete permanently',
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-            )
-          : null,
+      subtitle: subtitle,
       onTap: () => context.push('/customers/${customer.id}'),
     );
   }

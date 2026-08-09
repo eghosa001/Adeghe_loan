@@ -37,7 +37,8 @@ class AppConstants {
   static const String prefAutoBackupEnabled = 'pref_auto_backup_enabled';
   static const String prefCurrencyCode = 'pref_currency_code';
   static const String prefLocale = 'pref_locale';
-  static const String prefSessionTimeoutMinutes = 'pref_session_timeout_minutes';
+  static const String prefSessionTimeoutMinutes =
+      'pref_session_timeout_minutes';
 
   // Auth / security
   static const int pinLength = 4;
@@ -55,6 +56,14 @@ class AppConstants {
   static const int minLoanTermInDays = 7;
   static const int maxLoanTermInDays = 365;
   static const double defaultInterestRate = 5.0;
+
+  // Default terms applied when creating a NEW loan (editable in the form):
+  // daily loans default to 15% interest over 23 days, weekly loans to 20%
+  // over 12 weeks. Switching the loan type applies that type's defaults.
+  static const double defaultDailyInterestRate = 15.0;
+  static const int defaultDailyDurationDays = 23;
+  static const double defaultWeeklyInterestRate = 20.0;
+  static const int defaultWeeklyDurationWeeks = 12;
 
   // Upper bound for the duration field (days for daily loans, weeks for
   // weekly loans). Guards against a typo like "9999999999" allocating an

@@ -54,7 +54,23 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
         _customCtrl.text = _fmtAmount(loan.customCollectionAmount!);
       }
       WidgetsBinding.instance.addPostFrameCallback((_) => _loadLoanForEdit());
+    } else {
+      // New loan: start from the fresh daily defaults so the fields show the
+      // default terms and the summary is computed for them.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _initCreateMode());
     }
+  }
+
+  /// Resets the form to the daily defaults and mirrors them into the visible
+  /// text fields (the form notifier outlives this screen, so a previous visit
+  /// may have left it on another type).
+  void _initCreateMode() {
+    if (!mounted) return;
+    final notifier = ref.read(loanFormProvider.notifier);
+    notifier.selectLoanType(LoanType.daily);
+    final state = ref.read(loanFormProvider);
+    _interestCtrl.text = _fmtAmount(state.interestRatePercent);
+    _durationCtrl.text = state.duration.toString();
   }
 
   /// Whole values render without a trailing `.0`; small fractions keep them
@@ -165,7 +181,22 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
             ],
             selected: {formState.loanType},
             onSelectionChanged: (selection) {
-              formNotifier.updateField(loanType: selection.first);
+              final type = selection.first;
+              // Apply the selected type's default interest rate and duration
+              // and mirror them into the visible fields so the user can see
+              // and change them.
+              formNotifier.selectLoanType(type);
+              final defaults = type == LoanType.daily
+                  ? (
+                      AppConstants.defaultDailyInterestRate,
+                      AppConstants.defaultDailyDurationDays,
+                    )
+                  : (
+                      AppConstants.defaultWeeklyInterestRate,
+                      AppConstants.defaultWeeklyDurationWeeks,
+                    );
+              _interestCtrl.text = _fmtAmount(defaults.$1);
+              _durationCtrl.text = defaults.$2.toString();
             },
           ),
           const SizedBox(height: 16),
