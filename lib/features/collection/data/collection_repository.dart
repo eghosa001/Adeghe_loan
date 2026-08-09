@@ -204,6 +204,7 @@ cg.name AS groupName,
     try {
       final db = await _database;
       final today = DateTime.now();
+      final todayStr = today.toIso8601String().split('T').first;
 
       // One row per active weekly loan with per-installment tracking.
       // We join with repayment_schedule to get the current due installment
@@ -265,7 +266,13 @@ cg.name AS groupName,
             WHERE rs.loan_id = l.id AND rs.status != 'paid'
               AND $notOnEnabledHolidaySql
             ORDER BY rs.due_date ASC LIMIT 1
-          ), 'paid') AS currentInstallmentStatus
+          ), 'paid') AS currentInstallmentStatus,
+          COALESCE((
+            SELECT SUM(rs.amount - COALESCE(rs.paid_amount, 0.0))
+            FROM repayment_schedule rs
+            WHERE rs.loan_id = l.id AND rs.status != 'paid'
+              AND DATE(rs.due_date) < ?
+          ), 0.0) AS overdueAmount
         FROM loans l
         INNER JOIN customers c ON l.customer_id = c.id
         LEFT JOIN payments p ON p.loan_id = l.id AND p.status = 'completed'
@@ -274,7 +281,7 @@ cg.name AS groupName,
         WHERE l.loan_type = 'weekly' AND l.status IN ('active', 'completed')
         GROUP BY l.id
         ORDER BY c.full_name COLLATE NOCASE ASC
-      ''', const []);
+      ''', [todayStr]);
 
       final weeklyRows = rows.map((row) {
         final currentInstallmentDueDate = row['currentInstallmentDueDate'] as String? ?? '';
@@ -327,6 +334,7 @@ cg.name AS groupName,
           currentInstallmentStatus: currentInstallmentStatus,
           daysOverdue: daysOverdue,
           collectedThisPeriod: collectedThisPeriod,
+          overdueAmount: (row['overdueAmount'] as num?)?.toDouble() ?? 0.0,
         );
       }).toList(growable: false);
 
@@ -346,6 +354,7 @@ cg.name AS groupName,
       final db = await _database;
       final startStr = start.toIso8601String().split('T').first;
       final endStr = end.toIso8601String().split('T').first;
+      final todayStr = DateTime.now().toIso8601String().split('T').first;
 
       // Filter by installments whose due_date falls within the range.
       //
@@ -382,7 +391,13 @@ cg.name AS groupName,
           tgt.due_date AS currentInstallmentDueDate,
           tgt.amount AS currentInstallmentAmount,
           tgt.paid_amount AS currentInstallmentPaidAmount,
-          tgt.status AS currentInstallmentStatus
+          tgt.status AS currentInstallmentStatus,
+          COALESCE((
+            SELECT SUM(rs.amount - COALESCE(rs.paid_amount, 0.0))
+            FROM repayment_schedule rs
+            WHERE rs.loan_id = l.id AND rs.status != 'paid'
+              AND DATE(rs.due_date) < ?
+          ), 0.0) AS overdueAmount
         FROM loans l
         INNER JOIN customers c ON l.customer_id = c.id
         LEFT JOIN (
@@ -421,7 +436,7 @@ cg.name AS groupName,
           )
         GROUP BY l.id
         ORDER BY c.full_name COLLATE NOCASE ASC
-      ''', [startStr, endStr, startStr, endStr, startStr, endStr]);
+      ''', [startStr, endStr, startStr, endStr, todayStr, startStr, endStr]);
 
       final weeklyRows = rows.map((row) {
         final currentInstallmentDueDate = row['currentInstallmentDueDate'] as String? ?? '';
@@ -469,6 +484,7 @@ cg.name AS groupName,
           currentInstallmentStatus: currentInstallmentStatus,
           daysOverdue: daysOverdue,
           collectedThisPeriod: collectedThisPeriod,
+          overdueAmount: (row['overdueAmount'] as num?)?.toDouble() ?? 0.0,
         );
       }).toList(growable: false);
 

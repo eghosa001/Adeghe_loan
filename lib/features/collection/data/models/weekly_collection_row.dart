@@ -28,6 +28,7 @@ class WeeklyCollectionRow {
     required this.currentInstallmentStatus,
     required this.daysOverdue,
     required this.collectedThisPeriod,
+    required this.overdueAmount,
   });
 
   final String customerId;
@@ -75,11 +76,37 @@ class WeeklyCollectionRow {
   /// Amount collected for the current collection period (this week's installment).
   /// Empty/0 when no payment has been made for this installment yet.
   final double collectedThisPeriod;
+  /// Total accumulation of the customer's overdue — the sum of every past
+  /// installment (due before today) that is not fully paid, following the
+  /// money rule (`rs.amount - paid_amount`). 0 when nothing is overdue.
+  final double overdueAmount;
 
   /// Total expected (principal + interest + charges) − Amount Paid, never
   /// negative.
   double get remainingBalance =>
       (expectedAmount - amountPaid).clamp(0.0, double.infinity);
+
+  /// Disbursement date shown on the collection printout: exactly one week
+  /// before the weekly repayment anchor (`start_date`), per the owner rule
+  /// (disbursement starts a week before repayment). Falls back to the stored
+  /// loan date when the anchor is unparseable.
+  String get disbursementDate {
+    final anchor = DateTime.tryParse(paymentAnchorDate);
+    if (anchor == null) return loanDate;
+    final disbursed = anchor.subtract(const Duration(days: 7));
+    return '${disbursed.year.toString().padLeft(4, '0')}-'
+        '${disbursed.month.toString().padLeft(2, '0')}-'
+        '${disbursed.day.toString().padLeft(2, '0')}';
+  }
+
+  /// Printout status for the right-side Status column: 'Paid' when the current
+  /// installment is fully paid, 'Overdue' when the customer is owing from a
+  /// previous date, otherwise 'Pending'.
+  String get statusLabel {
+    if (isCurrentInstallmentPaid) return 'Paid';
+    if (isOverdue) return 'Overdue';
+    return 'Pending';
+  }
 
   /// The recurring payment day ("Monday".."Sunday") derived from the weekly
   /// anchor date's weekday — weekly installments are anchored to the

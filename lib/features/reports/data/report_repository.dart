@@ -238,7 +238,7 @@ class ReportRepository {
         'l.id AS loanId, '
         'l.loan_type AS loanType, '
         'l.amount AS amountBorrowed, '
-        'l.loan_date AS loanDate, '
+        'CASE WHEN l.loan_type = \'weekly\' THEN DATE(l.start_date, \'-7 days\') ELSE l.loan_date END AS loanDate, '
         'l.outstanding_balance AS outstandingBalance, '
         'l.status AS loanStatus, '
         'l.interest_rate AS interestRate, '

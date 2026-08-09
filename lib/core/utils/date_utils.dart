@@ -37,6 +37,22 @@ class AppDateUtils {
   /// e.g. "02:30 PM"
   static String formatTime(DateTime date) => DateFormat('hh:mm a').format(date);
 
+  /// Full weekday name of [date] ("Monday".."Sunday") — used on printouts so
+  /// the collection date reads as the day itself (e.g. "Monday") instead of a
+  /// relative label ("Tomorrow", "in 2 days").
+  static String weekdayName(DateTime date) {
+    const names = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ];
+    return names[date.weekday - 1];
+  }
+
   /// Human-friendly relative label — "Today", "Yesterday", "Tomorrow",
   /// "in 3 days", "3 days ago" — falling back to [formatDate] outside a
   /// 7-day window.

@@ -475,6 +475,76 @@ void main() {
     );
   });
 
+  test('overdueAmount accumulates every unpaid installment due before today',
+      () async {
+    final db = await openDb();
+    addTearDown(db.close);
+    // 2000 @10% + no charge → 2200 total, 4 weekly installments of 550 each,
+    // all due in January 2026 (well before "today" in the real test clock).
+    await seedWeeklyLoan(db, 'L1', 'C1', 'Ada',
+        startDate: DateTime(2026, 1, 7), // Wednesday
+        amount: 2000,
+        interestRate: 10);
+
+    final result = await repo(db).getWeeklyCollection();
+    result.when(
+      success: (rows) {
+        expect(rows, hasLength(1));
+        expect(rows.first.overdueAmount, closeTo(2200.0, 0.001));
+      },
+      failure: (f) => fail('query failed: $f'),
+    );
+  });
+
+  test('overdueAmount counts only unpaid past installments (money rule)',
+      () async {
+    final db = await openDb();
+    addTearDown(db.close);
+    await seedWeeklyLoan(db, 'L1', 'C1', 'Ada',
+        startDate: DateTime(2026, 1, 7), amount: 2000, interestRate: 10);
+
+    // Pay installment 1 in full → only installments 2-4 (1650) stay overdue.
+    await db.insert('payments', {
+      'id': 'P1',
+      'loan_id': 'L1',
+      'customer_id': 'C1',
+      'amount': 550,
+      'status': 'completed',
+      'payment_date': '2026-01-08',
+    });
+    await db.update(
+      'repayment_schedule',
+      {'status': 'paid', 'paid_amount': 550},
+      where: "loan_id = 'L1' AND installment_number = 1",
+    );
+
+    final result = await repo(db).getWeeklyCollection();
+    result.when(
+      success: (rows) {
+        expect(rows, hasLength(1));
+        expect(rows.first.overdueAmount, closeTo(1650.0, 0.001));
+      },
+      failure: (f) => fail('query failed: $f'),
+    );
+  });
+
+  test('overdueAmount flows through the date-range query', () async {
+    final db = await openDb();
+    addTearDown(db.close);
+    await seedWeeklyLoan(db, 'L1', 'C1', 'Ada',
+        startDate: DateTime(2026, 1, 7), amount: 2000, interestRate: 10);
+
+    final result = await repo(db)
+        .getWeeklyCollectionByDateRange(DateTime(2026, 1, 7), DateTime(2026, 1, 8));
+    result.when(
+      success: (rows) {
+        expect(rows, hasLength(1));
+        expect(rows.first.overdueAmount, closeTo(2200.0, 0.001));
+      },
+      failure: (f) => fail('query failed: $f'),
+    );
+  });
+
   test('paymentDaySortValue groups by repayment day Monday to Sunday', () async {
     final db = await openDb();
     addTearDown(db.close);

@@ -919,13 +919,14 @@ class ExportManager {
     'Phone',
     'Guarantor Name',
     'Guarantor Phone',
-    'Payment Day',
     'Disbursement Date',
     'Amount Disbursed',
     'Expected Amount',
     'Collected',
+    'Overdue',
     'Amount Paid',
     'Remaining Balance',
+    'Status',
   ];
 
   /// Builds the weekly collection workbook bytes. All amounts come from the
@@ -936,8 +937,10 @@ class ExportManager {
   /// "Expected Amount" is the fixed weekly installment (e.g. ₦10,000 for a
   /// ₦100,000 loan over 12 weeks at 20%). "Collected" shows the amount paid
   /// for the current installment (this week) — blank if nothing collected yet.
+  /// "Overdue" is the accumulated overdue balance (past installments unpaid).
   /// "Amount Paid" is the lifetime loan-applied total. "Remaining Balance" is
-  /// the true loan remainder (total repayment − amount paid).
+  /// the true loan remainder (total repayment − amount paid). The right-side
+  /// "Status" column shows Paid / Pending / Overdue.
   @visibleForTesting
   static List<int> buildWeeklyCollectionExcelBytes(
       List<WeeklyCollectionRow> rows, DateTime date) {
@@ -947,7 +950,7 @@ class ExportManager {
 
     // Title + date
     _appendStyled(ws, 0, ['Weekly Collection'], bold: true, size: 13);
-    _appendStyled(ws, 1, ['Date: ${AppDateUtils.formatDate(date)} (${AppDateUtils.formatRelative(date)})']);
+    _appendStyled(ws, 1, ['Date: ${AppDateUtils.formatDate(date)} — ${AppDateUtils.weekdayName(date)}']);
     _appendStyled(ws, 2, const []);
 
     var rowIdx = 3;
@@ -960,15 +963,17 @@ class ExportManager {
         row.phone,
         row.guarantorName,
         row.guarantorPhone,
-        row.paymentDay,
-        row.loanDate,
+        row.disbursementDate,
         row.amountDisbursed.toStringAsFixed(2),
         row.weeklyInstallment.toStringAsFixed(2),
         // Collected this period — blank if nothing collected for current installment
         row.collectedThisPeriod > 0 ? row.collectedThisPeriod.toStringAsFixed(2) : '',
+        // Overdue accumulation — blank when nothing overdue
+        row.overdueAmount > 0 ? row.overdueAmount.toStringAsFixed(2) : '',
         // Amount Paid is lifetime loan-applied total
         row.amountPaid > 0 ? row.amountPaid.toStringAsFixed(2) : '',
         row.remainingBalance.toStringAsFixed(2),
+        row.statusLabel,
       ];
       _appendStyled(ws, rowIdx, values);
       rowIdx++;
@@ -977,12 +982,14 @@ class ExportManager {
     var totalDisbursed = 0.0;
     var totalExpected = 0.0;
     var totalCollected = 0.0;
+    var totalOverdue = 0.0;
     var totalPaid = 0.0;
     var totalRemaining = 0.0;
     for (final row in rows) {
       totalDisbursed += row.amountDisbursed;
       totalExpected += row.weeklyInstallment;
       totalCollected += row.collectedThisPeriod;
+      totalOverdue += row.overdueAmount;
       totalPaid += row.amountPaid;
       totalRemaining += row.remainingBalance;
     }
@@ -994,12 +1001,13 @@ class ExportManager {
       '',
       '',
       '',
-      '',
       totalDisbursed.toStringAsFixed(2),
       totalExpected.toStringAsFixed(2),
       totalCollected > 0 ? totalCollected.toStringAsFixed(2) : '',
+      totalOverdue > 0 ? totalOverdue.toStringAsFixed(2) : '',
       totalPaid > 0 ? totalPaid.toStringAsFixed(2) : '',
       totalRemaining.toStringAsFixed(2),
+      '',
     ];
     _appendStyled(ws, rowIdx, totalValues, bold: true);
 
@@ -1063,12 +1071,14 @@ class ExportManager {
     var totalCollected = 0.0;
     var totalPaid = 0.0;
     var totalDisbursed = 0.0;
+    var totalOverdue = 0.0;
     var totalRemaining = 0.0;
     for (final r in rows) {
       totalExpected += r.weeklyInstallment;
       totalCollected += r.collectedThisPeriod;
       totalPaid += r.amountPaid;
       totalDisbursed += r.amountDisbursed;
+      totalOverdue += r.overdueAmount;
       totalRemaining += r.remainingBalance;
     }
 
@@ -1078,8 +1088,7 @@ class ExportManager {
               r.phone,
               r.guarantorName,
               r.guarantorPhone,
-              r.paymentDay,
-              r.loanDate,
+              r.disbursementDate,
               CurrencyUtils.format(r.amountDisbursed, symbol: currencySymbol),
               // Expected is the fixed weekly installment.
               CurrencyUtils.format(r.weeklyInstallment, symbol: currencySymbol),
@@ -1087,11 +1096,16 @@ class ExportManager {
               r.collectedThisPeriod > 0
                   ? CurrencyUtils.format(r.collectedThisPeriod, symbol: currencySymbol)
                   : '',
+              // Overdue accumulation — blank when nothing overdue.
+              r.overdueAmount > 0
+                  ? CurrencyUtils.format(r.overdueAmount, symbol: currencySymbol)
+                  : '',
               // Amount Paid is lifetime loan-applied total
               r.amountPaid > 0
                   ? CurrencyUtils.format(r.amountPaid, symbol: currencySymbol)
                   : '',
               CurrencyUtils.format(r.remainingBalance, symbol: currencySymbol),
+              r.statusLabel,
             ])
         .toList();
 
@@ -1110,7 +1124,7 @@ class ExportManager {
           ),
           pw.SizedBox(height: 4),
           pw.Text(
-            'Date: ${AppDateUtils.formatDate(date)} (${AppDateUtils.formatRelative(date)})',
+            'Date: ${AppDateUtils.formatDate(date)} — ${AppDateUtils.weekdayName(date)}',
             style:
                 pw.TextStyle(font: font, fontSize: 10, color: PdfColors.grey700),
           ),
@@ -1118,6 +1132,7 @@ class ExportManager {
             'Total Customers: ${rows.length}   |   Total Disbursed: ${CurrencyUtils.format(totalDisbursed, symbol: currencySymbol)}'
             '   |   Expected This Week: ${CurrencyUtils.format(totalExpected, symbol: currencySymbol)}'
             '   |   Collected This Week: ${CurrencyUtils.format(totalCollected, symbol: currencySymbol)}'
+            '   |   Overdue: ${CurrencyUtils.format(totalOverdue, symbol: currencySymbol)}'
             '   |   Paid: ${CurrencyUtils.format(totalPaid, symbol: currencySymbol)}'
             '   |   Remaining: ${CurrencyUtils.format(totalRemaining, symbol: currencySymbol)}',
             style:

@@ -151,8 +151,16 @@ class SavingsRepository {
   }
 
   /// Returns all savings accounts joined with customer names, newest first.
-  Future<List<Map<String, dynamic>>> getAllAccountsWithCustomerNames() async {
+  /// If [query] is provided, filters by customer name or phone.
+  Future<List<Map<String, dynamic>>> getAllAccountsWithCustomerNames(
+      {String query = ''}) async {
     final db = await _database;
+    final where = query.isEmpty
+        ? ''
+        : ' AND (c.full_name LIKE ? OR c.phone LIKE ?)';
+    final args = query.isEmpty
+        ? []
+        : ['%$query%', '%$query%'];
     return await db.rawQuery('''
       SELECT
         sa.id AS id,
@@ -163,8 +171,9 @@ class SavingsRepository {
         c.phone AS phone
       FROM savings_accounts sa
       INNER JOIN customers c ON sa.customer_id = c.id
+      WHERE 1=1 $where
       ORDER BY sa.created_at DESC
-    ''');
+    ''', args);
   }
 
   /// Returns the total savings balance across all customers.

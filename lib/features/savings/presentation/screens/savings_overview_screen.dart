@@ -4,7 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/utils/currency_utils.dart';
 import '../../../../core/widgets/app_drawer.dart';
-import '../../../../core/widgets/empty_state.dart';
+import '../../../../core/widgets/debounced_text_field.dart';
 import '../../../../core/widgets/keyboard_refreshable.dart';
 import '../../../reports/services/excel_export_service.dart';
 import '../../../business/presentation/providers/business_providers.dart';
@@ -15,7 +15,7 @@ class SavingsOverviewScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final accountsAsync = ref.watch(allAccountsWithNamesProvider);
+    final accountsAsync = ref.watch(filteredAccountsWithNamesProvider);
     final currency =
         ref.watch(currencySymbolProvider).valueOrNull ??
         CurrencyUtils.defaultSymbol;
@@ -33,7 +33,7 @@ class SavingsOverviewScreen extends ConsumerWidget {
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh (F5)',
-            onPressed: () => ref.invalidate(allAccountsWithNamesProvider),
+            onPressed: () => ref.invalidate(filteredAccountsWithNamesProvider),
           ),
           IconButton(
             icon: const Icon(Icons.file_download),
@@ -93,15 +93,7 @@ class SavingsOverviewScreen extends ConsumerWidget {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
         data: (accounts) {
-          if (accounts.isEmpty) {
-            return const EmptyState(
-              icon: Icons.savings_outlined,
-              title: 'No savings accounts yet',
-              subtitle:
-                  'Savings are created automatically when\noverpayments are received.',
-            );
-          }
-
+          final query = ref.watch(savingsSearchQueryProvider);
           final totalBalance = accounts.fold<double>(
             0,
             (sum, a) => sum + ((a['balance'] as num?)?.toDouble() ?? 0),
@@ -111,35 +103,58 @@ class SavingsOverviewScreen extends ConsumerWidget {
               .length;
 
           return KeyboardRefreshable(
-            onRefresh: () async => ref.invalidate(allAccountsWithNamesProvider),
-            child: ListView.builder(
+            onRefresh: () async => ref.invalidate(filteredAccountsWithNamesProvider),
+            child: ListView(
               padding: const EdgeInsets.all(16),
-              itemCount: accounts.length + 2,
-              itemBuilder: (context, index) {
-                if (index == 0) {
-                  return _SavingsSummaryCard(
-                    totalBalance: totalBalance,
-                    activeAccounts: activeAccounts,
-                    accountCount: accounts.length,
-                    currency: currency,
-                  );
-                }
-                if (index == 1) {
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 20, bottom: 8),
-                    child: Text(
-                      'Individual Accounts',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              children: [
+                _SavingsSummaryCard(
+                  totalBalance: totalBalance,
+                  activeAccounts: activeAccounts,
+                  accountCount: accounts.length,
+                  currency: currency,
+                ),
+                const SizedBox(height: 20),
+                DebouncedTextField(
+                  initialValue: query,
+                  decoration: const InputDecoration(
+                    hintText: 'Search customer or phone...',
+                    prefixIcon: Icon(Icons.search, size: 20),
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (v) =>
+                      ref.read(savingsSearchQueryProvider.notifier).state = v,
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Individual Accounts',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
+                ),
+                const SizedBox(height: 8),
+                if (accounts.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text(
+                      query.trim().isEmpty
+                          ? 'No savings accounts yet. Savings are created automatically when overpayments are received.'
+                          : 'No matching savings accounts found.',
+                      style: Theme.of(context).textTheme.bodyMedium,
                     ),
-                  );
-                }
-                return _AccountCard(
-                  account: accounts[index - 2],
-                  currency: currency,
-                );
-              },
+                  )
+                else
+                  ...accounts.map(
+                    (account) => _AccountCard(
+                      account: account,
+                      currency: currency,
+                    ),
+                  ),
+              ],
             ),
           );
         },

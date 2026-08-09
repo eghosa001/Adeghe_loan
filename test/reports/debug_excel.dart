@@ -22,6 +22,7 @@ void main() {
     String installmentStatus = 'pending',
     int daysOverdue = 0,
     double collectedThisPeriod = 0,
+    double overdueAmount = 0,
   }) {
     return WeeklyCollectionRow(
       customerId: 'c-$name',
@@ -48,6 +49,7 @@ void main() {
       currentInstallmentStatus: installmentStatus,
       daysOverdue: daysOverdue,
       collectedThisPeriod: collectedThisPeriod,
+      overdueAmount: overdueAmount,
     );
   }
 
