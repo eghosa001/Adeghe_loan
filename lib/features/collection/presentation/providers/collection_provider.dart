@@ -35,7 +35,7 @@ final collectionSearchQueryProvider = StateProvider<String>((ref) => '');
 /// Null means "all groups"; a non-null value filters by that group ID.
 final collectionGroupFilterProvider = StateProvider<String?>((ref) => null);
 
-enum CollectionSortBy { name, amountDue, amountPaid, outstanding, paymentDay }
+enum CollectionSortBy { name, amountDue, amountPaid, outstanding, paymentDay, disbursementDate }
 
 final collectionSortByProvider =
     StateProvider<CollectionSortBy>((ref) => CollectionSortBy.name);
@@ -94,6 +94,8 @@ final collectionListProvider = FutureProvider<List<CollectionRow>>((ref) async {
     case CollectionSortBy.paymentDay:
       // Payment day has no meaning for daily loans — fall back to name.
       filtered.sort((a, b) => a.customerName.toLowerCase().compareTo(b.customerName.toLowerCase()));
+    case CollectionSortBy.disbursementDate:
+      filtered.sort((a, b) => a.loanDate.compareTo(b.loanDate));
   }
   return filtered;
 });
@@ -127,11 +129,10 @@ final weeklyCollectionRangeEndProvider = StateProvider<DateTime>((ref) {
 
 /// Weekly list sort key. Reuses [CollectionSortBy]; `amountDue` maps to the
 /// next installment's remaining amount for the weekly list. Defaults to
-/// [CollectionSortBy.paymentDay] so the list groups every customer by their
-/// recurring repayment day (Monday → Sunday), letting collectors see at a
-/// glance which day each loan falls due.
+/// [CollectionSortBy.disbursementDate] so the list is sorted by loan
+/// disbursement date (oldest first), letting collectors prioritize older loans.
 final weeklyCollectionSortByProvider = StateProvider<CollectionSortBy>(
-    (ref) => CollectionSortBy.paymentDay);
+    (ref) => CollectionSortBy.disbursementDate);
 
 /// Weekly collection list filtered by date (single or range).
 final weeklyCollectionListProvider =
@@ -173,6 +174,12 @@ final weeklyCollectionListProvider =
       filtered.sort((a, b) {
         final byDay = a.paymentDaySortValue.compareTo(b.paymentDaySortValue);
         if (byDay != 0) return byDay;
+        return a.customerName.toLowerCase().compareTo(b.customerName.toLowerCase());
+      });
+    case CollectionSortBy.disbursementDate:
+      filtered.sort((a, b) {
+        final byDate = a.loanDate.compareTo(b.loanDate);
+        if (byDate != 0) return byDate;
         return a.customerName.toLowerCase().compareTo(b.customerName.toLowerCase());
       });
   }

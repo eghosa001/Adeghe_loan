@@ -280,7 +280,7 @@ cg.name AS groupName,
           ON st.reference_loan_payment_id = p.id AND st.type = 'overpayment'
         WHERE l.loan_type = 'weekly' AND l.status IN ('active', 'completed')
         GROUP BY l.id
-        ORDER BY c.full_name COLLATE NOCASE ASC
+        ORDER BY l.loan_date ASC, c.full_name COLLATE NOCASE ASC
       ''', [todayStr]);
 
       final weeklyRows = rows.map((row) {
@@ -435,7 +435,7 @@ cg.name AS groupName,
               AND $notOnEnabledHolidaySql
           )
         GROUP BY l.id
-        ORDER BY c.full_name COLLATE NOCASE ASC
+        ORDER BY l.loan_date ASC, c.full_name COLLATE NOCASE ASC
       ''', [startStr, endStr, startStr, endStr, todayStr, startStr, endStr]);
 
       final weeklyRows = rows.map((row) {

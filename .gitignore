@@ -1,24 +1,18 @@
 ```
 # Dependencies
 .dart_tool/
-.build/
+.packages
+.pub-cache/
+pubspec.lock
 
-# Logs and temp files
-*.log
-*.tmp
-*.swp
+# Build
+build/
+**/generated_plugin_registrant.*
 
-# Environment
+# Environment variables
 .env
-.env.local
 .env.*
-
-# Editors
-.vscode/
-.idea/
-*.iml
-*.ipr
-*.iws
+!.env.example
 
 # OS generated files
 .DS_Store

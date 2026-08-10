@@ -233,6 +233,10 @@ class WeeklyCollectionScreen extends ConsumerWidget {
                           isDense: true,
                           items: const [
                             DropdownMenuItem(
+                              value: CollectionSortBy.disbursementDate,
+                              child: Text('Disbursement Date'),
+                            ),
+                            DropdownMenuItem(
                               value: CollectionSortBy.paymentDay,
                               child: Text('Payment Day'),
                             ),

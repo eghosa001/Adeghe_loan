@@ -136,8 +136,10 @@ class WeeklyCollectionRow {
     return date.weekday;
   }
 
-  /// Whether the current installment is overdue.
-  bool get isOverdue => daysOverdue > 0;
+  /// Whether the current installment is overdue. A loan is considered overdue
+  /// if either the current installment is past due (daysOverdue > 0) OR if
+  /// there is any accumulated overdue amount from previous unpaid installments.
+  bool get isOverdue => overdueAmount > 0 || daysOverdue > 0;
 
   /// Whether the current installment is fully paid.
   bool get isCurrentInstallmentPaid => currentInstallmentStatus == 'paid';

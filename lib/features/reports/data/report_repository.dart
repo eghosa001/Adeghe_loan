@@ -123,15 +123,17 @@ class ReportRepository {
       ),
       // 3: Overdue loans count (active/defaulted loans with unpaid installments
       //    whose due date is strictly before today — future dues are NOT overdue)
+      //    Note: We check l.loan_date <= today (not endStr) so we capture all
+      //    currently overdue loans regardless of the report period filter.
       db.rawQuery(
-        'SELECT COUNT(DISTINCT l.id) AS count FROM loans l '
+        'SELECT COUNT(DISTINCT l.id) AS count FROM loans l '\
         "WHERE l.status IN ('active', 'defaulted') AND l.loan_date <= ? "
         'AND EXISTS (SELECT 1 FROM repayment_schedule rs WHERE rs.loan_id = l.id AND rs.status != ? AND DATE(rs.due_date) < ? '
         'AND $notOnEnabledHolidaySql)'
         '$ltClause',
         ltParam != null
-            ? [endStr, 'paid', todayStr, ltParam]
-            : [endStr, 'paid', todayStr],
+            ? [todayStr, 'paid', todayStr, ltParam]
+            : [todayStr, 'paid', todayStr],
       ),
       // 4: Amount disbursed in period (cancelled loans never disbursed)
       db.rawQuery(
