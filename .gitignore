@@ -1,9 +1,9 @@
-```
 # Dependencies
 .dart_tool/
 .packages
 .pub-cache/
 pubspec.lock
+.flutter-plugins-dependencies
 
 # Build
 build/
@@ -14,7 +14,10 @@ build/
 .env.*
 !.env.example
 
+# IDE
+.idea/
+*.iml
+
 # OS generated files
 .DS_Store
 Thumbs.db
-```
