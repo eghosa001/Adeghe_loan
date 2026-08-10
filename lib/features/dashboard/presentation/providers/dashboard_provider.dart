@@ -12,7 +12,7 @@ final _dashboardRepositoryProvider = FutureProvider<DashboardRepository>(
 
 final dashboardDataProvider = FutureProvider<DashboardData>((ref) async {
   final repo = await ref.watch(_dashboardRepositoryProvider.future);
-  final result = await repo.getDashboardData();
+  final result = await repo.getDashboardData(period: DashboardPeriod.today);
   return result.when(
     success: (data) => data,
     failure: (f) => throw f,

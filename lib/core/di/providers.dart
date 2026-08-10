@@ -13,6 +13,7 @@ import '../../features/backup/data/backup_service.dart';
 import '../../features/customers/data/statement_service.dart';
 import '../../features/audit_log/data/audit_log_repository.dart';
 import '../../features/loans/data/loan_schedule_service.dart';
+import '../../features/dashboard/data/dashboard_repository.dart';
 
 class _ThemeModeNotifier extends StateNotifier<ThemeMode> {
   _ThemeModeNotifier(this._storage) : super(ThemeMode.system) {

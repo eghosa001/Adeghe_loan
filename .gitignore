@@ -2,19 +2,37 @@
 # Dependencies
 .dart_tool/
 .packages
-.pub-cache/
-pubspec.lock
+.pub/
 
-# Build
+# Build outputs
 build/
-**/generated_plugin_registrant.*
+*.apk
+*.aab
+*.app
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
 
 # Environment variables
 .env
-.env.*
-!.env.example
+.env.local
+*.env.*
 
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Coverage
+coverage/
+*.coverage
+
+# Temporary files
+*.tmp
+*.temp
 ```
