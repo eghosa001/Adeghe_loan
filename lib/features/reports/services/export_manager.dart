@@ -922,9 +922,9 @@ class ExportManager {
     'Disbursement Date',
     'Amount Disbursed',
     'Expected Amount',
-    'Amount Due',
     'Amount Paid',
     'Overdue',
+    'Savings',
     'Remaining Balance',
   ];
 
@@ -934,12 +934,11 @@ class ExportManager {
   /// on-screen list. Testable without the file system.
   ///
   /// "Expected Amount" is the fixed weekly installment (e.g. ₦10,000 for a
-  /// ₦100,000 loan over 12 weeks at 20%). "Amount Due" shows what the customer
-  /// should pay today (current installment). "Amount Paid" shows what was
-  /// actually collected today for this installment. "Overdue" is the accumulated
-  /// overdue balance from previous unpaid installments. "Remaining Balance" is
-  /// the true loan remainder (total repayment − amount paid). Overdue rows are
-  /// highlighted in red in the UI.
+  /// ₦100,000 loan over 12 weeks at 20%). "Amount Paid" shows what the customer
+  /// paid this period (blank until paid). "Overdue" is the accumulated overdue
+  /// balance from previous unpaid installments (blank when nothing is due).
+  /// "Savings" is the customer's live savings account balance. "Remaining
+  /// Balance" is the true loan remainder (total repayment − amount paid).
   @visibleForTesting
   static List<int> buildWeeklyCollectionExcelBytes(
       List<WeeklyCollectionRow> rows, DateTime date) {
@@ -965,12 +964,12 @@ class ExportManager {
         row.disbursementDate,
         row.amountDisbursed.toStringAsFixed(2),
         row.weeklyInstallment.toStringAsFixed(2),
-        // Amount Due: current installment amount
-        row.currentInstallmentAmount.toStringAsFixed(2),
-        // Amount Paid: collected for current period — blank if nothing collected
+        // Amount Paid: what was collected this period — blank until a payment exists.
         row.collectedThisPeriod > 0 ? row.collectedThisPeriod.toStringAsFixed(2) : '',
-        // Overdue accumulation — blank when nothing overdue
+        // Overdue accumulation — blank when nothing overdue.
         row.overdueAmount > 0 ? row.overdueAmount.toStringAsFixed(2) : '',
+        // Savings: the customer's live savings account balance.
+        row.savingsBalance.toStringAsFixed(2),
         row.remainingBalance.toStringAsFixed(2),
       ];
       _appendStyled(ws, rowIdx, values);
@@ -979,16 +978,16 @@ class ExportManager {
     // Totals row
     var totalDisbursed = 0.0;
     var totalExpected = 0.0;
-    var totalAmountDue = 0.0;
-    var totalAmountPaid = 0.0;
+    var totalCollected = 0.0;
     var totalOverdue = 0.0;
+    var totalSavings = 0.0;
     var totalRemaining = 0.0;
     for (final row in rows) {
       totalDisbursed += row.amountDisbursed;
       totalExpected += row.weeklyInstallment;
-      totalAmountDue += row.currentInstallmentAmount;
-      totalAmountPaid += row.collectedThisPeriod;
+      totalCollected += row.collectedThisPeriod;
       totalOverdue += row.overdueAmount;
+      totalSavings += row.savingsBalance;
       totalRemaining += row.remainingBalance;
     }
     _appendStyled(ws, rowIdx, const []);
@@ -1001,9 +1000,9 @@ class ExportManager {
       '',
       totalDisbursed.toStringAsFixed(2),
       totalExpected.toStringAsFixed(2),
-      totalAmountDue.toStringAsFixed(2),
-      totalAmountPaid.toStringAsFixed(2),
+      totalCollected > 0 ? totalCollected.toStringAsFixed(2) : '',
       totalOverdue > 0 ? totalOverdue.toStringAsFixed(2) : '',
+      totalSavings.toStringAsFixed(2),
       totalRemaining.toStringAsFixed(2),
     ];
     _appendStyled(ws, rowIdx, totalValues, bold: true);
@@ -1065,17 +1064,17 @@ class ExportManager {
     final pdf = pw.Document();
 
     var totalExpected = 0.0;
-    var totalAmountDue = 0.0;
-    var totalAmountPaid = 0.0;
+    var totalCollected = 0.0;
     var totalDisbursed = 0.0;
     var totalOverdue = 0.0;
+    var totalSavings = 0.0;
     var totalRemaining = 0.0;
     for (final r in rows) {
       totalExpected += r.weeklyInstallment;
-      totalAmountDue += r.currentInstallmentAmount;
-      totalAmountPaid += r.collectedThisPeriod;
+      totalCollected += r.collectedThisPeriod;
       totalDisbursed += r.amountDisbursed;
       totalOverdue += r.overdueAmount;
+      totalSavings += r.savingsBalance;
       totalRemaining += r.remainingBalance;
     }
 
@@ -1089,9 +1088,7 @@ class ExportManager {
               CurrencyUtils.format(r.amountDisbursed, symbol: currencySymbol),
               // Expected is the fixed weekly installment.
               CurrencyUtils.format(r.weeklyInstallment, symbol: currencySymbol),
-              // Amount Due: current installment amount
-              CurrencyUtils.format(r.currentInstallmentAmount, symbol: currencySymbol),
-              // Amount Paid: collected for current period — blank if nothing collected
+              // Amount Paid: what was collected this period — blank until paid.
               r.collectedThisPeriod > 0
                   ? CurrencyUtils.format(r.collectedThisPeriod, symbol: currencySymbol)
                   : '',
@@ -1099,6 +1096,8 @@ class ExportManager {
               r.overdueAmount > 0
                   ? CurrencyUtils.format(r.overdueAmount, symbol: currencySymbol)
                   : '',
+              // Savings: the customer's live savings account balance.
+              CurrencyUtils.format(r.savingsBalance, symbol: currencySymbol),
               CurrencyUtils.format(r.remainingBalance, symbol: currencySymbol),
             ])
         .toList();
@@ -1125,9 +1124,9 @@ class ExportManager {
           pw.Text(
             'Total Customers: ${rows.length}   |   Total Disbursed: ${CurrencyUtils.format(totalDisbursed, symbol: currencySymbol)}'
             '   |   Expected This Week: ${CurrencyUtils.format(totalExpected, symbol: currencySymbol)}'
-            '   |   Amount Due: ${CurrencyUtils.format(totalAmountDue, symbol: currencySymbol)}'
-            '   |   Amount Paid: ${CurrencyUtils.format(totalAmountPaid, symbol: currencySymbol)}'
+            '   |   Amount Paid: ${CurrencyUtils.format(totalCollected, symbol: currencySymbol)}'
             '   |   Overdue: ${CurrencyUtils.format(totalOverdue, symbol: currencySymbol)}'
+            '   |   Savings: ${CurrencyUtils.format(totalSavings, symbol: currencySymbol)}'
             '   |   Remaining: ${CurrencyUtils.format(totalRemaining, symbol: currencySymbol)}',
             style:
                 pw.TextStyle(font: font, fontSize: 10, color: PdfColors.grey700),

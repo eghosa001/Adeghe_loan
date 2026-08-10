@@ -272,7 +272,12 @@ cg.name AS groupName,
             FROM repayment_schedule rs
             WHERE rs.loan_id = l.id AND rs.status != 'paid'
               AND DATE(rs.due_date) < ?
-          ), 0.0) AS overdueAmount
+          ), 0.0) AS overdueAmount,
+          COALESCE((
+            SELECT sa.balance
+            FROM savings_accounts sa
+            WHERE sa.customer_id = c.id
+          ), 0.0) AS savingsBalance
         FROM loans l
         INNER JOIN customers c ON l.customer_id = c.id
         LEFT JOIN payments p ON p.loan_id = l.id AND p.status = 'completed'
@@ -280,7 +285,7 @@ cg.name AS groupName,
           ON st.reference_loan_payment_id = p.id AND st.type = 'overpayment'
         WHERE l.loan_type = 'weekly' AND l.status IN ('active', 'completed')
         GROUP BY l.id
-        ORDER BY l.loan_date ASC, c.full_name COLLATE NOCASE ASC
+        ORDER BY l.start_date ASC, c.full_name COLLATE NOCASE ASC
       ''', [todayStr]);
 
       final weeklyRows = rows.map((row) {
@@ -335,6 +340,7 @@ cg.name AS groupName,
           daysOverdue: daysOverdue,
           collectedThisPeriod: collectedThisPeriod,
           overdueAmount: (row['overdueAmount'] as num?)?.toDouble() ?? 0.0,
+          savingsBalance: (row['savingsBalance'] as num?)?.toDouble() ?? 0.0,
         );
       }).toList(growable: false);
 
@@ -397,7 +403,12 @@ cg.name AS groupName,
             FROM repayment_schedule rs
             WHERE rs.loan_id = l.id AND rs.status != 'paid'
               AND DATE(rs.due_date) < ?
-          ), 0.0) AS overdueAmount
+          ), 0.0) AS overdueAmount,
+          COALESCE((
+            SELECT sa.balance
+            FROM savings_accounts sa
+            WHERE sa.customer_id = c.id
+          ), 0.0) AS savingsBalance
         FROM loans l
         INNER JOIN customers c ON l.customer_id = c.id
         LEFT JOIN (
@@ -435,8 +446,8 @@ cg.name AS groupName,
               AND $notOnEnabledHolidaySql
           )
         GROUP BY l.id
-        ORDER BY l.loan_date ASC, c.full_name COLLATE NOCASE ASC
-      ''', [startStr, endStr, startStr, endStr, todayStr, startStr, endStr]);
+        ORDER BY l.start_date ASC, c.full_name COLLATE NOCASE ASC
+      ''', [todayStr, startStr, endStr, startStr, endStr, startStr, endStr]);
 
       final weeklyRows = rows.map((row) {
         final currentInstallmentDueDate = row['currentInstallmentDueDate'] as String? ?? '';
@@ -485,6 +496,7 @@ cg.name AS groupName,
           daysOverdue: daysOverdue,
           collectedThisPeriod: collectedThisPeriod,
           overdueAmount: (row['overdueAmount'] as num?)?.toDouble() ?? 0.0,
+          savingsBalance: (row['savingsBalance'] as num?)?.toDouble() ?? 0.0,
         );
       }).toList(growable: false);
 

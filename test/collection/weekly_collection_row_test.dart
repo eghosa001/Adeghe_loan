@@ -35,6 +35,7 @@ void main() {
       daysOverdue: daysOverdue,
       collectedThisPeriod: 0,
       overdueAmount: overdueAmount,
+      savingsBalance: 0,
     );
   }
 

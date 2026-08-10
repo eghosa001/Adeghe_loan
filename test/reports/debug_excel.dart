@@ -50,6 +50,7 @@ void main() {
       daysOverdue: daysOverdue,
       collectedThisPeriod: collectedThisPeriod,
       overdueAmount: overdueAmount,
+      savingsBalance: 0,
     );
   }
 

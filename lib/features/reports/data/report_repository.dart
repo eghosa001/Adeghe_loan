@@ -126,7 +126,7 @@ class ReportRepository {
       //    Note: We check l.loan_date <= today (not endStr) so we capture all
       //    currently overdue loans regardless of the report period filter.
       db.rawQuery(
-        'SELECT COUNT(DISTINCT l.id) AS count FROM loans l '\
+        'SELECT COUNT(DISTINCT l.id) AS count FROM loans l '
         "WHERE l.status IN ('active', 'defaulted') AND l.loan_date <= ? "
         'AND EXISTS (SELECT 1 FROM repayment_schedule rs WHERE rs.loan_id = l.id AND rs.status != ? AND DATE(rs.due_date) < ? '
         'AND $notOnEnabledHolidaySql)'

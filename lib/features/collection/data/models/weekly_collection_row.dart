@@ -29,6 +29,7 @@ class WeeklyCollectionRow {
     required this.daysOverdue,
     required this.collectedThisPeriod,
     required this.overdueAmount,
+    required this.savingsBalance,
   });
 
   final String customerId;
@@ -80,6 +81,8 @@ class WeeklyCollectionRow {
   /// installment (due before today) that is not fully paid, following the
   /// money rule (`rs.amount - paid_amount`). 0 when nothing is overdue.
   final double overdueAmount;
+  /// The customer's live savings account balance (`savings_accounts.balance`).
+  final double savingsBalance;
 
   /// Total expected (principal + interest + charges) − Amount Paid, never
   /// negative.

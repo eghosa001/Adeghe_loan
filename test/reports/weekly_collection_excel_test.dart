@@ -23,6 +23,7 @@ void main() {
     int daysOverdue = 0,
     double collectedThisPeriod = 0,
     double overdueAmount = 0,
+    double savings = 0,
   }) {
     return WeeklyCollectionRow(
       customerId: 'c-$name',
@@ -50,6 +51,7 @@ void main() {
       daysOverdue: daysOverdue,
       collectedThisPeriod: collectedThisPeriod,
       overdueAmount: overdueAmount,
+      savingsBalance: savings,
     );
   }
 
@@ -59,9 +61,11 @@ void main() {
           ?.toString() ??
       '';
 
-  // Data now starts at row 4 (0=title, 1=date, 2=empty, 3=headers, 4=first data row)
-  int headerRow = 2; // headers are at row 2 (0=title, 1=date, 2=headers)
-  int dataRow(int index) => headerRow + 1 + index; // data starts at row 3
+  // Layout: 0=title, 1=date, 2=headers, 3=blank, 4=first data row.
+  // The blank at 3 comes from the header styling loop touching a row past the
+  // appended header row (appendRow of an empty list is a no-op on maxRows).
+  int headerRow = 2;
+  int dataRow(int index) => 4 + index; // data starts at row 4
 
   Sheet buildSheet(List<WeeklyCollectionRow> rows) {
     final bytes = ExportManager.buildWeeklyCollectionExcelBytes(rows, DateTime(2026, 8, 7));
@@ -70,26 +74,21 @@ void main() {
   }
 
   group('weekly collection export', () {
-    test('headers: payment day removed, overdue and status columns added', () {
+    test('headers match the requested collection sheet layout', () {
       final sheet = buildSheet([row()]);
 
-      expect(cellText(sheet, 0, headerRow), 'Customer Name');
+      expect(cellText(sheet, 0, headerRow), 'Customer');
       expect(cellText(sheet, 1, headerRow), 'Phone');
-      expect(cellText(sheet, 2, headerRow), 'Guarantor Name');
+      expect(cellText(sheet, 2, headerRow), 'Guarantor');
       expect(cellText(sheet, 3, headerRow), 'Guarantor Phone');
       expect(cellText(sheet, 4, headerRow), 'Disbursement Date');
       expect(cellText(sheet, 5, headerRow), 'Amount Disbursed');
       expect(cellText(sheet, 6, headerRow), 'Expected Amount');
-      expect(cellText(sheet, 7, headerRow), 'Collected');
+      expect(cellText(sheet, 7, headerRow), 'Amount Paid');
       expect(cellText(sheet, 8, headerRow), 'Overdue');
-      expect(cellText(sheet, 9, headerRow), 'Amount Paid');
+      expect(cellText(sheet, 9, headerRow), 'Savings');
       expect(cellText(sheet, 10, headerRow), 'Remaining Balance');
-      expect(cellText(sheet, 11, headerRow), 'Status');
-      expect(cellText(sheet, 12, headerRow), ''); // no 13th column
-      final headerRowList =
-          sheet.row(headerRow).map((c) => c?.value?.toString() ?? '').toList();
-      expect(headerRowList, isNot(contains('Payment Day')));
-      expect(headerRowList, isNot(contains('Interest')));
+      expect(cellText(sheet, 11, headerRow), ''); // no 12th column
     });
 
     test('date line shows the weekday name, not a relative label', () {
@@ -101,7 +100,7 @@ void main() {
       expect(cellText(sheet, 0, 1), 'Date: 07 Aug 2026 — Friday');
     });
 
-    test('expected is the weekly installment, collected is blank until paid',
+    test('expected is the weekly installment, amount paid is blank until paid',
         () {
       final sheet = buildSheet([
         row(
@@ -122,6 +121,7 @@ void main() {
           installmentStatus: 'pending',
           daysOverdue: 0,
           collectedThisPeriod: 0,
+          savings: 25000,
         ),
       ]);
 
@@ -134,14 +134,13 @@ void main() {
       expect(cellText(sheet, 4, r), '2026-07-29');
       expect(cellText(sheet, 5, r), '100000.00');
       expect(cellText(sheet, 6, r), '10000.00'); // weekly installment
-      expect(cellText(sheet, 7, r), ''); // Collected blank, not 0.00
+      expect(cellText(sheet, 7, r), ''); // Amount Paid blank, not 0.00
       expect(cellText(sheet, 8, r), ''); // Overdue blank, not 0.00
-      expect(cellText(sheet, 9, r), ''); // Amount Paid blank
+      expect(cellText(sheet, 9, r), '25000.00'); // Savings
       expect(cellText(sheet, 10, r), '120000.00'); // total remaining
-      expect(cellText(sheet, 11, r), 'Pending');
     });
 
-    test('collected reflects the weekly amount once the customer pays this period',
+    test('amount paid reflects the weekly amount once the customer pays this period',
         () {
       final sheet = buildSheet([
         row(
@@ -157,18 +156,19 @@ void main() {
           installmentStatus: 'paid',
           daysOverdue: 0,
           collectedThisPeriod: 10000,
+          savings: 25000,
         ),
       ]);
 
       final r = dataRow(0);
       expect(cellText(sheet, 6, r), '10000.00'); // Expected
-      expect(cellText(sheet, 7, r), '10000.00'); // Collected
-      expect(cellText(sheet, 9, r), '10000.00'); // Amount Paid
+      expect(cellText(sheet, 7, r), '10000.00'); // Amount Paid
+      expect(cellText(sheet, 8, r), ''); // Overdue blank
+      expect(cellText(sheet, 9, r), '25000.00'); // Savings
       expect(cellText(sheet, 10, r), '110000.00');
-      expect(cellText(sheet, 11, r), 'Paid');
     });
 
-    test('partial payment shows collected and amount paid, status pending', () {
+    test('partial payment shows the amount paid and keeps remaining', () {
       final sheet = buildSheet([
         row(
           name: 'Ada',
@@ -188,14 +188,12 @@ void main() {
 
       final r = dataRow(0);
       expect(cellText(sheet, 6, r), '10000.00');
-      expect(cellText(sheet, 7, r), '5000.00'); // Collected
-      expect(cellText(sheet, 9, r), '5000.00'); // Amount Paid
+      expect(cellText(sheet, 7, r), '5000.00'); // Amount Paid
+      expect(cellText(sheet, 9, r), '0.00'); // Savings
       expect(cellText(sheet, 10, r), '115000.00');
-      expect(cellText(sheet, 11, r), 'Pending');
     });
 
-    test('overdue accumulation shows in the Overdue column and Overdue status',
-        () {
+    test('overdue accumulation shows in the Overdue column', () {
       final sheet = buildSheet([
         row(
           name: 'Ada',
@@ -208,7 +206,7 @@ void main() {
 
       final r = dataRow(0);
       expect(cellText(sheet, 8, r), '30000.00');
-      expect(cellText(sheet, 11, r), 'Overdue');
+      expect(cellText(sheet, 7, r), ''); // nothing paid this period
     });
 
     test('remaining balance is never negative', () {
@@ -220,7 +218,7 @@ void main() {
       expect(cellText(sheet, 10, dataRow(0)), '0.00');
     });
 
-    test('overdue and paid totals accumulate across rows', () {
+    test('overdue, savings, and remaining totals accumulate across rows', () {
       final sheet = buildSheet([
         row(
           name: 'Ada',
@@ -231,6 +229,7 @@ void main() {
           collectedThisPeriod: 10000,
           installmentStatus: 'paid',
           overdueAmount: 5000,
+          savings: 20000,
         ),
         row(
           name: 'Bola',
@@ -240,16 +239,17 @@ void main() {
           paid: 0,
           installmentStatus: 'pending',
           overdueAmount: 10000,
+          savings: 30000,
         ),
       ]);
 
-      final totalRow = dataRow(2) + 1; // blank row after last data row, then totals
+      final totalRow = dataRow(2); // totals row follows the last data row directly
       expect(cellText(sheet, 5, totalRow), '150000.00'); // disbursed
       expect(cellText(sheet, 6, totalRow), '15000.00'); // expected
-      expect(cellText(sheet, 7, totalRow), '10000.00'); // collected
+      expect(cellText(sheet, 7, totalRow), '10000.00'); // amount paid
       expect(cellText(sheet, 8, totalRow), '15000.00'); // overdue
-      expect(cellText(sheet, 9, totalRow), '10000.00'); // paid
-      expect(cellText(sheet, 10, totalRow), '155000.00'); // remaining
+      expect(cellText(sheet, 9, totalRow), '50000.00'); // savings
+      expect(cellText(sheet, 10, totalRow), '170000.00'); // remaining
     });
 
     test('empty list still produces a valid workbook with totals', () {
@@ -257,12 +257,12 @@ void main() {
       final decoded = Excel.decodeBytes(bytes);
       final sheet = decoded.tables[decoded.tables.keys.first]!;
 
-      expect(cellText(sheet, 0, headerRow), 'Customer Name');
+      expect(cellText(sheet, 0, headerRow), 'Customer');
       expect(cellText(sheet, 0, headerRow + 2), 'TOTAL'); // empty row + totals row
       expect(cellText(sheet, 5, headerRow + 2), '0.00'); // disbursed total
-      expect(cellText(sheet, 7, headerRow + 2), ''); // collected total blank when nothing paid
+      expect(cellText(sheet, 7, headerRow + 2), ''); // amount paid total blank when nothing paid
       expect(cellText(sheet, 8, headerRow + 2), ''); // overdue total blank
-      expect(cellText(sheet, 9, headerRow + 2), ''); // paid total blank when nothing paid
+      expect(cellText(sheet, 9, headerRow + 2), '0.00'); // savings total
     });
   });
 }

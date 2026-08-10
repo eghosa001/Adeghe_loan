@@ -243,6 +243,7 @@ class _FinancialSettingsTabState extends ConsumerState<FinancialSettingsTab> {
     final settingsAsync = ref.watch(financialSettingsProvider);
 
     return Scaffold(
+      appBar: AppBar(title: const Text('Financial Defaults')),
       body: settingsAsync.when(
         data: (settings) => _isEditing
             ? _buildEditForm(settings)

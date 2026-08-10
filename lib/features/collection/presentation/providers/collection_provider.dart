@@ -95,7 +95,8 @@ final collectionListProvider = FutureProvider<List<CollectionRow>>((ref) async {
       // Payment day has no meaning for daily loans — fall back to name.
       filtered.sort((a, b) => a.customerName.toLowerCase().compareTo(b.customerName.toLowerCase()));
     case CollectionSortBy.disbursementDate:
-      filtered.sort((a, b) => a.loanDate.compareTo(b.loanDate));
+      // Disbursement date isn't available on daily rows — fall back to name.
+      filtered.sort((a, b) => a.customerName.toLowerCase().compareTo(b.customerName.toLowerCase()));
   }
   return filtered;
 });
@@ -177,8 +178,10 @@ final weeklyCollectionListProvider =
         return a.customerName.toLowerCase().compareTo(b.customerName.toLowerCase());
       });
     case CollectionSortBy.disbursementDate:
+      // The exported "Disbursement Date" column shows the displayed
+      // disbursementDate (start_date − 7 days), so sort by that value.
       filtered.sort((a, b) {
-        final byDate = a.loanDate.compareTo(b.loanDate);
+        final byDate = a.disbursementDate.compareTo(b.disbursementDate);
         if (byDate != 0) return byDate;
         return a.customerName.toLowerCase().compareTo(b.customerName.toLowerCase());
       });

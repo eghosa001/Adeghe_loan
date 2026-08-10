@@ -237,6 +237,7 @@ class _BusinessDetailsTabState extends ConsumerState<BusinessDetailsTab> {
     final profileAsync = ref.watch(businessProfileProvider);
 
     return Scaffold(
+      appBar: AppBar(title: const Text('Business Profile')),
       body: profileAsync.when(
         data: (profile) => _isEditing
             ? _buildEditForm(profile)

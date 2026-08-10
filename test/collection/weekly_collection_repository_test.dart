@@ -106,6 +106,15 @@ void main() {
         created_at TEXT NOT NULL
       )
     ''');
+    await db.execute('''
+      CREATE TABLE savings_accounts (
+        id TEXT PRIMARY KEY,
+        customer_id TEXT NOT NULL UNIQUE,
+        balance REAL NOT NULL DEFAULT 0.0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT
+      )
+    ''');
     return db;
   }
 
