@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/security/secure_storage_service.dart';
 import '../../../../core/security/biometric_service.dart';
+import '../../../../core/widgets/keyboard_scrollable.dart';
 
 class SecuritySettingsScreen extends ConsumerStatefulWidget {
   const SecuritySettingsScreen({super.key});
@@ -72,25 +73,27 @@ class _SecuritySettingsScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Security Settings')),
-      body: ListView(padding: const EdgeInsets.all(8.0), children: [
-        ListTile(
-          leading: const Icon(Icons.fingerprint),
-          title: const Text('Fingerprint Unlock'),
-          trailing:
-              Switch(value: _biometricEnabled, onChanged: _toggleBiometric),
-        ),
-        ListTile(
-          leading: const Icon(Icons.pin),
-          title: const Text('Change PIN'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => context.push('/auth/change_pin'),
-        ),
-        ListTile(
-          leading: const Icon(Icons.lock_reset),
-          title: const Text('Forgot PIN / Reset'),
-          onTap: () => context.push('/auth/forgot_pin'),
-        ),
-      ]),
+      body: KeyboardScrollable(
+        child: ListView(padding: const EdgeInsets.all(8.0), children: [
+          ListTile(
+            leading: const Icon(Icons.fingerprint),
+            title: const Text('Fingerprint Unlock'),
+            trailing:
+                Switch(value: _biometricEnabled, onChanged: _toggleBiometric),
+          ),
+          ListTile(
+            leading: const Icon(Icons.pin),
+            title: const Text('Change PIN'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/auth/change_pin'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.lock_reset),
+            title: const Text('Forgot PIN / Reset'),
+            onTap: () => context.push('/auth/forgot_pin'),
+          ),
+        ]),
+      ),
     );
   }
 }

@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/utils/currency_utils.dart';
 import '../../../../core/utils/input_formatters.dart';
+import '../../../../core/widgets/keyboard_scrollable.dart';
 import '../../../business/presentation/providers/business_providers.dart';
 import '../../data/models/payment_entity.dart';
 import '../providers/payment_providers.dart';
@@ -118,7 +119,8 @@ class _RecordPaymentScreenState extends ConsumerState<RecordPaymentScreen> {
         ref.invalidate(allAccountsWithNamesProvider);
         ref.invalidate(customerProvider(widget.customerId));
         ref.invalidate(customerListProvider);
-        ref.invalidate(reportSummaryProvider);
+        invalidateReportData(ref.invalidate);
+        ref.invalidate(futureScheduleProvider);
         ref.invalidate(activeLoansForCustomerProvider(widget.customerId));
         ref.invalidate(allLoansProvider);
         Navigator.of(context).pop();
@@ -144,10 +146,11 @@ class _RecordPaymentScreenState extends ConsumerState<RecordPaymentScreen> {
         CurrencyUtils.defaultSymbol;
     return Scaffold(
       appBar: AppBar(title: const Text('Record Payment')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: ListView(
-          children: [
+      body: KeyboardScrollable(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: ListView(
+            children: [
             Card(
               color: colorScheme.primaryContainer,
               child: Padding(
@@ -278,6 +281,7 @@ class _RecordPaymentScreenState extends ConsumerState<RecordPaymentScreen> {
                   : const Text('Submit payment'),
             ),
           ],
+          ),
         ),
       ),
     );

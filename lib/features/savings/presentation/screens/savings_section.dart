@@ -187,7 +187,8 @@ class SavingsSection extends ConsumerWidget {
       ref.invalidate(allAccountsWithNamesProvider);
       ref.invalidate(dashboardDataProvider);
       ref.invalidate(collectionListProvider);
-      ref.invalidate(reportSummaryProvider);
+      invalidateReportData(ref.invalidate);
+      ref.invalidate(weeklyCollectionListProvider);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

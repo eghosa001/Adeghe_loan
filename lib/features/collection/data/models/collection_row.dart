@@ -14,6 +14,7 @@ class CollectionRow {
     this.groupName,
     this.remarks,
     this.dueDate,
+    this.overdueAmount = 0,
   });
 
   final String customerId;
@@ -32,8 +33,15 @@ class CollectionRow {
   final String? groupName;
   final String? remarks;
   final String? dueDate;
+  /// Total accumulation of the customer's overdue — the sum of every past
+  /// unpaid installment on this loan (money rule: `rs.amount - paid_amount`).
+  /// 0 when nothing is overdue.
+  final double overdueAmount;
 
   bool get isPaid => scheduleStatus == 'paid';
   bool get isPartial => scheduleStatus == 'partial';
   bool get isPending => scheduleStatus == 'pending';
+
+  /// Whether the loan has any unpaid installment due before today.
+  bool get isOverdue => overdueAmount > 0;
 }

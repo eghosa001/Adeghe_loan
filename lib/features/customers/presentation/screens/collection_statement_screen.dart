@@ -5,6 +5,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../../core/utils/currency_utils.dart';
 import '../../../../core/utils/date_utils.dart';
+import '../../../../core/widgets/keyboard_scrollable.dart';
 import '../../../business/presentation/providers/business_providers.dart';
 import '../../../collection/data/models/collection_row.dart';
 import '../../../collection/presentation/providers/collection_provider.dart';
@@ -143,27 +144,29 @@ class _CollectionStatementScreenState extends ConsumerState<CollectionStatementS
               ),
             ),
             Expanded(
-              child: ListView.separated(
-                itemCount: rows.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
-                itemBuilder: (context, index) {
-                  final row = rows[index];
-                  return ListTile(
-                    title: Text(row.customerName),
-                    subtitle: Text(
-                        '${row.loanType}${row.groupName != null ? ' — ${row.groupName}' : ''}'),
-                    trailing: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(CurrencyUtils.format(row.amountPaid, symbol: _currencySymbol),
-                            style: const TextStyle(fontWeight: FontWeight.bold)),
-                        Text('/ ${CurrencyUtils.format(row.amountDue, symbol: _currencySymbol)}',
-                            style: Theme.of(context).textTheme.bodySmall),
-                      ],
-                    ),
-                  );
-                },
+              child: KeyboardScrollable(
+                child: ListView.separated(
+                  itemCount: rows.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final row = rows[index];
+                    return ListTile(
+                      title: Text(row.customerName),
+                      subtitle: Text(
+                          '${row.loanType}${row.groupName != null ? ' — ${row.groupName}' : ''}'),
+                      trailing: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(CurrencyUtils.format(row.amountPaid, symbol: _currencySymbol),
+                              style: const TextStyle(fontWeight: FontWeight.bold)),
+                          Text('/ ${CurrencyUtils.format(row.amountDue, symbol: _currencySymbol)}',
+                              style: Theme.of(context).textTheme.bodySmall),
+                        ],
+                      ),
+                    );
+                  },
+                ),
               ),
             ),
           ],

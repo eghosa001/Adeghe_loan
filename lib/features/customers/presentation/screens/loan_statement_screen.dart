@@ -7,6 +7,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../../core/di/providers.dart';
 import '../../../../core/utils/currency_utils.dart';
+import '../../../../core/widgets/keyboard_scrollable.dart';
 import '../../../customers/presentation/providers/customer_providers.dart';
 import '../../../loans/presentation/providers/loan_providers.dart';
 import '../../../loans/data/models/loan_entity.dart';
@@ -154,58 +155,60 @@ class _LoanStatementBody extends ConsumerWidget {
             ),
           );
         }
-        return ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: loans.length,
-          itemBuilder: (context, index) {
-            final loan = loans[index];
-            return Card(
-              margin: const EdgeInsets.only(bottom: 12),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(loan.loanType.name.toUpperCase(),
-                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                                  color: Theme.of(context).colorScheme.primary,
+        return KeyboardScrollable(
+          child: ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: loans.length,
+            itemBuilder: (context, index) {
+              final loan = loans[index];
+              return Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(loan.loanType.name.toUpperCase(),
+                              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                    color: Theme.of(context).colorScheme.primary,
+                                  )),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: switch (loan.status) {
+                                LoanStatus.active => Colors.green.withValues(alpha: 0.1),
+                                LoanStatus.completed => Colors.blue.withValues(alpha: 0.1),
+                                _ => Colors.orange.withValues(alpha: 0.1),
+                              },
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(loan.status.name,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: switch (loan.status) {
+                                    LoanStatus.active => Colors.green.shade800,
+                                    LoanStatus.completed => Colors.blue.shade800,
+                                    _ => Colors.orange.shade800,
+                                  },
                                 )),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: switch (loan.status) {
-                              LoanStatus.active => Colors.green.withValues(alpha: 0.1),
-                              LoanStatus.completed => Colors.blue.withValues(alpha: 0.1),
-                              _ => Colors.orange.withValues(alpha: 0.1),
-                            },
-                            borderRadius: BorderRadius.circular(12),
                           ),
-                          child: Text(loan.status.name,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: switch (loan.status) {
-                                  LoanStatus.active => Colors.green.shade800,
-                                  LoanStatus.completed => Colors.blue.shade800,
-                                  _ => Colors.orange.shade800,
-                                },
-                              )),
-                        ),
-                      ],
-                    ),
-                    const Divider(),
-                    _detailRow('Principal', CurrencyUtils.format(loan.amount, symbol: currency)),
-                    _detailRow('Total Repayment', CurrencyUtils.format(loan.totalRepayment, symbol: currency)),
-                    _detailRow('Outstanding', CurrencyUtils.format(loan.outstandingBalance, symbol: currency)),
-                    _detailRow('Interest Rate', '${loan.interestRate}%'),
-                    _detailRow('Loan Date', loan.loanDate.toString().split(' ').first),
-                  ],
+                        ],
+                      ),
+                      const Divider(),
+                      _detailRow('Principal', CurrencyUtils.format(loan.amount, symbol: currency)),
+                      _detailRow('Total Repayment', CurrencyUtils.format(loan.totalRepayment, symbol: currency)),
+                      _detailRow('Outstanding', CurrencyUtils.format(loan.outstandingBalance, symbol: currency)),
+                      _detailRow('Interest Rate', '${loan.interestRate}%'),
+                      _detailRow('Loan Date', loan.loanDate.toString().split(' ').first),
+                    ],
+                  ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         );
       },
     );

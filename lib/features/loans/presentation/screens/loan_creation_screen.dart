@@ -4,6 +4,7 @@ import 'package:loantrack/core/constants/app_constants.dart';
 import 'package:loantrack/core/utils/currency_utils.dart';
 import 'package:loantrack/core/utils/date_utils.dart';
 import 'package:loantrack/core/utils/input_formatters.dart';
+import 'package:loantrack/core/widgets/keyboard_scrollable.dart';
 import 'package:loantrack/features/loans/data/models/loan_entity.dart';
 import 'package:loantrack/features/loans/presentation/providers/loan_providers.dart';
 
@@ -170,9 +171,10 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16.0),
-        children: [
+      body: KeyboardScrollable(
+        child: ListView(
+          padding: const EdgeInsets.all(16.0),
+          children: [
           // Loan type: Daily or Weekly
           SegmentedButton<LoanType>(
             segments: const [
@@ -332,6 +334,7 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
           // Calculation Summary
           if (formState.calculationResult != null) _buildSummary(formState),
         ],
+        ),
       ),
     );
   }

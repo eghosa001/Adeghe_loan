@@ -5,6 +5,7 @@ import 'package:open_filex/open_filex.dart';
 
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/date_utils.dart';
+import '../../../../core/widgets/keyboard_scrollable.dart';
 import '../../../business/presentation/providers/business_providers.dart';
 import '../../services/export_manager.dart';
 
@@ -99,9 +100,11 @@ class ReportScreenShell extends StatelessWidget {
         actions: actions,
       ),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-          children: children,
+        child: KeyboardScrollable(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            children: children,
+          ),
         ),
       ),
     );

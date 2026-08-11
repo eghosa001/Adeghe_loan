@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:loantrack/core/security/file_encryption_service.dart';
 import 'package:loantrack/core/utils/platform_utils.dart';
 import 'package:loantrack/core/widgets/empty_state.dart';
+import 'package:loantrack/core/widgets/keyboard_scrollable.dart';
 
 import '../../data/document_repository.dart';
 import '../../data/models/document_entity.dart';
@@ -172,42 +173,44 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
                 title: 'No documents yet',
                 subtitle: 'Upload an image or PDF to keep records safe.',
               )
-            : ListView.separated(
-                padding: const EdgeInsets.all(12),
-                itemCount: items.length,
-                separatorBuilder: (context, index) => const SizedBox(height: 8),
-                itemBuilder: (context, index) {
-                  final document = items[index];
-                  return Card(
-                    child: ListTile(
-                      leading: Icon(
-                        document.isPdf
-                            ? Icons.picture_as_pdf
-                            : Icons.image_outlined,
+            : KeyboardScrollable(
+                child: ListView.separated(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: items.length,
+                  separatorBuilder: (context, index) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final document = items[index];
+                    return Card(
+                      child: ListTile(
+                        leading: Icon(
+                          document.isPdf
+                              ? Icons.picture_as_pdf
+                              : Icons.image_outlined,
+                        ),
+                        title: Text(document.type.label),
+                        subtitle: Text(
+                          '${document.originalName}\nEncrypted on device',
+                        ),
+                        isThreeLine: true,
+                        onTap: () =>
+                            context.push('/documents/preview', extra: document),
+                        trailing: PopupMenuButton<String>(
+                          onSelected: (action) {
+                            if (action == 'replace') _replace(document);
+                            if (action == 'delete') _delete(document);
+                          },
+                          itemBuilder: (context) => const [
+                            PopupMenuItem(
+                              value: 'replace',
+                              child: Text('Replace'),
+                            ),
+                            PopupMenuItem(value: 'delete', child: Text('Delete')),
+                          ],
+                        ),
                       ),
-                      title: Text(document.type.label),
-                      subtitle: Text(
-                        '${document.originalName}\nEncrypted on device',
-                      ),
-                      isThreeLine: true,
-                      onTap: () =>
-                          context.push('/documents/preview', extra: document),
-                      trailing: PopupMenuButton<String>(
-                        onSelected: (action) {
-                          if (action == 'replace') _replace(document);
-                          if (action == 'delete') _delete(document);
-                        },
-                        itemBuilder: (context) => const [
-                          PopupMenuItem(
-                            value: 'replace',
-                            child: Text('Replace'),
-                          ),
-                          PopupMenuItem(value: 'delete', child: Text('Delete')),
-                        ],
-                      ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
       ),
     );

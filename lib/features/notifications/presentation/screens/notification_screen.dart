@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:loantrack/core/widgets/keyboard_scrollable.dart';
+
 import '../providers/notification_provider.dart';
 import '../../data/notification_item.dart';
 
@@ -32,13 +34,15 @@ class NotificationScreen extends ConsumerWidget {
             );
           }
 
-          return ListView.builder(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: notifications.length,
-            itemBuilder: (context, index) {
-              final item = notifications[index];
-              return _NotificationTile(item: item);
-            },
+          return KeyboardScrollable(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              itemCount: notifications.length,
+              itemBuilder: (context, index) {
+                final item = notifications[index];
+                return _NotificationTile(item: item);
+              },
+            ),
           );
         },
       ),

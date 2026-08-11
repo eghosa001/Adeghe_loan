@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:loantrack/core/utils/currency_utils.dart';
 import 'package:loantrack/core/utils/date_utils.dart';
 import 'package:loantrack/core/widgets/empty_state.dart';
+import 'package:loantrack/core/widgets/keyboard_scrollable.dart';
 import 'package:loantrack/features/loans/data/models/repayment_installment_entity.dart';
 import 'package:loantrack/features/loans/presentation/providers/loan_providers.dart';
 
@@ -34,13 +35,15 @@ class RepaymentCalendarView extends ConsumerWidget {
             children: [
               _buildLegend(),
               Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.all(16.0),
-                  itemCount: schedule.length,
-                  itemBuilder: (context, index) {
-                    final installment = schedule[index];
-                    return _buildInstallmentCard(context, installment);
-                  },
+                child: KeyboardScrollable(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(16.0),
+                    itemCount: schedule.length,
+                    itemBuilder: (context, index) {
+                      final installment = schedule[index];
+                      return _buildInstallmentCard(context, installment);
+                    },
+                  ),
                 ),
               ),
             ],

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:loantrack/core/widgets/empty_state.dart';
+import 'package:loantrack/core/widgets/keyboard_scrollable.dart';
 import 'package:loantrack/core/utils/currency_utils.dart';
 
 import '../../data/models/payment_entity.dart';
@@ -37,17 +38,19 @@ class PaymentHistoryScreen extends ConsumerWidget {
         error: (e, _) => Center(child: Text('Error: $e')),
         data: (payments) {
           if (payments.isEmpty) return const _EmptyState();
-          return ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: payments.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 8),
-            itemBuilder: (context, index) =>
-                _PaymentCard(
-                  payment: payments[index],
-                  ref: ref,
-                  loanId: loanId,
-                  customerId: customerId,
-                ),
+          return KeyboardScrollable(
+            child: ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: payments.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 8),
+              itemBuilder: (context, index) =>
+                  _PaymentCard(
+                    payment: payments[index],
+                    ref: ref,
+                    loanId: loanId,
+                    customerId: customerId,
+                  ),
+            ),
           );
         },
       ),
@@ -301,7 +304,9 @@ class _PaymentCard extends StatelessWidget {
       ref.invalidate(paymentsForLoanProvider(payment.loanId));
       ref.invalidate(dashboardDataProvider);
       ref.invalidate(collectionListProvider);
-      ref.invalidate(reportSummaryProvider);
+      invalidateReportData(ref.invalidate);
+      ref.invalidate(futureScheduleProvider);
+      ref.invalidate(weeklyCollectionListProvider);
       ref.invalidate(loanDetailsProvider(payment.loanId));
       ref.invalidate(loanScheduleProvider(payment.loanId));
       ref.invalidate(activeLoansForCustomerProvider(customerId));

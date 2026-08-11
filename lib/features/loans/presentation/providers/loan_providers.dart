@@ -279,7 +279,7 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
         _ref.invalidate(customerListProvider);
         _ref.invalidate(customerProvider(customerId));
         _ref.invalidate(collectionListProvider);
-        _ref.invalidate(reportSummaryProvider);
+        invalidateReportData(_ref.invalidate);
         _ref.invalidate(activeLoansForCustomerProvider(customerId));
         _ref.invalidate(allLoansProvider);
         logAuditAction(
@@ -342,7 +342,7 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
         _ref.invalidate(customerListProvider);
         _ref.invalidate(customerProvider(customerId));
         _ref.invalidate(collectionListProvider);
-        _ref.invalidate(reportSummaryProvider);
+        invalidateReportData(_ref.invalidate);
         _ref.invalidate(activeLoansForCustomerProvider(customerId));
         _ref.invalidate(allLoansProvider);
         logAuditAction(

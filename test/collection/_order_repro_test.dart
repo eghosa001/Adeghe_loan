@@ -1,4 +1,5 @@
 import 'package:excel/excel.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loantrack/core/database/database_service.dart';
 import 'package:loantrack/core/security/secure_storage_service.dart';
@@ -150,15 +151,15 @@ void main() {
         DateTime(2026, 7, 1), DateTime(2026, 8, 31));
     result.when(
       success: (rows) {
-        print('REPO ORDER:');
+        debugPrint('REPO ORDER:');
         for (final r in rows) {
-          print('  ${r.customerName} loanDate=${r.loanDate} anchor=${r.paymentAnchorDate} disp=${r.disbursementDate}');
+          debugPrint('  ${r.customerName} loanDate=${r.loanDate} anchor=${r.paymentAnchorDate} disp=${r.disbursementDate}');
         }
         final bytes = ExportManager.buildWeeklyCollectionExcelBytes(
             rows, DateTime(2026, 8, 10));
         final decoded = Excel.decodeBytes(bytes);
         final sheet = decoded.tables[decoded.tables.keys.first]!;
-        print('EXCEL DATA ROWS:');
+        debugPrint('EXCEL DATA ROWS:');
         final names = <String>[];
         for (int r = 4; r < 4 + rows.length; r++) {
           final name = sheet.cell(
@@ -167,7 +168,7 @@ void main() {
           final disp = sheet.cell(
               CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: r)).value
               ?.toString();
-          print('  row $r: name=$name disp=$disp');
+          debugPrint('  row $r: name=$name disp=$disp');
           names.add(name ?? '');
         }
         // Rows must be ordered by the DISPLAYED disbursement date.

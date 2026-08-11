@@ -407,7 +407,7 @@ class _HolidayManagementScreenState
       await scheduleService.rebuildAllSchedules();
       ref.invalidate(collectionListProvider);
       ref.invalidate(dashboardDataProvider);
-      ref.invalidate(reportSummaryProvider);
+      invalidateReportData(ref.invalidate);
     } catch (_) {}
   }
 

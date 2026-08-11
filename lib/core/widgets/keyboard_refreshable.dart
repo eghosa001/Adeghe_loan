@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'keyboard_scrollable.dart';
 import 'refresh_bus.dart';
 
 /// A [RefreshIndicator] that also registers itself with the global
 /// [RefreshBus], so the desktop refresh shortcut (F5 / Ctrl+R) triggers this
 /// screen's refresh exactly like a pull-to-refresh gesture would on touch
-/// devices. On touch platforms it behaves as a plain [RefreshIndicator].
+/// devices. On desktop it additionally wraps its child in [KeyboardScrollable]
+/// so the physical Up / Down / PageUp / PageDown / Home / End keys scroll the
+/// list. On touch platforms it behaves as a plain [RefreshIndicator].
 class KeyboardRefreshable extends ConsumerStatefulWidget {
   const KeyboardRefreshable({
     super.key,
@@ -45,10 +48,12 @@ class _KeyboardRefreshableState extends ConsumerState<KeyboardRefreshable> {
 
   @override
   Widget build(BuildContext context) {
-    return RefreshIndicator(
-      key: _indicatorKey,
-      onRefresh: widget.onRefresh,
-      child: widget.child,
+    return KeyboardScrollable(
+      child: RefreshIndicator(
+        key: _indicatorKey,
+        onRefresh: widget.onRefresh,
+        child: widget.child,
+      ),
     );
   }
 }

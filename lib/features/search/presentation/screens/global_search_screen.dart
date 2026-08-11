@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:loantrack/core/widgets/keyboard_scrollable.dart';
+
 import '../../data/global_search_repository.dart';
 import '../providers/global_search_provider.dart';
 
@@ -124,25 +126,27 @@ class _GlobalSearchScreenState extends ConsumerState<GlobalSearchScreen> {
             items.addAll(groupResults.map((r) => (null, r)));
           }
 
-          return ListView.builder(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: items.length,
-            itemBuilder: (context, index) {
-              final (label, item) = items[index];
-              if (item == null) {
-                return _SectionHeader(label: label!);
-              }
-              final icon = switch (item.category) {
-                'customer' => Icons.person_rounded,
-                'loan' => Icons.monetization_on_rounded,
-                _ => Icons.group_rounded,
-              };
-              return _ResultTile(
-                item: item,
-                icon: icon,
-                onTap: () => context.push(item.route),
-              );
-            },
+          return KeyboardScrollable(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              itemCount: items.length,
+              itemBuilder: (context, index) {
+                final (label, item) = items[index];
+                if (item == null) {
+                  return _SectionHeader(label: label!);
+                }
+                final icon = switch (item.category) {
+                  'customer' => Icons.person_rounded,
+                  'loan' => Icons.monetization_on_rounded,
+                  _ => Icons.group_rounded,
+                };
+                return _ResultTile(
+                  item: item,
+                  icon: icon,
+                  onTap: () => context.push(item.route),
+                );
+              },
+            ),
           );
         },
       ),

@@ -1,7 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/di/providers.dart';
-import '../../../collection/presentation/providers/collection_provider.dart';
 import '../../data/models/report_summary.dart';
 import '../../data/models/report_models.dart';
 import '../../data/report_repository.dart';
@@ -91,6 +90,14 @@ final reportSummaryProvider =
 /// stats, all computed in one batched repository call.
 final reportDashboardProvider =
     FutureProvider.family<ReportDashboardData, ReportDateRange>((ref, dates) async {
+  // Invalidation propagation: every screen already invalidates the whole
+  // `reportSummaryProvider` family after a data mutation (payment, loan,
+  // customer, holiday, savings). Watching the matching family instance makes
+  // this snapshot recompute at the same moment instead of serving a stale
+  // dashboard. The value is deliberately unused — `getReportDashboard`
+  // computes its own summary inside the batched call so the dashboard stays
+  // one consistent snapshot.
+  ref.watch(reportSummaryProvider(dates));
   final repo = await ref.watch(reportRepositoryProvider.future);
   final result = await repo.getReportDashboard(
     dates.start,
@@ -132,6 +139,9 @@ final profitReportProvider =
 /// Dashboard trend series per date range + optional loan type filter.
 final dashboardTrendsProvider =
     FutureProvider.family<DashboardTrends, ReportDateRange>((ref, dates) async {
+  // Same invalidation propagation as reportDashboardProvider — recompute when
+  // any mutation invalidates the reportSummaryProvider family.
+  ref.watch(reportSummaryProvider(dates));
   final repo = await ref.watch(reportRepositoryProvider.future);
   final result = await repo.getDashboardTrends(
     startDate: dates.start,
@@ -141,31 +151,19 @@ final dashboardTrendsProvider =
   return result.when(success: (trends) => trends, failure: (f) => throw f);
 });
 
-/// Collection Report per date range + optional loan type/group filter, built
-/// from the same source as the Collection screen (`getCollectionsByDateRange`)
-/// so the numbers always match.
-final collectionReportProvider =
-    FutureProvider.family<List<CollectionReportRow>, ReportDateRange>((ref, dates) async {
-  final repo = await ref.watch(collectionRepositoryProvider.future);
-  final result = await repo.getCollectionsByDateRange(
-    dates.start,
-    dates.end,
-    loanType: dates.loanType,
-  );
-  return result.when(
-    success: (rows) => rows
-        .map((row) => CollectionReportRow(
-              customerId: row.customerId,
-              customerName: row.customerName,
-              phone: row.phone,
-              loanId: row.loanId,
-              loanType: row.loanType,
-              amountDue: row.amountDue,
-              amountPaid: row.amountPaid,
-              outstandingBalance: row.outstandingBalance,
-              groupName: row.groupName,
-            ))
-        .toList(growable: false),
-    failure: (f) => throw f,
-  );
-});
+/// Invalidates every reports provider so all report screens recompute after a
+/// data mutation. Every mutation site used to call
+/// `ref.invalidate(reportSummaryProvider)` alone, which left the dashboard,
+/// the profit/overdue/customer/savings sub-reports and the trends serving
+/// stale cached data. Call this helper instead. Accepts the `invalidate`
+/// tear-off of either a `Ref` (providers) or a `WidgetRef` (screens) — the
+/// two types share no supertype, only this method.
+void invalidateReportData(void Function(ProviderOrFamily) invalidate) {
+  invalidate(reportSummaryProvider);
+  invalidate(reportDashboardProvider);
+  invalidate(dashboardTrendsProvider);
+  invalidate(profitReportProvider);
+  invalidate(overdueReportProvider);
+  invalidate(customerReportProvider);
+  invalidate(savingsReportProvider);
+}

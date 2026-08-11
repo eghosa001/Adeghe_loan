@@ -663,7 +663,8 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
       ref.invalidate(allSavingsAccountsProvider);
       ref.invalidate(allAccountsWithNamesProvider);
       ref.invalidate(customerProvider(row.customerId));
-      ref.invalidate(reportSummaryProvider);
+      invalidateReportData(ref.invalidate);
+      ref.invalidate(futureScheduleProvider);
       ref.invalidate(customerListProvider);
       ref.invalidate(loanDetailsProvider(row.loanId));
       ref.invalidate(loanScheduleProvider(row.loanId));

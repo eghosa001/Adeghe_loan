@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/cloud/cloud_auth_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/di/providers.dart';
+import '../../../../core/widgets/keyboard_scrollable.dart';
 
 /// Pre-entry cloud sign-in gate shown right after PIN unlock. The owner signs
 /// in here so cloud sync can start immediately. A "Continue offline" escape
@@ -87,8 +88,9 @@ class _CloudGateScreenState extends ConsumerState<CloudGateScreen> {
         ),
         child: SafeArea(
           child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
+            child: KeyboardScrollable(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
               child: Card(
                 elevation: 4,
                 child: Padding(
@@ -200,6 +202,7 @@ class _CloudGateScreenState extends ConsumerState<CloudGateScreen> {
           ),
         ),
       ),
-    );
+    ),
+  );
   }
 }

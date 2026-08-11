@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:loantrack/core/constants/app_constants.dart';
 import 'package:loantrack/core/di/providers.dart';
 import 'package:loantrack/core/widgets/app_drawer.dart';
+import 'package:loantrack/core/widgets/keyboard_scrollable.dart';
 
 import '../../../business/presentation/providers/business_providers.dart';
 
@@ -74,10 +75,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       drawer: const AppDrawer(currentRoute: '/settings'),
-      body: ListView(
-        children: [
-          // ── Business ──
-          _SectionHeader(title: 'Business'),
+      body: KeyboardScrollable(
+        child: ListView(
+          children: [
+            // ── Business ──
+            _SectionHeader(title: 'Business'),
           ListTile(
             leading: const Icon(Icons.business),
             title: const Text('Business Profile'),
@@ -260,6 +262,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
              subtitle: Text('AIGHEWI EGHOSA'),
            ),
         ],
+        ),
       ),
     );
   }

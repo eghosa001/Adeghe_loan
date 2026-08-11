@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:loantrack/core/di/providers.dart';
 import 'package:loantrack/core/utils/currency_utils.dart';
 import 'package:loantrack/core/utils/date_utils.dart';
+import 'package:loantrack/core/widgets/keyboard_scrollable.dart';
 import 'package:loantrack/features/loans/data/loan_repository.dart';
 import 'package:loantrack/features/loans/data/models/loan_entity.dart';
 import 'package:loantrack/features/loans/data/models/repayment_installment_entity.dart';
@@ -131,33 +132,35 @@ class LoanDetailsScreen extends ConsumerWidget {
               error: (err, _) =>
                   Center(child: Text('Error loading schedule: $err')),
               data: (schedule) {
-                return ListView.builder(
-                  padding: EdgeInsets.zero,
-                  itemCount: schedule.length,
-                  itemBuilder: (context, index) {
-                    final installment = schedule[index];
-                    final isToday = _isToday(installment.dueDate);
-                    return ListTile(
-                      leading: CircleAvatar(
-                          backgroundColor: isToday
-                              ? Theme.of(context).colorScheme.primary
-                              : null,
-                          child: Text(
-                            '${installment.installmentNumber}',
-                            style: TextStyle(
-                                color: isToday ? Colors.white : null),
-                          )),
-                      title: Text(CurrencyUtils.format(installment.amount)),
-                      subtitle: Text(
-                          'Due: ${AppDateUtils.formatDate(installment.dueDate)}'
-                          '${isToday ? " (Today)" : ""}'),
-                      trailing: Chip(
-                        label: Text(installment.status.name.toUpperCase()),
-                        backgroundColor:
-                            _statusColor(context, installment.status),
-                      ),
-                    );
-                  },
+                return KeyboardScrollable(
+                  child: ListView.builder(
+                    padding: EdgeInsets.zero,
+                    itemCount: schedule.length,
+                    itemBuilder: (context, index) {
+                      final installment = schedule[index];
+                      final isToday = _isToday(installment.dueDate);
+                      return ListTile(
+                        leading: CircleAvatar(
+                            backgroundColor: isToday
+                                ? Theme.of(context).colorScheme.primary
+                                : null,
+                            child: Text(
+                              '${installment.installmentNumber}',
+                              style: TextStyle(
+                                  color: isToday ? Colors.white : null),
+                            )),
+                        title: Text(CurrencyUtils.format(installment.amount)),
+                        subtitle: Text(
+                            'Due: ${AppDateUtils.formatDate(installment.dueDate)}'
+                            '${isToday ? " (Today)" : ""}'),
+                        trailing: Chip(
+                          label: Text(installment.status.name.toUpperCase()),
+                          backgroundColor:
+                              _statusColor(context, installment.status),
+                        ),
+                      );
+                    },
+                  ),
                 );
               },
             ),
@@ -233,7 +236,8 @@ class LoanDetailsScreen extends ConsumerWidget {
           ref.invalidate(loanScheduleProvider(loan.id));
           ref.invalidate(dashboardDataProvider);
           ref.invalidate(collectionListProvider);
-          ref.invalidate(reportSummaryProvider);
+          invalidateReportData(ref.invalidate);
+          ref.invalidate(futureScheduleProvider);
           ref.invalidate(allLoansProvider);
           logAuditAction(ref, 'CANCEL', 'Loan ${loan.id} cancelled');
         },
@@ -330,7 +334,9 @@ class LoanDetailsScreen extends ConsumerWidget {
       ref.invalidate(activeLoansForCustomerProvider(loan.customerId));
       ref.invalidate(dashboardDataProvider);
       ref.invalidate(collectionListProvider);
-      ref.invalidate(reportSummaryProvider);
+      invalidateReportData(ref.invalidate);
+      ref.invalidate(futureScheduleProvider);
+      ref.invalidate(weeklyCollectionListProvider);
       ref.invalidate(customerProvider(loan.customerId));
       ref.invalidate(paymentsForLoanProvider(loan.id));
       ref.invalidate(allLoansProvider);

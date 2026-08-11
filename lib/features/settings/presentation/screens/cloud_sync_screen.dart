@@ -4,6 +4,7 @@ import 'package:loantrack/core/cloud/cloud_auth_service.dart';
 import 'package:loantrack/core/cloud/supabase_config.dart';
 import 'package:loantrack/core/di/providers.dart';
 import 'package:loantrack/core/widgets/app_drawer.dart';
+import 'package:loantrack/core/widgets/keyboard_scrollable.dart';
 
 /// Cloud sync: link the app to Supabase and run a manual sync. The local PIN
 /// lock stays the only way to open the app — the cloud account is optional and
@@ -120,9 +121,10 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Cloud Sync')),
       drawer: const AppDrawer(currentRoute: '/settings'),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
+      body: KeyboardScrollable(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -304,6 +306,7 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
             Text(_message!, style: Theme.of(context).textTheme.bodyMedium),
           ],
         ],
+        ),
       ),
     );
   }

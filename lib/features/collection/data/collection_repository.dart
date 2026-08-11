@@ -19,13 +19,16 @@ class CollectionRepository {
     try {
       final db = await _database;
       final dateStr = date.toIso8601String().split('T').first;
+      final todayStr = DateTime.now().toIso8601String().split('T').first;
 
       final conditions = <String>[
         'DATE(rs.due_date) = ?',
         "l.status = 'active'",
         notOnEnabledHolidaySql,
       ];
-      final args = <dynamic>[dateStr];
+      // The overdue subquery placeholder binds first (it sits in the SELECT
+      // list, before the WHERE clause), so todayStr leads the args.
+      final args = <dynamic>[todayStr, dateStr];
 
       if (groupId != null && groupId.isNotEmpty) {
         conditions.add('c.group_id = ?');
@@ -52,7 +55,13 @@ class CollectionRepository {
           l.outstanding_balance AS outstandingBalance,
           l.status AS status,
           l.notes AS remarks,
-          cg.name AS groupName
+          cg.name AS groupName,
+          COALESCE((
+            SELECT SUM(rs2.amount - COALESCE(rs2.paid_amount, 0.0))
+            FROM repayment_schedule rs2
+            WHERE rs2.loan_id = l.id AND rs2.status != 'paid'
+              AND DATE(rs2.due_date) < ?
+          ), 0.0) AS overdueAmount
         FROM repayment_schedule rs
         INNER JOIN loans l ON rs.loan_id = l.id
         INNER JOIN customers c ON l.customer_id = c.id
@@ -80,6 +89,7 @@ class CollectionRepository {
           scheduleStatus: row['scheduleStatus'] as String? ?? 'pending',
           groupName: row['groupName'] as String?,
           remarks: row['remarks'] as String?,
+          overdueAmount: (row['overdueAmount'] as num?)?.toDouble() ?? 0.0,
         );
       }).toList(growable: false);
 
@@ -96,6 +106,7 @@ class CollectionRepository {
       final db = await _database;
       final startStr = start.toIso8601String().split('T').first;
       final endStr = end.toIso8601String().split('T').first;
+      final todayStr = DateTime.now().toIso8601String().split('T').first;
       // Include completed loans so paid installments remain visible for
       // historical/reference purposes (paid weekly loans should still show).
       final conditions = <String>["l.status IN ('active','completed')"];
@@ -113,10 +124,13 @@ class CollectionRepository {
       final whereClause = conditions.join(' AND ');
 
       // Placeholder order (positional binding): the 4 date-range clauses each
-      // use BETWEEN ? AND ?, in the order they appear in the SQL below — the
-      // amountPaid correlated subquery, the installmentAmount and scheduleStatus
-      // subqueries, and the repayment_schedule join. Date args come first, then
-      // the WHERE filter placeholders (c.group_id, l.loan_type).
+      // use BETWEEN ? AND ? for the amountPaid correlated subquery, the
+      // installmentAmount and scheduleStatus subqueries, and the
+      // repayment_schedule join, PLUS one overdue subquery `?` (today's date)
+      // that sits in the SELECT list just before the join. Order in the SQL
+      // text: amountPaid, installmentAmount, scheduleStatus (each 2 args), the
+      // overdue `?`, then the join's BETWEEN, then the WHERE filter
+      // placeholders (c.group_id, l.loan_type).
       //
       // NOTE: the payments aggregate is a correlated subquery, NOT a join — a
       // join would cross-multiply against the (per-installment) repayment
@@ -158,7 +172,13 @@ cg.name AS groupName,
               AND rs.status != 'paid'
               AND $notOnEnabledHolidaySql
             ORDER BY rs.due_date ASC LIMIT 1
-          ), 'paid') AS scheduleStatus
+          ), 'paid') AS scheduleStatus,
+          COALESCE((
+            SELECT SUM(rs2.amount - COALESCE(rs2.paid_amount, 0.0))
+            FROM repayment_schedule rs2
+            WHERE rs2.loan_id = l.id AND rs2.status != 'paid'
+              AND DATE(rs2.due_date) < ?
+          ), 0.0) AS overdueAmount
         FROM loans l
         INNER JOIN customers c ON l.customer_id = c.id
         LEFT JOIN customer_groups cg ON c.group_id = cg.id
@@ -168,7 +188,7 @@ cg.name AS groupName,
         WHERE $whereClause
         GROUP BY l.id
         ORDER BY c.full_name COLLATE NOCASE ASC
-      ''', [startStr, endStr, startStr, endStr, startStr, endStr, startStr, endStr, ...args]);
+      ''', [startStr, endStr, startStr, endStr, startStr, endStr, todayStr, startStr, endStr, ...args]);
 
       final collectionRows = rows.map((row) {
         final amountPaid = (row['amountPaid'] as num?)?.toDouble() ?? 0.0;
@@ -189,6 +209,7 @@ cg.name AS groupName,
           scheduleStatus: row['scheduleStatus'] as String? ?? 'pending',
           groupName: row['groupName'] as String?,
           remarks: row['remarks'] as String?,
+          overdueAmount: (row['overdueAmount'] as num?)?.toDouble() ?? 0.0,
         );
       }).toList(growable: false);
 

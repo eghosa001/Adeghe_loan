@@ -18,6 +18,7 @@ import '../../../savings/presentation/providers/savings_providers.dart';
 import '../../../collection/presentation/providers/collection_provider.dart';
 import '../../../dashboard/presentation/providers/dashboard_provider.dart';
 import '../../../../core/di/providers.dart';
+import '../../../../core/widgets/keyboard_scrollable.dart';
 import '../../../business/presentation/providers/business_providers.dart';
 import '../../../reports/presentation/providers/report_provider.dart';
 
@@ -75,7 +76,7 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
       ref.invalidate(customerCountProvider);
       ref.invalidate(dashboardDataProvider);
       ref.invalidate(collectionListProvider);
-      ref.invalidate(reportSummaryProvider);
+      invalidateReportData(ref.invalidate);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -166,7 +167,7 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
       ref.invalidate(customerCountProvider);
       ref.invalidate(dashboardDataProvider);
       ref.invalidate(collectionListProvider);
-      ref.invalidate(reportSummaryProvider);
+      invalidateReportData(ref.invalidate);
       ref.invalidate(savingsBalanceProvider(customer.id));
       ref.invalidate(savingsTransactionsProvider(customer.id));
       ref.invalidate(allSavingsAccountsProvider);
@@ -198,7 +199,7 @@ class _CustomerViewState extends ConsumerState<_CustomerView>
       ref.invalidate(customerCountProvider);
       ref.invalidate(dashboardDataProvider);
       ref.invalidate(collectionListProvider);
-      ref.invalidate(reportSummaryProvider);
+      invalidateReportData(ref.invalidate);
       ref.invalidate(savingsBalanceProvider(customer.id));
       ref.invalidate(savingsTransactionsProvider(customer.id));
       ref.invalidate(allSavingsAccountsProvider);
@@ -360,22 +361,23 @@ class _ProfileTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final activeLoans = ref.watch(activeLoansForCustomerProvider(customer.id));
 
-    return ListView(padding: const EdgeInsets.all(16), children: [
-      Center(
-          child: CircleAvatar(
-              radius: 48,
-              backgroundImage: customer.passportPath == null
-                  ? null
-                  : FileImage(File(customer.passportPath!)),
-              child: customer.passportPath == null
-                  ? Text(
-                      (customer.fullName.isEmpty
-                              ? '?'
-                              : customer.fullName[0])
-                          .toUpperCase(),
-                      style: Theme.of(context).textTheme.headlineMedium)
-                  : null)),
-      const SizedBox(height: 12),
+    return KeyboardScrollable(
+      child: ListView(padding: const EdgeInsets.all(16), children: [
+        Center(
+            child: CircleAvatar(
+                radius: 48,
+                backgroundImage: customer.passportPath == null
+                    ? null
+                    : FileImage(File(customer.passportPath!)),
+                child: customer.passportPath == null
+                    ? Text(
+                        (customer.fullName.isEmpty
+                                ? '?'
+                                : customer.fullName[0])
+                            .toUpperCase(),
+                        style: Theme.of(context).textTheme.headlineMedium)
+                    : null)),
+        const SizedBox(height: 12),
       Center(
           child: Text(customer.fullName,
               style: Theme.of(context).textTheme.headlineSmall)),
@@ -460,7 +462,8 @@ class _ProfileTab extends ConsumerWidget {
           onTap: () => context.push('/customers/${customer.id}/loans/new'),
         ),
       ),
-    ]);
+      ]),
+    );
   }
 }
 
@@ -542,7 +545,8 @@ class _LoanTile extends ConsumerWidget {
       ref.invalidate(dashboardDataProvider);
       ref.invalidate(collectionListProvider);
       ref.invalidate(weeklyCollectionListProvider);
-      ref.invalidate(reportSummaryProvider);
+      invalidateReportData(ref.invalidate);
+      ref.invalidate(futureScheduleProvider);
       ref.invalidate(savingsBalanceProvider(loan.customerId));
       ref.invalidate(savingsTransactionsProvider(loan.customerId));
       ref.invalidate(paymentsForLoanProvider(loan.id));
@@ -639,7 +643,9 @@ class _LoanTile extends ConsumerWidget {
       ref.invalidate(allAccountsWithNamesProvider);
       ref.invalidate(dashboardDataProvider);
       ref.invalidate(collectionListProvider);
-      ref.invalidate(reportSummaryProvider);
+      invalidateReportData(ref.invalidate);
+      ref.invalidate(futureScheduleProvider);
+      ref.invalidate(weeklyCollectionListProvider);
       ref.invalidate(paymentsForLoanProvider(loan.id));
       ref.invalidate(customerProvider(loan.customerId));
       if (context.mounted) {
@@ -663,9 +669,11 @@ class _SavingsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [SavingsSection(customerId: customerId)],
+    return KeyboardScrollable(
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [SavingsSection(customerId: customerId)],
+      ),
     );
   }
 }

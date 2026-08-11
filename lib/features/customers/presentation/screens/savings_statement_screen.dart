@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/di/providers.dart';
 import '../../../../core/utils/currency_utils.dart';
 import '../../../../core/utils/date_utils.dart';
+import '../../../../core/widgets/keyboard_scrollable.dart';
 import '../../../customers/presentation/providers/customer_providers.dart';
 import '../../../savings/presentation/providers/savings_providers.dart';
 import '../../../savings/data/models/savings_transaction_entity.dart';
@@ -158,43 +159,45 @@ class _SavingsStatementBody extends ConsumerWidget {
                   ),
                 );
               }
-              return ListView.separated(
-                itemCount: transactions.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
-                itemBuilder: (context, index) {
-                  final tx = transactions[index];
-                  final type = tx.type.value;
-                  final isCredit = tx.type == SavingsTransactionType.deposit ||
-                      tx.type == SavingsTransactionType.overpayment;
-                  final date = DateTime.tryParse(tx.createdAt);
+              return KeyboardScrollable(
+                child: ListView.separated(
+                  itemCount: transactions.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final tx = transactions[index];
+                    final type = tx.type.value;
+                    final isCredit = tx.type == SavingsTransactionType.deposit ||
+                        tx.type == SavingsTransactionType.overpayment;
+                    final date = DateTime.tryParse(tx.createdAt);
 
-                  return ListTile(
-                    leading: CircleAvatar(
-                      child: Icon(
-                        isCredit ? Icons.add : Icons.remove,
-                        color: isCredit ? Colors.green : Colors.red,
-                      ),
-                    ),
-                    title: Text(type.toUpperCase()),
-                    subtitle: Text(tx.note ?? ''),
-                    trailing: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          '${isCredit ? '+' : '-'}${CurrencyUtils.format(tx.amount)}',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: isCredit ? Colors.green : Colors.red,
-                          ),
+                    return ListTile(
+                      leading: CircleAvatar(
+                        child: Icon(
+                          isCredit ? Icons.add : Icons.remove,
+                          color: isCredit ? Colors.green : Colors.red,
                         ),
-                        if (date != null)
-                          Text(AppDateUtils.formatDate(date),
-                              style: Theme.of(context).textTheme.bodySmall),
-                      ],
-                    ),
-                  );
-                },
+                      ),
+                      title: Text(type.toUpperCase()),
+                      subtitle: Text(tx.note ?? ''),
+                      trailing: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            '${isCredit ? '+' : '-'}${CurrencyUtils.format(tx.amount)}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: isCredit ? Colors.green : Colors.red,
+                            ),
+                          ),
+                          if (date != null)
+                            Text(AppDateUtils.formatDate(date),
+                                style: Theme.of(context).textTheme.bodySmall),
+                        ],
+                      ),
+                    );
+                  },
+                ),
               );
             },
           ),

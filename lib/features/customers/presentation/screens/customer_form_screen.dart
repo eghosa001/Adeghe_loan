@@ -199,7 +199,7 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
       ref.invalidate(customerProvider(customer.id));
       ref.invalidate(dashboardDataProvider);
       ref.invalidate(collectionListProvider);
-      ref.invalidate(reportSummaryProvider);
+      invalidateReportData(ref.invalidate);
       if (mounted) context.pop();
     } on DuplicateCustomerException catch (error) {
       _showMessage(error.toString());

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:loantrack/core/widgets/app_drawer.dart';
 import 'package:loantrack/core/widgets/empty_state.dart';
+import 'package:loantrack/core/widgets/keyboard_scrollable.dart';
 
 import '../../../../core/di/providers.dart';
 import '../../../../core/utils/date_utils.dart';
@@ -131,60 +132,62 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
 
     final dateKeys = grouped.keys.toList();
 
-    return ListView.builder(
-      itemCount: dateKeys.length,
-      itemBuilder: (context, dateIndex) {
-        final dateKey = dateKeys[dateIndex];
-        final entries = grouped[dateKey]!;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: Text(
-                dateKey,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: Theme.of(context).colorScheme.primary,
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ),
-            ...entries.map((log) => ListTile(
-                  leading: CircleAvatar(
-                    radius: 16,
-                    child: Text(
-                      log.action.isEmpty ? '?' : log.action.characters.first,
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ),
-                  title: Text(log.action),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${log.user} — ${AppDateUtils.formatTime(log.timestamp)}',
-                        style: Theme.of(context).textTheme.bodySmall,
+    return KeyboardScrollable(
+      child: ListView.builder(
+        itemCount: dateKeys.length,
+        itemBuilder: (context, dateIndex) {
+          final dateKey = dateKeys[dateIndex];
+          final entries = grouped[dateKey]!;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                child: Text(
+                  dateKey,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: Theme.of(context).colorScheme.primary,
+                        fontWeight: FontWeight.bold,
                       ),
-                      if (log.details.isNotEmpty)
+                ),
+              ),
+              ...entries.map((log) => ListTile(
+                    leading: CircleAvatar(
+                      radius: 16,
+                      child: Text(
+                        log.action.isEmpty ? '?' : log.action.characters.first,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                    title: Text(log.action),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                         Text(
-                          log.details,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.color
-                                    ?.withValues(alpha: 0.7),
-                              ),
+                          '${log.user} — ${AppDateUtils.formatTime(log.timestamp)}',
+                          style: Theme.of(context).textTheme.bodySmall,
                         ),
-                    ],
-                  ),
-                  trailing: const Icon(Icons.chevron_right),
-                )),
-          ],
-        );
-      },
+                        if (log.details.isNotEmpty)
+                          Text(
+                            log.details,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.color
+                                      ?.withValues(alpha: 0.7),
+                                ),
+                          ),
+                      ],
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                  )),
+            ],
+          );
+        },
+      ),
     );
   }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:loantrack/core/constants/app_constants.dart';
 import 'package:loantrack/core/utils/input_formatters.dart';
+import 'package:loantrack/core/widgets/keyboard_scrollable.dart';
 import '../providers/business_providers.dart';
 import '../../data/models/financial_settings_entity.dart';
 
@@ -244,13 +245,15 @@ class _FinancialSettingsTabState extends ConsumerState<FinancialSettingsTab> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Financial Defaults')),
-      body: settingsAsync.when(
-        data: (settings) => _isEditing
-            ? _buildEditForm(settings)
-            : _buildSettingsView(settings),
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, stack) =>
-            Center(child: Text('Error loading settings: $error')),
+      body: KeyboardScrollable(
+        child: settingsAsync.when(
+          data: (settings) => _isEditing
+              ? _buildEditForm(settings)
+              : _buildSettingsView(settings),
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (error, stack) =>
+              Center(child: Text('Error loading settings: $error')),
+        ),
       ),
       floatingActionButton: settingsAsync.whenOrNull(
         data: (_) => FloatingActionButton(

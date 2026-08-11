@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:loantrack/core/constants/app_constants.dart';
 import 'package:loantrack/core/di/providers.dart';
 import 'package:loantrack/core/utils/input_formatters.dart';
+import 'package:loantrack/core/widgets/keyboard_scrollable.dart';
 import '../providers/business_providers.dart';
 import '../../data/models/business_profile_entity.dart';
 
@@ -238,13 +239,15 @@ class _BusinessDetailsTabState extends ConsumerState<BusinessDetailsTab> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Business Profile')),
-      body: profileAsync.when(
-        data: (profile) => _isEditing
-            ? _buildEditForm(profile)
-            : _buildProfileView(profile),
+      body: KeyboardScrollable(
+        child: profileAsync.when(
+          data: (profile) => _isEditing
+              ? _buildEditForm(profile)
+              : _buildProfileView(profile),
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, stack) =>
             Center(child: Text('Error loading profile: $error')),
+      ),
       ),
       floatingActionButton: profileAsync.whenOrNull(
         data: (_) => FloatingActionButton(

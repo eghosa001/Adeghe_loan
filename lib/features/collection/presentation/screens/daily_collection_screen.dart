@@ -312,9 +312,11 @@ class DailyCollectionScreen extends ConsumerWidget {
   ]) {
     double totalDue = 0;
     double totalPaid = 0;
+    int overdueCount = 0;
     for (final row in rows) {
       totalDue += row.amountDue;
       totalPaid += row.amountPaid;
+      if (row.isOverdue) overdueCount++;
     }
 
     return Column(
@@ -336,6 +338,11 @@ class DailyCollectionScreen extends ConsumerWidget {
               _SummaryItem(
                 label: 'Remaining',
                 value: CurrencyUtils.format(totalDue - totalPaid),
+              ),
+              _SummaryItem(
+                label: 'Overdue',
+                value: overdueCount.toString(),
+                highlight: overdueCount > 0,
               ),
             ],
           ),
@@ -525,7 +532,8 @@ class _CollectionRowTile extends ConsumerWidget {
       ref.invalidate(allSavingsAccountsProvider);
       ref.invalidate(allAccountsWithNamesProvider);
       ref.invalidate(customerProvider(row.customerId));
-      ref.invalidate(reportSummaryProvider);
+      invalidateReportData(ref.invalidate);
+      ref.invalidate(futureScheduleProvider);
       ref.invalidate(customerListProvider);
       ref.invalidate(loanDetailsProvider(row.loanId));
       ref.invalidate(loanScheduleProvider(row.loanId));
@@ -598,10 +606,15 @@ class _DatePickerTile extends StatelessWidget {
 }
 
 class _SummaryItem extends StatelessWidget {
-  const _SummaryItem({required this.label, required this.value});
+  const _SummaryItem({
+    required this.label,
+    required this.value,
+    this.highlight = false,
+  });
 
   final String label;
   final String value;
+  final bool highlight;
 
   @override
   Widget build(BuildContext context) {
@@ -609,9 +622,10 @@ class _SummaryItem extends StatelessWidget {
       children: [
         Text(
           value,
-          style: Theme.of(
-            context,
-          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+            color: highlight ? Colors.red : null,
+          ),
         ),
         Text(label, style: Theme.of(context).textTheme.bodySmall),
       ],

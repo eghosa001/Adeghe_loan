@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../../core/utils/platform_utils.dart';
+import '../../../../core/widgets/keyboard_scrollable.dart';
 import '../../data/document_repository.dart';
 import '../../data/models/document_entity.dart';
 import '../providers/document_providers.dart';
@@ -109,10 +110,11 @@ class _DocumentUploadScreenState extends ConsumerState<DocumentUploadScreen> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Upload document')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: KeyboardScrollable(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             DropdownButtonFormField<CustomerDocumentType>(
               initialValue: _selectedType,
@@ -200,6 +202,7 @@ class _DocumentUploadScreenState extends ConsumerState<DocumentUploadScreen> {
               label: Text(_uploading ? 'Encrypting & uploading...' : 'Upload'),
             ),
           ],
+          ),
         ),
       ),
     );

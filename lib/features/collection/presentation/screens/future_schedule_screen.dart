@@ -242,7 +242,7 @@ class FutureScheduleScreen extends ConsumerWidget {
       ref.invalidate(allAccountsWithNamesProvider);
       ref.invalidate(customerProvider(row.customerId));
       ref.invalidate(customerListProvider);
-      ref.invalidate(reportSummaryProvider);
+      invalidateReportData(ref.invalidate);
       ref.invalidate(loanDetailsProvider(row.loanId));
       ref.invalidate(loanScheduleProvider(row.loanId));
       ref.invalidate(paymentsForLoanProvider(row.loanId));
