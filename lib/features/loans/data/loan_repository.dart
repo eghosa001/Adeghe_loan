@@ -309,41 +309,6 @@ class LoanRepository {
     }
   }
 
-  Future<Result<int>> countAllLoans({
-    String? query,
-    String? statusFilter,
-    String? loanType,
-  }) async {
-    try {
-      final db = await _database;
-      final conditions = <String>['1=1'];
-      final args = <Object?>[];
-
-      if (query != null && query.isNotEmpty) {
-        conditions.add('(l.id LIKE ? OR c.full_name LIKE ? OR c.phone LIKE ?)');
-        args.addAll(List.filled(3, '%$query%'));
-      }
-      if (statusFilter != null && statusFilter.isNotEmpty) {
-        conditions.add('l.status = ?');
-        args.add(statusFilter);
-      }
-      if (loanType != null && loanType.isNotEmpty) {
-        conditions.add('l.loan_type = ?');
-        args.add(loanType);
-      }
-
-      final where = conditions.join(' AND ');
-      final result = await db.rawQuery('''
-        SELECT COUNT(*) AS count FROM loans l
-        INNER JOIN customers c ON l.customer_id = c.id
-        WHERE $where
-      ''', args);
-      return Result.success((result.first['count'] as int?) ?? 0);
-    } on DatabaseException catch (e) {
-      return Result.failure(DatabaseFailure('Failed to count loans.', cause: e));
-    }
-  }
-
   Future<Result<List<RepaymentInstallment>>> getScheduleForLoan(
       String loanId) async {
     try {

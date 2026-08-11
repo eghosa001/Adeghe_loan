@@ -12,32 +12,6 @@ class SavingsRepository {
 
   Future<Database> get _database async => _dbService.database;
 
-  /// Returns the savings account for a customer, or null if none exists.
-  Future<SavingsAccount?> getAccount(String customerId) async {
-    final db = await _database;
-    final rows = await db.query(
-      'savings_accounts',
-      where: 'customer_id = ?',
-      whereArgs: [customerId],
-      limit: 1,
-    );
-    return rows.isEmpty ? null : SavingsAccount.fromMap(rows.first);
-  }
-
-  /// Creates a savings account for a new customer (called during customer creation).
-  Future<SavingsAccount> createAccount(String customerId) async {
-    final db = await _database;
-    final account = SavingsAccount(
-      id: const Uuid().v4(),
-      customerId: customerId,
-      balance: 0,
-      createdAt: DateTime.now().toIso8601String(),
-    );
-    await db.insert('savings_accounts', account.toMap(),
-        conflictAlgorithm: ConflictAlgorithm.ignore);
-    return account;
-  }
-
   /// Returns the savings balance for a customer (0.0 if no account yet).
   Future<double> getSavingsBalance(String customerId) async {
     final db = await _database;
@@ -174,13 +148,5 @@ class SavingsRepository {
       WHERE 1=1 $where
       ORDER BY sa.created_at DESC
     ''', args);
-  }
-
-  /// Returns the total savings balance across all customers.
-  Future<double> getTotalSavingsBalance() async {
-    final db = await _database;
-    final result = await db.rawQuery(
-        'SELECT COALESCE(SUM(balance), 0.0) AS total FROM savings_accounts');
-    return (result.first['total'] as num?)?.toDouble() ?? 0.0;
   }
 }

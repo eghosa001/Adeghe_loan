@@ -211,7 +211,7 @@ void main() {
         status: LoanStatus.cancelled);
     await seedDailyLoan(db);
 
-    final result = await repo(db).getWeeklyCollection();
+    final result = await repo(db).getWeeklyCollectionByDateRange(DateTime(2020, 1, 1), DateTime(2100, 1, 1));
     result.when(
       success: (rows) {
         // Completed loans should now appear (to show as "paid" with green tick)
@@ -267,7 +267,7 @@ void main() {
       'payment_date': '2026-08-07',
     });
 
-    final result = await repo(db).getWeeklyCollection();
+    final result = await repo(db).getWeeklyCollectionByDateRange(DateTime(2020, 1, 1), DateTime(2100, 1, 1));
     result.when(
       success: (rows) {
         expect(rows, hasLength(1));
@@ -284,7 +284,7 @@ void main() {
     await seedWeeklyLoan(db, 'L1', 'C1', 'Ada',
         amount: 2000, interestRate: 10, charge: 50, installmentAmount: 562.5);
 
-    final result = await repo(db).getWeeklyCollection();
+    final result = await repo(db).getWeeklyCollectionByDateRange(DateTime(2020, 1, 1), DateTime(2100, 1, 1));
     result.when(
       success: (rows) {
         expect(rows, hasLength(1));
@@ -308,7 +308,7 @@ void main() {
     await seedWeeklyLoan(db, 'L2', 'C2', 'Beta',
         startDate: DateTime(2026, 8, 7)); // Friday
 
-    final result = await repo(db).getWeeklyCollection();
+    final result = await repo(db).getWeeklyCollectionByDateRange(DateTime(2020, 1, 1), DateTime(2100, 1, 1));
     result.when(
       success: (rows) {
         final ada = rows.firstWhere((r) => r.loanId == 'L1');
@@ -341,7 +341,7 @@ void main() {
       where: "loan_id = 'L1' AND installment_number = 1",
     );
 
-    final result = await repo(db).getWeeklyCollection();
+    final result = await repo(db).getWeeklyCollectionByDateRange(DateTime(2020, 1, 1), DateTime(2100, 1, 1));
     result.when(
       success: (rows) {
         expect(rows, hasLength(1));
@@ -360,7 +360,7 @@ void main() {
     await seedWeeklyLoan(db, 'L1', 'C1', 'Zulu');
     await seedWeeklyLoan(db, 'L2', 'C2', 'Alpha');
 
-    final result = await repo(db).getWeeklyCollection();
+    final result = await repo(db).getWeeklyCollectionByDateRange(DateTime(2020, 1, 1), DateTime(2100, 1, 1));
     result.when(
       success: (rows) {
         expect(rows.map((r) => r.customerName).toList(), ['Alpha', 'Zulu']);
@@ -495,7 +495,7 @@ void main() {
         amount: 2000,
         interestRate: 10);
 
-    final result = await repo(db).getWeeklyCollection();
+    final result = await repo(db).getWeeklyCollectionByDateRange(DateTime(2020, 1, 1), DateTime(2100, 1, 1));
     result.when(
       success: (rows) {
         expect(rows, hasLength(1));
@@ -527,7 +527,7 @@ void main() {
       where: "loan_id = 'L1' AND installment_number = 1",
     );
 
-    final result = await repo(db).getWeeklyCollection();
+    final result = await repo(db).getWeeklyCollectionByDateRange(DateTime(2020, 1, 1), DateTime(2100, 1, 1));
     result.when(
       success: (rows) {
         expect(rows, hasLength(1));
@@ -565,7 +565,7 @@ void main() {
     await seedWeeklyLoan(db, 'L3', 'C3', 'Mon Person',
         startDate: DateTime(2026, 8, 3));
 
-    final result = await repo(db).getWeeklyCollection();
+    final result = await repo(db).getWeeklyCollectionByDateRange(DateTime(2020, 1, 1), DateTime(2100, 1, 1));
     result.when(
       success: (rows) {
         final sorted = [...rows]

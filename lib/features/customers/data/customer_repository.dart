@@ -182,6 +182,16 @@ class CustomerRepository {
     // single write normalizes every read path that consumes them.
     final normalized = _uppercaseNames(customer);
 
+    // Phone is mandatory wherever customers are replicated: the cloud schema
+    // declares `customers.phone` NOT NULL and the sync pull guard
+    // (`cloudRequiredTextColumns`) rejects empty phones, so a saved customer
+    // with no phone becomes a black hole the other device can never receive
+    // (the row is rejected on pull and its loans fail FK with it). Reject empty
+    // phone here so no save path can create one.
+    if (normalized.phone.trim().isEmpty) {
+      throw ArgumentError('Phone number is required');
+    }
+
     await db.transaction((txn) async {
       await _validateUnique(txn, normalized);
 

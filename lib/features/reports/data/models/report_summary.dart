@@ -96,11 +96,9 @@ class ReportSummary {
 
 class ClientReport {
   ClientReport({
-    required this.customerId,
     required this.customerName,
     required this.phone,
     required this.loanType,
-    required this.loanId,
     required this.amountBorrowed,
     required this.outstandingBalance,
     required this.totalPaid,
@@ -113,11 +111,9 @@ class ClientReport {
     required this.savingsAmount,
   });
 
-  final String customerId;
   final String customerName;
   final String phone;
   final String loanType;
-  final String loanId;
   final double amountBorrowed;
   final double outstandingBalance;
   final double totalPaid;
@@ -143,31 +139,23 @@ class OverdueEntry {
     required this.customerId,
     required this.customerName,
     required this.phone,
-    required this.loanId,
     required this.loanType,
     required this.installmentNumber,
     required this.dueDate,
     required this.amountDue,
     required this.paidAmount,
     required this.overdueDays,
-    this.groupName,
-    required this.guarantorName,
-    required this.guarantorPhone,
   });
 
   final String customerId;
   final String customerName;
   final String phone;
-  final String loanId;
   final String loanType;
   final int installmentNumber;
   final String dueDate;
   final double amountDue;
   final double paidAmount;
   final int overdueDays;
-  final String? groupName;
-  final String guarantorName;
-  final String guarantorPhone;
 
   double get amountRemaining => (amountDue - paidAmount).clamp(0.0, double.infinity);
 }

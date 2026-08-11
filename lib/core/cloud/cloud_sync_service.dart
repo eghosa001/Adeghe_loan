@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math' show min;
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -18,12 +19,14 @@ class CloudSyncResult {
     this.pushedRows = 0,
     this.pulledRows = 0,
     this.deletedRows = 0,
+    this.mergedCustomers = 0,
     this.error,
   });
 
   final int pushedRows;
   final int pulledRows;
   final int deletedRows;
+  final int mergedCustomers;
   final String? error;
 
   bool get success => error == null;
@@ -186,12 +189,16 @@ class CloudSyncService {
 
       var attempted = 0;
       var pushFailures = 0;
+      var mergedCustomers = 0;
+      var failedTables = <String>{};
       try {
         final result = await _push(db);
         pushed = result.pushed;
         deleted = result.deleted;
         attempted = result.attempted;
         pushFailures = result.failures;
+        mergedCustomers = result.merged;
+        failedTables = result.failedTables;
       } catch (error) {
         noteError(error);
       }
@@ -217,9 +224,12 @@ class CloudSyncService {
       // as an error so the user can investigate (RLS, network, owner access).
       String? error = firstError;
       if (error == null && (pushFailures > 0 || pullFailures > 0)) {
+        final failedList = failedTables.toList()..sort();
+        final failedDetails =
+            failedList.isEmpty ? '' : ' Tables: ${failedList.join(', ')}.';
         error = 'Sync finished but $pushFailures push and $pullFailures pull '
             'item(s) failed and were not replicated. They retry on the next '
-            'sync.';
+            'sync.$failedDetails';
       } else if (error == null &&
           attempted > 0 &&
           pushed == 0 &&
@@ -232,6 +242,7 @@ class CloudSyncService {
         pushedRows: pushed,
         pulledRows: pulled,
         deletedRows: deleted,
+        mergedCustomers: mergedCustomers,
         error: error,
       );
     } finally {
@@ -239,15 +250,45 @@ class CloudSyncService {
     }
   }
 
+  /// Resets the local push watermark so the next sync re-uploads EVERY local
+  /// row (a full push), then runs one full cycle.
+  ///
+  /// Incremental push only ever sends rows newer than `last_pushed_at`, so if
+  /// the cloud is ever wiped or recreated, the older (unmodified) local rows
+  /// would be skipped forever and any child rows referencing them would fail
+  /// their foreign keys. Calling this once forces a complete re-upload that
+  /// repopulates the cloud from this device. It intentionally overwrites the
+  /// cloud with THIS device's data — only use it to recover from a cloud
+  /// reset, never as routine sync.
+  Future<CloudSyncResult> forceFullReupload() async {
+    final db = await _databaseService.database;
+    await db.update('sync_meta', {'last_pushed_at': null},
+        where: 'id = ?', whereArgs: [1]);
+    return fullSync();
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Push
   // ─────────────────────────────────────────────────────────────────────────
 
-  Future<({int pushed, int deleted, int attempted, int failures})> _push(
-      Database db) async {
+  Future<
+      ({
+        int pushed,
+        int deleted,
+        int attempted,
+        int failures,
+        int merged,
+        Set<String> failedTables,
+      })> _push(Database db) async {
     final client = Supabase.instance.client;
     final meta = await _readMeta(db);
     final lastPushed = meta.$1;
+
+    // Merge locally-duplicated customers (same phone, non-archived) BEFORE
+    // snapshotting, so the surviving record, the re-pointed children, and the
+    // tombstone for each removed duplicate all reach the cloud in this cycle —
+    // instead of the cloud (and the other device) inheriting the duplicates.
+    final merged = await _resolveDuplicateCustomers(db);
 
     // Snapshot every changed row BEFORE capturing the watermark, so rows
     // written after the watermark are picked up by the next cycle.
@@ -341,7 +382,41 @@ class CloudSyncService {
       deleted: deleted,
       attempted: attempted,
       failures: failures,
+      merged: merged,
+      failedTables: failedTables,
     );
+  }
+
+  /// Finds customers duplicated locally (same trimmed `phone`, both
+  /// non-archived) and merges each duplicate into the canonical record. The
+  /// canonical record is the earliest `date_registered` (ties broken by `id`)
+  /// — a decision based purely on replicated data, so every device resolves
+  /// the SAME survivor and the merge converges instead of fighting.
+  ///
+  /// Runs at the start of every push so duplicates (whether created locally or
+  /// pulled from a second device) are resolved BEFORE the snapshot: the
+  /// survivor's `updated_at`, the re-pointed child rows, and the tombstone for
+  /// each removed duplicate are all captured by the same cycle and reach the
+  /// cloud together. Returns the number of duplicate rows removed.
+  Future<int> _resolveDuplicateCustomers(Database db) async {
+    final rows = await db.query('customers', where: "status != 'archived'");
+    final byPhone = <String, List<Map<String, Object?>>>{};
+    for (final row in rows) {
+      final phone = (row['phone'] as String?)?.trim();
+      if (phone == null || phone.isEmpty) continue;
+      byPhone.putIfAbsent(phone, () => []).add(row);
+    }
+    var merged = 0;
+    for (final group in byPhone.values) {
+      if (group.length < 2) continue;
+      sortDuplicateCustomersByCanonicalOrder(group);
+      final survivor = group.first;
+      for (final duplicate in group.skip(1)) {
+        await mergeDuplicateCustomerInto(db, duplicate, survivor);
+        merged++;
+      }
+    }
+    return merged;
   }
 
   Future<({int pushed, int failures})> _pushDocuments(
@@ -770,7 +845,7 @@ const Map<String, Map<String, Set<String>>> cloudEnumValues = {
   },
   'payments': {
     'status': {'completed', 'reversed'},
-    'type': {'partial', 'full', 'advance', 'overpayment'},
+    'type': {'partial', 'full', 'overpayment'},
   },
   'savings_transactions': {
     'type': {'deposit', 'withdrawal', 'overpayment'},
@@ -858,4 +933,170 @@ bool isSaneCloudRow(String table, Map<String, Object?> row, String pk) {
 String sanitizeCloudPathPart(String value) {
   final sanitized = value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
   return sanitized.isEmpty ? '_' : sanitized;
+}
+
+/// Canonical ordering for a group of same-phone non-archived customers: the
+/// survivor is the earliest `date_registered` (ties broken by `id`). Both are
+/// purely replicated values, so every device resolves the SAME survivor and the
+/// merge converges instead of two devices deleting each other's record.
+/// `@visibleForTesting` so the determinism rule is pinned by a unit test.
+@visibleForTesting
+void sortDuplicateCustomersByCanonicalOrder(List<Map<String, Object?>> group) {
+  group.sort((a, b) {
+    final byDate = ((a['date_registered'] as String?) ?? '')
+        .compareTo((b['date_registered'] as String?) ?? '');
+    if (byDate != 0) return byDate;
+    return ((a['id'] as String?) ?? '').compareTo((b['id'] as String?) ?? '');
+  });
+}
+
+/// Nullable, non-identity profile columns that may be copied from a duplicate
+/// customer onto the survivor when the survivor's value is NULL. Identity
+/// columns (`phone`, `nin`, `bvn`, `full_name`, `status`, `date_registered`,
+/// `group_id`, `updated_at`) are deliberately excluded — the survivor keeps its
+/// own identity, and copying a regulated identifier (`nin`/`bvn`, handled
+/// separately with a uniqueness guard) or a `phone` could violate the v21
+/// partial unique indexes.
+const List<String> _mergeableCustomerFields = [
+  'gender',
+  'dob',
+  'alt_phone',
+  'email',
+  'residential_address',
+  'business_address',
+  'occupation',
+  'employer',
+  'marital_status',
+  'nationality',
+  'state',
+  'lga',
+  'next_of_kin',
+  'next_of_kin_relation',
+  'next_of_kin_phone',
+  'guarantor_1_name',
+  'guarantor_1_phone',
+  'guarantor_1_address',
+  'guarantor_2_name',
+  'guarantor_2_phone',
+  'guarantor_2_address',
+  'id_type',
+  'id_number',
+  'notes',
+  'passport_path',
+  'guarantor_passport_path',
+  'signature_path',
+];
+
+/// Merges [duplicate] into [survivor] in one transaction:
+///
+///  1. re-points every child row (`loans`, `payments`, `documents`,
+///     `savings_accounts`, and transitively `repayment_schedule` /
+///     `savings_transactions`) at the survivor — the sync trigger stamps each
+///     UPDATE so the correction is pushed;
+///  2. folds the duplicate's savings balance into the survivor's account when
+///     both hold one (the `savings_accounts.customer_id` UNIQUE constraint
+///     forbids a plain re-point);
+///  3. fills NULL profile fields on the survivor from the duplicate
+///     (best-effort, never overwriting an existing value; `nin`/`bvn` are only
+///     copied when no other non-archived customer holds the same value);
+///  4. hard-deletes the duplicate — the AFTER DELETE sync trigger records the
+///     tombstone so the cloud and the other owner's device converge to the
+///     survivor too.
+///
+/// Idempotent and safe to re-run: rows already re-pointed are no-ops and the
+/// duplicate is only deleted once. `@visibleForTesting` because the merge is
+/// pure DB work — only [_CloudSyncService._resolveDuplicateCustomers]
+/// orchestrates it.
+@visibleForTesting
+Future<void> mergeDuplicateCustomerInto(
+  Database db,
+  Map<String, Object?> duplicate,
+  Map<String, Object?> survivor,
+) async {
+  final dupId = duplicate['id'] as String?;
+  final survivorId = survivor['id'] as String?;
+  if (dupId == null || survivorId == null || dupId == survivorId) return;
+  await db.transaction((txn) async {
+    await txn.update('loans', {'customer_id': survivorId},
+        where: 'customer_id = ?', whereArgs: [dupId]);
+    await txn.update('payments', {'customer_id': survivorId},
+        where: 'customer_id = ?', whereArgs: [dupId]);
+    await txn.update('documents', {'customer_id': survivorId},
+        where: 'customer_id = ?', whereArgs: [dupId]);
+
+    // Savings account is 1:1 with customers (UNIQUE customer_id), so a plain
+    // re-point would conflict when both records hold an account.
+    final dupAccountRows = await txn.query('savings_accounts',
+        where: 'customer_id = ?', whereArgs: [dupId], limit: 1);
+    final survivorAccountRows = await txn.query('savings_accounts',
+        where: 'customer_id = ?', whereArgs: [survivorId], limit: 1);
+    if (dupAccountRows.isNotEmpty) {
+      if (survivorAccountRows.isEmpty) {
+        await txn.update('savings_accounts', {'customer_id': survivorId},
+            where: 'id = ?', whereArgs: [dupAccountRows.first['id']]);
+      } else {
+        final dupAccountId = dupAccountRows.first['id'];
+        final survivorAccountId = survivorAccountRows.first['id'];
+        await txn.update(
+            'savings_transactions', {'savings_account_id': survivorAccountId},
+            where: 'savings_account_id = ?', whereArgs: [dupAccountId]);
+        final dupBalance =
+            (dupAccountRows.first['balance'] as num?)?.toDouble() ?? 0.0;
+        if (dupBalance != 0.0) {
+          await txn.rawUpdate(
+            'UPDATE savings_accounts SET balance = balance + ? WHERE id = ?',
+            [dupBalance, survivorAccountId],
+          );
+        }
+        await txn.delete('savings_accounts',
+            where: 'id = ?', whereArgs: [dupAccountId]);
+      }
+    }
+
+    // Group membership: fill a gap on the survivor, never overwrite.
+    final dupGroup = duplicate['group_id'] as String?;
+    if (dupGroup != null &&
+        dupGroup.isNotEmpty &&
+        (survivor['group_id'] as String?) == null) {
+      await txn.update('customers', {'group_id': dupGroup},
+          where: 'id = ?', whereArgs: [survivorId]);
+    }
+
+    // Profile fields: copy the duplicate's value only where the survivor's is
+    // NULL so existing data is never overwritten.
+    final fills = <String, Object?>{};
+    for (final column in _mergeableCustomerFields) {
+      final dupValue = duplicate[column];
+      if (dupValue != null && survivor[column] == null) {
+        fills[column] = dupValue;
+      }
+    }
+    final dupScore = (duplicate['credit_score'] as num?)?.toDouble() ?? 0.0;
+    final survivorScore =
+        (survivor['credit_score'] as num?)?.toDouble() ?? 0.0;
+    if (dupScore > 0 && survivorScore <= 0) fills['credit_score'] = dupScore;
+    for (final column in const ['nin', 'bvn']) {
+      final dupValue = duplicate[column];
+      if (dupValue == null) continue;
+      if (survivor[column] != null) continue;
+      // The duplicate itself is still in the table at this point (deleted at
+      // the end of the transaction), so it must be excluded from the clash
+      // scan or the copy is always skipped.
+      final clash = await txn.query('customers',
+          columns: const ['id'],
+          where: "$column = ? AND id NOT IN (?, ?) AND status != 'archived'",
+          whereArgs: [dupValue, survivorId, dupId],
+          limit: 1);
+      if (clash.isEmpty) fills[column] = dupValue;
+    }
+    if (fills.isNotEmpty) {
+      await txn.update('customers', fills,
+          where: 'id = ?', whereArgs: [survivorId]);
+    }
+
+    // Remove the duplicate. All children were re-pointed above, so the
+    // ON DELETE CASCADE has nothing to clean up; the sync trigger records the
+    // tombstone so the removal replicates.
+    await txn.delete('customers', where: 'id = ?', whereArgs: [dupId]);
+  });
 }

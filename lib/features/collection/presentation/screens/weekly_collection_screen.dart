@@ -22,17 +22,43 @@ import '../../../payments/presentation/providers/payment_providers.dart';
 import '../../../payments/data/models/payment_entity.dart';
 import '../../../../core/di/providers.dart';
 import '../providers/collection_provider.dart';
+import '../widgets/bulk_collection.dart';
 import '../widgets/collection_type_toggle.dart';
 
 /// Weekly Collection screen — filter by date or date range to see which
 /// weekly loans have payments due on the selected day(s). Works like Daily
 /// Collection but for weekly loans whose installment due dates come from
 /// the repayment schedule.
-class WeeklyCollectionScreen extends ConsumerWidget {
+class WeeklyCollectionScreen extends ConsumerStatefulWidget {
   const WeeklyCollectionScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<WeeklyCollectionScreen> createState() =>
+      _WeeklyCollectionScreenState();
+}
+
+class _WeeklyCollectionScreenState
+    extends ConsumerState<WeeklyCollectionScreen> {
+  bool _bulkMode = false;
+  final Set<String> _selectedLoanIds = {};
+
+  void _toggleBulkMode() {
+    setState(() {
+      _bulkMode = !_bulkMode;
+      if (!_bulkMode) _selectedLoanIds.clear();
+    });
+  }
+
+  void _toggleSelected(String loanId) {
+    setState(() {
+      if (!_selectedLoanIds.remove(loanId)) {
+        _selectedLoanIds.add(loanId);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final collectionAsync = ref.watch(weeklyCollectionListProvider);
     final selectedDate = ref.watch(weeklyCollectionDateFilterProvider);
     final isRangeMode = ref.watch(weeklyCollectionDateRangeModeProvider);
@@ -49,6 +75,11 @@ class WeeklyCollectionScreen extends ConsumerWidget {
           ),
         ),
         actions: [
+          IconButton(
+            icon: Icon(_bulkMode ? Icons.close : Icons.done_all),
+            tooltip: _bulkMode ? 'Exit bulk collect' : 'Bulk collect',
+            onPressed: _toggleBulkMode,
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh (F5)',
@@ -151,6 +182,9 @@ class WeeklyCollectionScreen extends ConsumerWidget {
         ],
       ),
       drawer: const AppDrawer(currentRoute: '/collections/weekly'),
+      bottomNavigationBar: _bulkMode
+          ? _buildBulkBottomBar(collectionAsync.valueOrNull ?? const [])
+          : null,
       body: Column(
         children: [
           const CollectionTypeToggle(isWeekly: true),
@@ -282,7 +316,7 @@ class WeeklyCollectionScreen extends ConsumerWidget {
                     child: Text('No weekly loans due in this period.'),
                   );
                 }
-                return _buildSummaryAndList(context, ref, rows);
+                return _buildSummaryAndList(context, rows);
               },
             ),
           ),
@@ -293,7 +327,6 @@ class WeeklyCollectionScreen extends ConsumerWidget {
 
   Widget _buildSummaryAndList(
     BuildContext context,
-    WidgetRef ref,
     List<WeeklyCollectionRow> rows,
   ) {
     double totalExpected = 0;
@@ -352,6 +385,9 @@ class WeeklyCollectionScreen extends ConsumerWidget {
                       onPaymentRecorded: () {
                         ref.invalidate(weeklyCollectionListProvider);
                       },
+                      selectMode: _bulkMode,
+                      selected: _selectedLoanIds.contains(row.loanId),
+                      onToggleSelected: () => _toggleSelected(row.loanId),
                     ),
                     const Divider(height: 1),
                   ],
@@ -383,6 +419,89 @@ class WeeklyCollectionScreen extends ConsumerWidget {
       items.add((null, row));
     }
     return items;
+  }
+
+  Widget _buildBulkBottomBar(List<WeeklyCollectionRow> rows) {
+    final selectable = rows.where((r) => !r.isCurrentInstallmentPaid).toList();
+    final selected = selectable
+        .where((r) => _selectedLoanIds.contains(r.loanId))
+        .toList();
+    final total = selected.fold(
+      0.0,
+      (sum, row) => sum + _rowDefaultAmount(row),
+    );
+    final allSelected =
+        selectable.isNotEmpty && selectable.length == _selectedLoanIds.length;
+    return BulkCollectBottomBar(
+      selectedCount: _selectedLoanIds.length,
+      total: total,
+      allSelected: allSelected,
+      onSelectAll: () {
+        setState(() {
+          if (allSelected) {
+            _selectedLoanIds.clear();
+          } else {
+            _selectedLoanIds
+              ..clear()
+              ..addAll(selectable.map((r) => r.loanId));
+          }
+        });
+      },
+      onCollect: () => _openBulkCollect(rows),
+    );
+  }
+
+  double _rowDefaultAmount(WeeklyCollectionRow row) {
+    return row.installmentDue > 0
+        ? row.installmentDue
+        : row.outstandingBalance;
+  }
+
+  Future<void> _openBulkCollect(List<WeeklyCollectionRow> rows) async {
+    final selected = rows
+        .where((r) =>
+            _selectedLoanIds.contains(r.loanId) && !r.isCurrentInstallmentPaid)
+        .toList();
+    if (selected.isEmpty) return;
+    final items = selected.map((row) {
+      return BulkCollectItem(
+        loanId: row.loanId,
+        customerId: row.customerId,
+        customerName: row.customerName,
+        subtitle: 'Week ${row.currentInstallmentNumber}'
+            ' • ${row.currentInstallmentDueDate}',
+        defaultAmount: _rowDefaultAmount(row),
+        installmentDue: row.installmentDue,
+        outstandingBalance: row.outstandingBalance,
+      );
+    }).toList();
+
+    final currency =
+        ref.read(currencySymbolProvider).valueOrNull ??
+        CurrencyUtils.defaultSymbol;
+    final draft = await showBulkCollectDialog(
+      context,
+      items,
+      currencySymbol: currency,
+    );
+    if (draft == null || !mounted) return;
+
+    setState(() {
+      _bulkMode = false;
+      _selectedLoanIds.clear();
+    });
+    final outcome = await recordBulkPayments(
+      ref,
+      items: draft.items,
+      amounts: draft.amounts,
+      method: draft.method,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(bulkCollectSummary(outcome, draft.total)),
+      ),
+    );
   }
 }
 
@@ -425,10 +544,16 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
   const _WeeklyCollectionRowTile({
     required this.row,
     required this.onPaymentRecorded,
+    this.selectMode = false,
+    this.selected = false,
+    this.onToggleSelected,
   });
 
   final WeeklyCollectionRow row;
   final VoidCallback onPaymentRecorded;
+  final bool selectMode;
+  final bool selected;
+  final VoidCallback? onToggleSelected;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -468,6 +593,12 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
     }
 
     return ListTile(
+      leading: selectMode && !row.isCurrentInstallmentPaid
+          ? Checkbox(
+              value: selected,
+              onChanged: (_) => onToggleSelected?.call(),
+            )
+          : null,
       title: Row(
         children: [
           Expanded(
@@ -499,7 +630,20 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
         ],
       ),
       isThreeLine: false,
-      trailing: row.isCurrentInstallmentPaid
+      trailing: selectMode
+          ? (row.isCurrentInstallmentPaid
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.check_circle, color: Colors.green),
+                      Text(
+                        'Paid',
+                        style: TextStyle(color: Colors.green, fontSize: 10),
+                      ),
+                    ],
+                  )
+                : null)
+          : row.isCurrentInstallmentPaid
           ? Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -543,7 +687,11 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
                 ),
               ],
             ),
-      onTap: row.isCurrentInstallmentPaid ? null : () => _openPayment(context),
+      onTap: row.isCurrentInstallmentPaid
+          ? null
+          : selectMode
+          ? onToggleSelected
+          : () => _openPayment(context),
     );
   }
 

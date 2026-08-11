@@ -39,8 +39,6 @@ class CollectionRow {
   final double overdueAmount;
 
   bool get isPaid => scheduleStatus == 'paid';
-  bool get isPartial => scheduleStatus == 'partial';
-  bool get isPending => scheduleStatus == 'pending';
 
   /// Whether the loan has any unpaid installment due before today.
   bool get isOverdue => overdueAmount > 0;

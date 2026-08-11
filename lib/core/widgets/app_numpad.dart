@@ -9,10 +9,6 @@ class AppNumpad extends StatelessWidget {
     required this.onKeyPressed,
     required this.onDelete,
     this.enabled = true,
-    this.keyColor = Colors.white,
-    this.keyAlpha = 0.08,
-    this.borderColor,
-    this.textColor = Colors.white,
   });
 
   final ValueChanged<String> onKeyPressed;
@@ -22,24 +18,14 @@ class AppNumpad extends StatelessWidget {
   /// the PIN is locked out).
   final bool enabled;
 
-  /// Color of the key text and delete icon.
-  final Color keyColor;
-
-  /// Opacity of the key background.
-  final double keyAlpha;
-
-  /// Override border color (defaults to [keyColor] at 12% opacity).
-  final Color? borderColor;
-
-  /// Text/icon color for keys.
-  final Color textColor;
-
   @override
   Widget build(BuildContext context) {
-    final effectiveBorder = borderColor ?? textColor.withValues(alpha: 0.12);
     final dimmed = !enabled;
-    final effectiveTextColor = dimmed ? textColor.withValues(alpha: 0.3) : textColor;
-    final effectiveKeyColor = dimmed ? keyColor.withValues(alpha: keyAlpha) : keyColor;
+    final effectiveBorder = Colors.white.withValues(alpha: 0.12);
+    final effectiveTextColor =
+        dimmed ? Colors.white.withValues(alpha: 0.3) : Colors.white;
+    final effectiveKeyColor =
+        dimmed ? Colors.white.withValues(alpha: 0.08) : Colors.white;
 
     void invoke(VoidCallback callback) {
       if (enabled) callback();
@@ -66,7 +52,7 @@ class AppNumpad extends StatelessWidget {
                             invoke(() => onKeyPressed(k));
                           },
                           keyColor: effectiveKeyColor,
-                          keyAlpha: keyAlpha,
+                          keyAlpha: 0.08,
                           borderColor: effectiveBorder,
                           textColor: effectiveTextColor,
                         ))
@@ -86,7 +72,7 @@ class AppNumpad extends StatelessWidget {
                     invoke(() => onKeyPressed('0'));
                   },
                   keyColor: effectiveKeyColor,
-                  keyAlpha: keyAlpha,
+                  keyAlpha: 0.08,
                   borderColor: effectiveBorder,
                   textColor: effectiveTextColor,
                 ),

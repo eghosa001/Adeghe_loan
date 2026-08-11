@@ -112,6 +112,56 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
     }
   }
 
+  Future<void> _forceFullReupload() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Force full re-upload?'),
+        content: const Text(
+            'This re-uploads EVERYTHING on this device to the cloud, '
+            'overwriting the cloud copy with this device\u2019s data. '
+            'Only use it after the cloud was wiped or recreated and '
+            'background sync keeps failing.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Re-upload'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _busy = true;
+      _message = 'Re-uploading everything…';
+    });
+    try {
+      final service = await ref.read(cloudSyncServiceProvider.future);
+      final result = await service.forceFullReupload();
+      if (!mounted) return;
+      setState(() {
+        _message = result.success
+            ? 'Re-upload complete — ${result.pushedRows} pushed, '
+                '${result.pulledRows} pulled, ${result.deletedRows} deleted.'
+            : 'Re-upload finished with errors: ${result.error}';
+        _lastSync = DateTime.now();
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() =>
+            _message = 'Re-upload failed. Try again when the cloud is '
+                'reachable.\n$error');
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(cloudAuthServiceProvider);
@@ -291,6 +341,25 @@ class _CloudSyncScreenState extends ConsumerState<CloudSyncScreen> {
                   label: const Text('Sign out'),
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                TextButton.icon(
+                  onPressed: _busy ? null : _forceFullReupload,
+                  icon: const Icon(Icons.published_with_changes),
+                  label: const Text('Force full re-upload'),
+                  style: TextButton.styleFrom(
+                    foregroundColor:
+                        Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ],
+            ),
+            Text(
+              'Re-uploads everything from this device after a cloud '
+              'reset. The cloud copy is overwritten.',
+              style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 8),
             Text(

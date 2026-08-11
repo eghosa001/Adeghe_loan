@@ -23,15 +23,40 @@ import '../../../payments/presentation/providers/payment_providers.dart';
 import '../../../payments/data/models/payment_entity.dart';
 import '../../../../core/di/providers.dart';
 import '../providers/collection_provider.dart';
+import '../widgets/bulk_collection.dart';
 import '../widgets/collection_type_toggle.dart';
 
 /// Daily Collection screen — daily loans only, viewable by date or date range
 /// and by group. Weekly loans live in their own WeeklyCollectionScreen.
-class DailyCollectionScreen extends ConsumerWidget {
+class DailyCollectionScreen extends ConsumerStatefulWidget {
   const DailyCollectionScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DailyCollectionScreen> createState() =>
+      _DailyCollectionScreenState();
+}
+
+class _DailyCollectionScreenState extends ConsumerState<DailyCollectionScreen> {
+  bool _bulkMode = false;
+  final Set<String> _selectedLoanIds = {};
+
+  void _toggleBulkMode() {
+    setState(() {
+      _bulkMode = !_bulkMode;
+      if (!_bulkMode) _selectedLoanIds.clear();
+    });
+  }
+
+  void _toggleSelected(String loanId) {
+    setState(() {
+      if (!_selectedLoanIds.remove(loanId)) {
+        _selectedLoanIds.add(loanId);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final collectionAsync = ref.watch(collectionListProvider);
     final selectedDate = ref.watch(collectionDateFilterProvider);
     final selectedGroup = ref.watch(collectionGroupFilterProvider);
@@ -50,6 +75,11 @@ class DailyCollectionScreen extends ConsumerWidget {
           ),
         ),
         actions: [
+          IconButton(
+            icon: Icon(_bulkMode ? Icons.close : Icons.done_all),
+            tooltip: _bulkMode ? 'Exit bulk collect' : 'Bulk collect',
+            onPressed: _toggleBulkMode,
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh (F5)',
@@ -137,6 +167,9 @@ class DailyCollectionScreen extends ConsumerWidget {
         ],
       ),
       drawer: const AppDrawer(currentRoute: '/collections'),
+      bottomNavigationBar: _bulkMode
+          ? _buildBulkBottomBar(collectionAsync.valueOrNull ?? const [])
+          : null,
       body: Column(
         children: [
           const CollectionTypeToggle(isWeekly: false),
@@ -295,7 +328,7 @@ class DailyCollectionScreen extends ConsumerWidget {
                     child: Text('No daily collections for this date.'),
                   );
                 }
-                return _buildSummaryAndList(context, ref, rows, isRangeMode);
+                return _buildSummaryAndList(context, rows, isRangeMode);
               },
             ),
           ),
@@ -306,7 +339,6 @@ class DailyCollectionScreen extends ConsumerWidget {
 
   Widget _buildSummaryAndList(
     BuildContext context,
-    WidgetRef ref,
     List<CollectionRow> rows, [
     bool isRangeMode = false,
   ]) {
@@ -369,12 +401,108 @@ class DailyCollectionScreen extends ConsumerWidget {
                   onPaymentRecorded: () {
                     ref.invalidate(collectionListProvider);
                   },
+                  selectMode: _bulkMode,
+                  selected: _selectedLoanIds.contains(row.loanId),
+                  onToggleSelected: () => _toggleSelected(row.loanId),
                 );
               },
             ),
           ),
         ),
       ],
+    );
+  }
+
+  /// The current installment's remaining amount, used as the loan-applied cap.
+  double _rowInstallmentDue(CollectionRow row, bool isRangeMode) {
+    final cap = isRangeMode
+        ? row.installmentAmount
+        : row.installmentAmount - row.amountPaid;
+    return cap > 0 ? cap : 0;
+  }
+
+  Widget _buildBulkBottomBar(List<CollectionRow> rows) {
+    final selectable = rows.where((r) => !r.isPaid).toList();
+    final selected = selectable
+        .where((r) => _selectedLoanIds.contains(r.loanId))
+        .toList();
+    final total = selected.fold(
+      0.0,
+      (sum, row) => sum + _rowDefaultAmount(row),
+    );
+    final allSelected =
+        selectable.isNotEmpty && selectable.length == _selectedLoanIds.length;
+    return BulkCollectBottomBar(
+      selectedCount: _selectedLoanIds.length,
+      total: total,
+      allSelected: allSelected,
+      onSelectAll: () {
+        setState(() {
+          if (allSelected) {
+            _selectedLoanIds.clear();
+          } else {
+            _selectedLoanIds
+              ..clear()
+              ..addAll(selectable.map((r) => r.loanId));
+          }
+        });
+      },
+      onCollect: () => _openBulkCollect(rows),
+    );
+  }
+
+  double _rowDefaultAmount(CollectionRow row) {
+    final due = _rowInstallmentDue(row, _isRangeMode);
+    return due > 0 ? due : row.outstandingBalance;
+  }
+
+  bool get _isRangeMode => ref.read(collectionDateRangeModeProvider);
+
+  Future<void> _openBulkCollect(List<CollectionRow> rows) async {
+    final selected = rows
+        .where((r) => _selectedLoanIds.contains(r.loanId) && !r.isPaid)
+        .toList();
+    if (selected.isEmpty) return;
+    final items = selected.map((row) {
+      final due = _rowInstallmentDue(row, _isRangeMode);
+      return BulkCollectItem(
+        loanId: row.loanId,
+        customerId: row.customerId,
+        customerName: row.customerName,
+        subtitle: row.groupName != null && row.groupName!.isNotEmpty
+            ? row.groupName!
+            : (row.phone.isNotEmpty ? row.phone : 'Daily loan'),
+        defaultAmount: due > 0 ? due : row.outstandingBalance,
+        installmentDue: due,
+        outstandingBalance: row.outstandingBalance,
+      );
+    }).toList();
+
+    final currency =
+        ref.read(currencySymbolProvider).valueOrNull ??
+        CurrencyUtils.defaultSymbol;
+    final draft = await showBulkCollectDialog(
+      context,
+      items,
+      currencySymbol: currency,
+    );
+    if (draft == null || !mounted) return;
+
+    setState(() {
+      _bulkMode = false;
+      _selectedLoanIds.clear();
+    });
+    final outcome = await recordBulkPayments(
+      ref,
+      items: draft.items,
+      amounts: draft.amounts,
+      method: draft.method,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(bulkCollectSummary(outcome, draft.total)),
+      ),
     );
   }
 }
@@ -384,21 +512,37 @@ class _CollectionRowTile extends ConsumerWidget {
     required this.row,
     required this.installmentDue,
     required this.onPaymentRecorded,
+    this.selectMode = false,
+    this.selected = false,
+    this.onToggleSelected,
   });
 
   final CollectionRow row;
   final double installmentDue;
   final VoidCallback onPaymentRecorded;
+  final bool selectMode;
+  final bool selected;
+  final VoidCallback? onToggleSelected;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return ListTile(
+      leading: selectMode && !row.isPaid
+          ? Checkbox(
+              value: selected,
+              onChanged: (_) => onToggleSelected?.call(),
+            )
+          : null,
       title: Text(row.customerName),
       subtitle: Text(
         '${CurrencyUtils.format(row.amountPaid)} / ${CurrencyUtils.format(row.amountDue)}'
         '${row.groupName != null ? ' — ${row.groupName}' : ''}',
       ),
-      trailing: row.isPaid
+      trailing: selectMode
+          ? (row.isPaid
+                ? const Icon(Icons.check_circle, color: Colors.green)
+                : null)
+          : row.isPaid
           ? const Icon(Icons.check_circle, color: Colors.green)
           : Row(
               mainAxisSize: MainAxisSize.min,
@@ -414,7 +558,11 @@ class _CollectionRowTile extends ConsumerWidget {
                 ),
               ],
             ),
-      onTap: row.isPaid ? null : () => _openPayment(context),
+      onTap: row.isPaid
+          ? null
+          : selectMode
+          ? onToggleSelected
+          : () => _openPayment(context),
     );
   }
 

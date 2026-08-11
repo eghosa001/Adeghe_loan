@@ -263,9 +263,11 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
     ...textFormatters(maxLength: AppConstants.maxNameLength),
   ];
 
-  String? _validatePhone(String? value) {
+  String? _validatePhone(String? value, {bool required = false}) {
     final v = value?.trim() ?? '';
-    if (v.isEmpty) return null;
+    if (v.isEmpty) {
+      return required ? 'Phone number is required' : null;
+    }
     return RegExp(r'^\+?[0-9]{7,15}$').hasMatch(v)
         ? null
         : 'Enter a valid phone number';
@@ -401,7 +403,7 @@ class _CustomerFormScreenState extends ConsumerState<CustomerFormScreen> {
                     required: true,
                     type: TextInputType.phone,
                     maxLength: AppConstants.maxPhoneLength,
-                    validator: _validatePhone,
+                    validator: (value) => _validatePhone(value, required: true),
                   ),
                   _field(
                     'altPhone',

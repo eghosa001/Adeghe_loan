@@ -33,6 +33,7 @@ class DatabaseMigrations {
     if (pending(20)) await _v20(db);
     if (pending(21)) await _v21(db);
     if (pending(22)) await _v22(db);
+    if (pending(23)) await _v23(db);
   }
 
   /// v20 — indexes backing the money-rule join and common date-range filters.
@@ -167,6 +168,44 @@ class DatabaseMigrations {
         guarantor_1_name = CASE WHEN guarantor_1_name IS NULL THEN NULL ELSE UPPER(TRIM(guarantor_1_name)) END,
         guarantor_2_name = CASE WHEN guarantor_2_name IS NULL THEN NULL ELSE UPPER(TRIM(guarantor_2_name)) END
     ''');
+  }
+
+  /// v23 — backfill `updated_at` on replicated rows that still have none (live
+  /// fix 2026-08-11). v17 stamped rows that predated it, but a row written by a
+  /// path where the stamp trigger never ran keeps a NULL `updated_at` forever:
+  /// the push sends it as an explicit NULL (`updated_at > ? OR updated_at IS
+  /// NULL`), the cloud stores NULL, and the other device's pull guard
+  /// (`isSaneCloudRow`) rejects a row with no valid sync timestamp — so that
+  /// payment/savings row never reaches the other device and its totals stay
+  /// different forever (observed live: 7 payments + 1 savings transaction in
+  /// the cloud that the phone never received). Backfilling the NULL rows with a
+  /// valid `syncTimestamp()` makes the next push send a pullable row. Only the
+  /// replicated tables are touched (repayment_schedule is a derived local cache
+  /// and never replicated; audit_logs/settings are device-local).
+  static Future<void> _v23(Database db) async {
+    final now = syncTimestamp();
+    await db.execute(
+        'UPDATE business_profile SET updated_at = ? WHERE updated_at IS NULL',
+        [now]);
+    await db.execute(
+        'UPDATE customer_groups SET updated_at = ? WHERE updated_at IS NULL',
+        [now]);
+    await db.execute(
+        'UPDATE customers SET updated_at = ? WHERE updated_at IS NULL', [now]);
+    await db.execute(
+        'UPDATE loans SET updated_at = ? WHERE updated_at IS NULL', [now]);
+    await db.execute(
+        'UPDATE payments SET updated_at = ? WHERE updated_at IS NULL', [now]);
+    await db.execute(
+        'UPDATE savings_accounts SET updated_at = ? WHERE updated_at IS NULL',
+        [now]);
+    await db.execute(
+        'UPDATE savings_transactions SET updated_at = ? WHERE updated_at IS NULL',
+        [now]);
+    await db.execute(
+        'UPDATE documents SET updated_at = ? WHERE updated_at IS NULL', [now]);
+    await db.execute(
+        'UPDATE holidays SET updated_at = ? WHERE updated_at IS NULL', [now]);
   }
 
   /// Tables that get cloud-sync change tracking (updated_at stamping +

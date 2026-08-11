@@ -485,12 +485,10 @@ class ReportRepository {
         // 12: Client reports
         db.rawQuery(
         'SELECT '
-        'c.id AS customerId, '
         'c.full_name AS customerName, '
         'c.phone AS phone, '
         'c.guarantor_1_name AS guarantorName, '
         'c.guarantor_1_phone AS guarantorPhone, '
-        'l.id AS loanId, '
         'l.loan_type AS loanType, '
         'l.amount AS amountBorrowed, '
         'CASE WHEN l.loan_type = \'weekly\' THEN DATE(l.start_date, \'-7 days\') ELSE l.loan_date END AS loanDate, '
@@ -523,19 +521,14 @@ class ReportRepository {
         'c.id AS customerId, '
         'c.full_name AS customerName, '
         'c.phone AS phone, '
-        'c.guarantor_1_name AS guarantorName, '
-        'c.guarantor_1_phone AS guarantorPhone, '
-        'l.id AS loanId, '
         'l.loan_type AS loanType, '
         'rs.installment_number AS installmentNumber, '
         'rs.due_date AS dueDate, '
         'rs.amount AS amountDue, '
-        'rs.paid_amount AS paidAmount, '
-        'cg.name AS groupName '
+        'rs.paid_amount AS paidAmount '
         'FROM repayment_schedule rs '
         'INNER JOIN loans l ON rs.loan_id = l.id '
         'INNER JOIN customers c ON l.customer_id = c.id '
-        'LEFT JOIN customer_groups cg ON c.group_id = cg.id '
         "WHERE l.status IN ('active', 'defaulted') AND rs.status != 'paid' AND DATE(rs.due_date) < ?$ltClause "
         'AND $notOnEnabledHolidaySql '
         'ORDER BY rs.due_date ASC',
@@ -550,10 +543,8 @@ class ReportRepository {
             final borrowed = (row['amountBorrowed'] as num?)?.toDouble() ?? 0.0;
             final rate = (row['interestRate'] as num?)?.toDouble() ?? 0.0;
             return ClientReport(
-                customerId: row['customerId'] as String? ?? '',
                 customerName: row['customerName'] as String? ?? '',
                 phone: row['phone'] as String? ?? '',
-                loanId: row['loanId'] as String? ?? '',
                 loanType: row['loanType'] as String? ?? '',
                 amountBorrowed: borrowed,
                 outstandingBalance:
@@ -579,16 +570,12 @@ class ReportRepository {
           customerId: row['customerId'] as String? ?? '',
           customerName: row['customerName'] as String? ?? '',
           phone: row['phone'] as String? ?? '',
-          loanId: row['loanId'] as String? ?? '',
           loanType: row['loanType'] as String? ?? '',
           installmentNumber: row['installmentNumber'] as int? ?? 0,
           dueDate: dueStr,
           amountDue: (row['amountDue'] as num?)?.toDouble() ?? 0.0,
           paidAmount: (row['paidAmount'] as num?)?.toDouble() ?? 0.0,
           overdueDays: overdueDays,
-          groupName: row['groupName'] as String?,
-          guarantorName: row['guarantorName'] as String? ?? '',
-          guarantorPhone: row['guarantorPhone'] as String? ?? '',
         );
       }).toList();
     }
@@ -612,7 +599,7 @@ class ReportRepository {
     );
   }
 
-  Future<Result<List<OverdueEntry>>> getOverdueReport({String? loanType}) async {
+  Future<Result<List<OverdueEntry>>> getOverdueReport() async {
     try {
       final db = await _database;
       final todayStr = AppDateUtils.formatForStorage(DateTime.now());
@@ -622,25 +609,19 @@ class ReportRepository {
         'c.id AS customerId, '
         'c.full_name AS customerName, '
         'c.phone AS phone, '
-        'c.guarantor_1_name AS guarantorName, '
-        'c.guarantor_1_phone AS guarantorPhone, '
-        'l.id AS loanId, '
         'l.loan_type AS loanType, '
         'rs.installment_number AS installmentNumber, '
         'rs.due_date AS dueDate, '
         'rs.amount AS amountDue, '
-        'rs.paid_amount AS paidAmount, '
-        'cg.name AS groupName '
+        'rs.paid_amount AS paidAmount '
         'FROM repayment_schedule rs '
         'INNER JOIN loans l ON rs.loan_id = l.id '
         'INNER JOIN customers c ON l.customer_id = c.id '
-        'LEFT JOIN customer_groups cg ON c.group_id = cg.id '
         "WHERE l.status IN ('active', 'defaulted') AND rs.status != 'paid' "
         'AND DATE(rs.due_date) < ? '
         'AND $notOnEnabledHolidaySql '
-        '${loanType != null ? 'AND l.loan_type = ?' : ''} '
         'ORDER BY rs.due_date ASC',
-        loanType != null ? [todayStr, loanType] : [todayStr],
+        [todayStr],
       );
 
       final nowDate = DateTime.now();
@@ -652,16 +633,12 @@ class ReportRepository {
           customerId: row['customerId'] as String? ?? '',
           customerName: row['customerName'] as String? ?? '',
           phone: row['phone'] as String? ?? '',
-          loanId: row['loanId'] as String? ?? '',
           loanType: row['loanType'] as String? ?? '',
           installmentNumber: row['installmentNumber'] as int? ?? 0,
           dueDate: dueStr,
           amountDue: (row['amountDue'] as num?)?.toDouble() ?? 0.0,
           paidAmount: (row['paidAmount'] as num?)?.toDouble() ?? 0.0,
           overdueDays: overdueDays,
-          groupName: row['groupName'] as String?,
-          guarantorName: row['guarantorName'] as String? ?? '',
-          guarantorPhone: row['guarantorPhone'] as String? ?? '',
         );
       }).toList();
 

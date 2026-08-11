@@ -94,52 +94,6 @@ class Customer {
   /// written to the `customers` table.
   final double totalOwed;
 
-  Customer copyWith({
-    String? passportPath,
-    String? fullName,
-    String? phone,
-    CustomerStatus? status,
-    String? groupId,
-    bool clearGroupId = false,
-  }) => Customer(
-    id: id,
-    passportPath: passportPath ?? this.passportPath,
-    fullName: fullName ?? this.fullName,
-    gender: gender,
-    dateOfBirth: dateOfBirth,
-    phone: phone ?? this.phone,
-    altPhone: altPhone,
-    email: email,
-    residentialAddress: residentialAddress,
-    businessAddress: businessAddress,
-    occupation: occupation,
-    employer: employer,
-    maritalStatus: maritalStatus,
-    nationality: nationality,
-    state: state,
-    lga: lga,
-    nextOfKin: nextOfKin,
-    nextOfKinRelation: nextOfKinRelation,
-    nextOfKinPhone: nextOfKinPhone,
-    guarantor1Name: guarantor1Name,
-    guarantor1Phone: guarantor1Phone,
-    guarantor1Address: guarantor1Address,
-    guarantor2Name: guarantor2Name,
-    guarantor2Phone: guarantor2Phone,
-    guarantor2Address: guarantor2Address,
-    guarantorPassportPath: guarantorPassportPath,
-    nin: nin,
-    bvn: bvn,
-    idType: idType,
-    idNumber: idNumber,
-    signaturePath: signaturePath,
-    dateRegistered: dateRegistered,
-    notes: notes,
-    status: status ?? this.status,
-    creditScore: creditScore,
-    groupId: clearGroupId ? null : (groupId ?? this.groupId),
-  );
-
   static String _caps(String value) => value.trim().toUpperCase();
 
   static String? _capsNullable(String? value) {

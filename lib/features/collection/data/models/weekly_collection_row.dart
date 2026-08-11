@@ -102,15 +102,6 @@ class WeeklyCollectionRow {
         '${disbursed.day.toString().padLeft(2, '0')}';
   }
 
-  /// Printout status for the right-side Status column: 'Paid' when the current
-  /// installment is fully paid, 'Overdue' when the customer is owing from a
-  /// previous date, otherwise 'Pending'.
-  String get statusLabel {
-    if (isCurrentInstallmentPaid) return 'Paid';
-    if (isOverdue) return 'Overdue';
-    return 'Pending';
-  }
-
   /// The recurring payment day ("Monday".."Sunday") derived from the weekly
   /// anchor date's weekday — weekly installments are anchored to the
   /// `start_date` weekday and resume it after a weekend/holiday shift.
@@ -149,11 +140,4 @@ class WeeklyCollectionRow {
 
   /// Whether the current installment is partially paid.
   bool get isCurrentInstallmentPartial => currentInstallmentStatus == 'partial';
-
-  /// Whether the current installment is pending (not paid, not overdue).
-  bool get isCurrentInstallmentPending => currentInstallmentStatus == 'pending';
-
-  /// Remaining amount for the current installment.
-  double get currentInstallmentRemaining =>
-      (currentInstallmentAmount - currentInstallmentPaidAmount).clamp(0.0, double.infinity);
 }

@@ -58,35 +58,5 @@ void main() {
       final r = row(paymentAnchorDate: 'not-a-date', loanDate: '2026-08-01');
       expect(r.disbursementDate, '2026-08-01');
     });
-
-    test('statusLabel: paid when the current installment is fully paid', () {
-      expect(
-        row(currentInstallmentStatus: 'paid', daysOverdue: 0).statusLabel,
-        'Paid',
-      );
-    });
-
-    test('statusLabel: overdue when owing from a previous date', () {
-      expect(
-        row(currentInstallmentStatus: 'pending', daysOverdue: 3).statusLabel,
-        'Overdue',
-      );
-      // An overdue partial payment is still overdue.
-      expect(
-        row(currentInstallmentStatus: 'partial', daysOverdue: 2).statusLabel,
-        'Overdue',
-      );
-    });
-
-    test('statusLabel: pending when not yet paid and not overdue', () {
-      expect(
-        row(currentInstallmentStatus: 'pending', daysOverdue: 0).statusLabel,
-        'Pending',
-      );
-      expect(
-        row(currentInstallmentStatus: 'partial', daysOverdue: 0).statusLabel,
-        'Pending',
-      );
-    });
   });
 }

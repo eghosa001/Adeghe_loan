@@ -111,36 +111,6 @@ class ProfitReportRow {
           .clamp(0.0, double.infinity);
 }
 
-/// One customer/loan collection line in the Collection Report. Rows come from
-/// `CollectionRepository.getCollectionsByDateRange` semantics: due = unpaid
-/// portion of installments due in period; paid = loan-applied payments in
-/// period (money rule).
-class CollectionReportRow {
-  const CollectionReportRow({
-    required this.customerId,
-    required this.customerName,
-    required this.phone,
-    required this.loanId,
-    required this.loanType,
-    required this.amountDue,
-    required this.amountPaid,
-    required this.outstandingBalance,
-    this.groupName,
-  });
-
-  final String customerId;
-  final String customerName;
-  final String phone;
-  final String loanId;
-  final String loanType;
-  final double amountDue;
-  final double amountPaid;
-  final double outstandingBalance;
-  final String? groupName;
-
-  double get balanceRemaining => (amountDue - amountPaid).clamp(0.0, double.infinity);
-}
-
 /// A single bucket on a dashboard trend chart. Each chart plots one or two
 /// series of these points over the selected report period (bucketed daily for
 /// short ranges, weekly for medium, monthly for long).

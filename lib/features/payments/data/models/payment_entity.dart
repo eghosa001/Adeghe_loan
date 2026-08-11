@@ -2,7 +2,7 @@ import 'package:loantrack/core/utils/date_utils.dart';
 
 enum PaymentMethod { cash, transfer, pos, cheque, mobileMoney, savings }
 
-enum PaymentType { partial, full, advance, overpayment }
+enum PaymentType { partial, full, overpayment }
 
 enum PaymentStatus { completed, reversed }
 
@@ -47,28 +47,6 @@ class Payment {
     this.priorLoanStatus,
     this.clientRequestId,
   });
-
-  Payment copyWith({
-    String? remarks,
-    bool clearRemarks = false,
-  }) {
-    return Payment(
-      id: id,
-      loanId: loanId,
-      customerId: customerId,
-      amount: amount,
-      method: method,
-      referenceNumber: referenceNumber,
-      receiptNumber: receiptNumber,
-      paymentDate: paymentDate,
-      collector: collector,
-      type: type,
-      status: status,
-      remarks: clearRemarks ? null : (remarks ?? this.remarks),
-      priorLoanStatus: priorLoanStatus,
-      clientRequestId: clientRequestId,
-    );
-  }
 
   Map<String, dynamic> toMap() => {
         'id': id,

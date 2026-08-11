@@ -68,7 +68,7 @@ create table if not exists authorized_owners (
 alter table authorized_owners enable row level security;
 
 create table if not exists app_owner (
-  id text primary key
+  id uuid primary key
 );
 alter table app_owner enable row level security;
 drop policy if exists "app_owner self" on app_owner;
@@ -336,6 +336,10 @@ create table if not exists loans (
 create index if not exists idx_loans_customer on loans(customer_id);
 create index if not exists idx_loans_type_status on loans(loan_type, status);
 create index if not exists idx_loans_type_date on loans(loan_type, loan_date);
+create index if not exists idx_loans_active
+  on loans(loan_type, status) where status in ('active','pending');
+create index if not exists idx_loans_active_status
+  on loans(customer_id, loan_type) where status = 'active';
 alter table loans enable row level security;
 drop policy if exists "loans all" on loans;
 create policy "loans all" on loans
@@ -370,6 +374,8 @@ create table if not exists payments (
 );
 create index if not exists idx_payments_loan on payments(loan_id);
 create index if not exists idx_payments_loan_date on payments(loan_id, payment_date);
+create index if not exists idx_payments_completed
+  on payments(loan_id, payment_date) where status = 'completed';
 alter table payments enable row level security;
 drop policy if exists "payments all" on payments;
 create policy "payments all" on payments
@@ -655,7 +661,7 @@ select add_check_if_not_exists('payments', 'ck_payments_amount_nonneg',
 select add_check_if_not_exists('payments', 'ck_payments_status',
   'status in (''completed'',''reversed'')');
 select add_check_if_not_exists('payments', 'ck_payments_type',
-  'type is null or type in (''partial'',''full'',''advance'',''overpayment'')');
+  'type is null or type in (''partial'',''full'',''overpayment'')');
 
 select add_check_if_not_exists('savings_accounts', 'ck_savings_balance_nonneg',
   'balance >= 0');
