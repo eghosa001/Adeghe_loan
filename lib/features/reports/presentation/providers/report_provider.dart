@@ -86,6 +86,23 @@ final reportSummaryProvider =
   );
 });
 
+/// The redesigned Reports dashboard snapshot: period summary + previous-period
+/// summary (deltas) + today's collections + overdue risk + savings + customer
+/// stats, all computed in one batched repository call.
+final reportDashboardProvider =
+    FutureProvider.family<ReportDashboardData, ReportDateRange>((ref, dates) async {
+  final repo = await ref.watch(reportRepositoryProvider.future);
+  final result = await repo.getReportDashboard(
+    dates.start,
+    dates.end,
+    loanType: dates.loanType,
+  );
+  return result.when(
+    success: (data) => data,
+    failure: (f) => throw f,
+  );
+});
+
 /// Customer Report (all customers, no date filter — aggregates are lifetime).
 final customerReportProvider = FutureProvider<List<CustomerReportRow>>((ref) async {
   final repo = await ref.watch(reportRepositoryProvider.future);

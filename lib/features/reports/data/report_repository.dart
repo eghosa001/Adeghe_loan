@@ -93,6 +93,259 @@ class ReportRepository {
     }
   }
 
+  /// The single query behind the redesigned Reports dashboard. Computes the
+  /// period summary, the previous-period summary (same length immediately
+  /// before [startDate], for deltas), today's collections, overdue risk,
+  /// savings and customer stats in one batched pass so every dashboard
+  /// section reads from ONE consistent snapshot.
+  Future<Result<ReportDashboardData>> getReportDashboard(
+    DateTime startDate,
+    DateTime endDate, {
+    String? loanType,
+  }) async {
+    try {
+      final db = await _database;
+      final startStr = AppDateUtils.formatForStorage(startDate);
+      final endStr = AppDateUtils.formatForStorage(endDate);
+
+      final daysInPeriod = endDate.difference(startDate).inDays + 1;
+      final prevEnd = startDate.subtract(const Duration(days: 1));
+      final prevStart = prevEnd.subtract(Duration(days: daysInPeriod - 1));
+
+      final today = DateTime.now();
+      final todayStr = AppDateUtils.formatForStorage(today);
+      final minus7Str = AppDateUtils.formatForStorage(
+          today.subtract(const Duration(days: 7)));
+      final minus14Str = AppDateUtils.formatForStorage(
+          today.subtract(const Duration(days: 14)));
+
+      final ltClause = loanType != null ? ' AND l.loan_type = ?' : '';
+      final ltArgs = loanType != null ? [loanType] : <String>[];
+      List<String> withLt(List<String> args) => [...args, ...ltArgs];
+
+      final summaries = await Future.wait([
+        getReportSummary(startDate, endDate, loanType: loanType),
+        getReportSummary(prevStart, prevEnd, loanType: loanType),
+      ]);
+      final summary = summaries[0].when(
+        success: (s) => s,
+        failure: (f) => throw f,
+      );
+      final previousSummary = summaries[1].when(
+        success: (s) => s,
+        failure: (f) => throw f,
+      );
+
+      // ── Scalar + list queries, all money-rule compliant ────────────────
+      final scalars = await Future.wait([
+        // 1: Today's collected (money rule) + payment count
+        db.rawQuery(
+          'SELECT COUNT(*) AS count, '
+          'COALESCE(SUM(p.amount - COALESCE(st.amount, 0.0)), 0) AS total '
+          'FROM payments p '
+          'JOIN loans l ON p.loan_id = l.id '
+          'LEFT JOIN savings_transactions st '
+          '  ON st.reference_loan_payment_id = p.id AND st.type = \'overpayment\' '
+          "WHERE p.status = 'completed' AND p.payment_date = ?$ltClause",
+          withLt([todayStr]),
+        ),
+        // 2: Top collectors today (money rule)
+        db.rawQuery(
+          'SELECT p.collector AS collector, COUNT(*) AS count, '
+          'COALESCE(SUM(p.amount - COALESCE(st.amount, 0.0)), 0) AS total '
+          'FROM payments p '
+          'JOIN loans l ON p.loan_id = l.id '
+          'LEFT JOIN savings_transactions st '
+          '  ON st.reference_loan_payment_id = p.id AND st.type = \'overpayment\' '
+          "WHERE p.status = 'completed' AND p.payment_date = ?$ltClause "
+          'GROUP BY p.collector ORDER BY total DESC LIMIT 5',
+          withLt([todayStr]),
+        ),
+        // 3: Due today — unpaid installments on ACTIVE loans, holidays excluded
+        db.rawQuery(
+          'SELECT COUNT(DISTINCT l.id) AS loans, '
+          'COUNT(DISTINCT l.customer_id) AS customers, '
+          'COALESCE(SUM(rs.amount - COALESCE(rs.paid_amount, 0)), 0) AS total '
+          'FROM repayment_schedule rs '
+          'JOIN loans l ON rs.loan_id = l.id '
+          "WHERE l.status = 'active' AND rs.status != 'paid' "
+          'AND DATE(rs.due_date) = ?$ltClause '
+          'AND $notOnEnabledHolidaySql',
+          withLt([todayStr]),
+        ),
+        // 4: Overdue totals (all active/defaulted loans)
+        db.rawQuery(
+          'SELECT COUNT(DISTINCT l.id) AS loans, '
+          'COALESCE(SUM(rs.amount - COALESCE(rs.paid_amount, 0)), 0) AS total '
+          'FROM repayment_schedule rs '
+          'JOIN loans l ON rs.loan_id = l.id '
+          "WHERE l.status IN ('active', 'defaulted') AND rs.status != 'paid' "
+          'AND DATE(rs.due_date) < ?$ltClause '
+          'AND $notOnEnabledHolidaySql',
+          withLt([todayStr]),
+        ),
+        // 5: Overdue bucket 1–7 days
+        db.rawQuery(
+          'SELECT COUNT(DISTINCT l.id) AS loans, '
+          'COALESCE(SUM(rs.amount - COALESCE(rs.paid_amount, 0)), 0) AS total '
+          'FROM repayment_schedule rs '
+          'JOIN loans l ON rs.loan_id = l.id '
+          "WHERE l.status IN ('active', 'defaulted') AND rs.status != 'paid' "
+          'AND DATE(rs.due_date) >= ? AND DATE(rs.due_date) < ?$ltClause '
+          'AND $notOnEnabledHolidaySql',
+          withLt([minus7Str, todayStr]),
+        ),
+        // 6: Overdue bucket 8–14 days
+        db.rawQuery(
+          'SELECT COUNT(DISTINCT l.id) AS loans, '
+          'COALESCE(SUM(rs.amount - COALESCE(rs.paid_amount, 0)), 0) AS total '
+          'FROM repayment_schedule rs '
+          'JOIN loans l ON rs.loan_id = l.id '
+          "WHERE l.status IN ('active', 'defaulted') AND rs.status != 'paid' "
+          'AND DATE(rs.due_date) >= ? AND DATE(rs.due_date) < ?$ltClause '
+          'AND $notOnEnabledHolidaySql',
+          withLt([minus14Str, minus7Str]),
+        ),
+        // 7: Overdue bucket 15+ days
+        db.rawQuery(
+          'SELECT COUNT(DISTINCT l.id) AS loans, '
+          'COALESCE(SUM(rs.amount - COALESCE(rs.paid_amount, 0)), 0) AS total '
+          'FROM repayment_schedule rs '
+          'JOIN loans l ON rs.loan_id = l.id '
+          "WHERE l.status IN ('active', 'defaulted') AND rs.status != 'paid' "
+          'AND DATE(rs.due_date) < ?$ltClause '
+          'AND $notOnEnabledHolidaySql',
+          withLt([minus14Str]),
+        ),
+        // 8: Top overdue accounts (grouped per loan, money rule + holidays)
+        db.rawQuery(
+          'SELECT c.full_name AS customerName, l.id AS loanId, '
+          'l.loan_type AS loanType, '
+          'COALESCE(SUM(rs.amount - COALESCE(rs.paid_amount, 0)), 0) AS total '
+          'FROM repayment_schedule rs '
+          'JOIN loans l ON rs.loan_id = l.id '
+          'JOIN customers c ON l.customer_id = c.id '
+          "WHERE l.status IN ('active', 'defaulted') AND rs.status != 'paid' "
+          'AND DATE(rs.due_date) < ?$ltClause '
+          'AND $notOnEnabledHolidaySql '
+          'GROUP BY l.id ORDER BY total DESC LIMIT 5',
+          withLt([todayStr]),
+        ),
+        // 9: Savings balance + funded accounts (non-archived customers)
+        db.rawQuery(
+          'SELECT COALESCE(SUM(sa.balance), 0) AS total, '
+          'COUNT(*) AS accounts '
+          'FROM savings_accounts sa '
+          'JOIN customers c ON sa.customer_id = c.id '
+          "WHERE c.status != 'archived'",
+        ),
+        // 10: Savings inflow in period (deposits + overpayments linked to a
+        //     completed payment — the trends savings-in rule)
+        db.rawQuery(
+          'SELECT COALESCE(SUM(st.amount), 0) AS total '
+          'FROM savings_transactions st '
+          'LEFT JOIN payments p ON st.reference_loan_payment_id = p.id '
+          "WHERE st.type IN ('deposit', 'overpayment') "
+          'AND (st.reference_loan_payment_id IS NULL OR p.status = \'completed\') '
+          'AND substr(st.created_at, 1, 10) BETWEEN ? AND ?',
+          [startStr, endStr],
+        ),
+        // 11: Savings outflow in period (withdrawals)
+        db.rawQuery(
+          'SELECT COALESCE(SUM(st.amount), 0) AS total '
+          'FROM savings_transactions st '
+          "WHERE st.type = 'withdrawal' AND substr(st.created_at, 1, 10) BETWEEN ? AND ?",
+          [startStr, endStr],
+        ),
+        // 12: Total customers (all non-archived)
+        db.rawQuery(
+          "SELECT COUNT(*) AS total FROM customers c WHERE c.status != 'archived'",
+        ),
+        // 13: New customers in period
+        db.rawQuery(
+          "SELECT COUNT(*) AS total FROM customers c "
+          "WHERE c.status != 'archived' AND DATE(c.date_registered) BETWEEN ? AND ?",
+          [startStr, endStr],
+        ),
+      ]);
+
+      final todayRow = scalars[0].first;
+      final todayCollection = TodayCollection(
+        paymentCount: _toInt(todayRow, 'count'),
+        collectedAmount: _toDouble(todayRow, 'total'),
+        dueToday: _toDouble(scalars[2].first, 'total'),
+        dueTodayLoans: _toInt(scalars[2].first, 'loans'),
+        dueTodayCustomers: _toInt(scalars[2].first, 'customers'),
+        topCollectors: (scalars[1] as List<Map<String, dynamic>>)
+            .map(
+              (row) => CollectorTotal(
+                collector: row['collector'] as String? ?? '',
+                amount: _toDouble(row, 'total'),
+                count: _toInt(row, 'count'),
+              ),
+            )
+            .toList(),
+      );
+
+      final overdueBuckets = [
+        OverdueBucket(
+          label: '1-7 days',
+          loanCount: _toInt(scalars[4].first, 'loans'),
+          amount: _toDouble(scalars[4].first, 'total'),
+        ),
+        OverdueBucket(
+          label: '8-14 days',
+          loanCount: _toInt(scalars[5].first, 'loans'),
+          amount: _toDouble(scalars[5].first, 'total'),
+        ),
+        OverdueBucket(
+          label: '15+ days',
+          loanCount: _toInt(scalars[6].first, 'loans'),
+          amount: _toDouble(scalars[6].first, 'total'),
+        ),
+      ];
+      final overdueRisk = OverdueRisk(
+        totalAmount: _toDouble(scalars[3].first, 'total'),
+        overdueLoans: _toInt(scalars[3].first, 'loans'),
+        buckets: overdueBuckets,
+        topAccounts: (scalars[7] as List<Map<String, dynamic>>)
+            .map(
+              (row) => OverdueAccount(
+                customerName: row['customerName'] as String? ?? '',
+                loanId: row['loanId'] as String? ?? '',
+                loanType: row['loanType'] as String? ?? '',
+                amount: _toDouble(row, 'total'),
+              ),
+            )
+            .toList(),
+      );
+
+      final savings = SavingsSummary(
+        totalBalance: _toDouble(scalars[8].first, 'total'),
+        inflow: _toDouble(scalars[9].first, 'total'),
+        outflow: _toDouble(scalars[10].first, 'total'),
+      );
+
+      final customers = CustomerStats(
+        totalCustomers: _toInt(scalars[11].first, 'total'),
+        newInPeriod: _toInt(scalars[12].first, 'total'),
+        activeLoanCustomers: summary.totalCustomers,
+      );
+
+      return Result.success(ReportDashboardData(
+        summary: summary,
+        previousSummary: previousSummary,
+        today: todayCollection,
+        overdue: overdueRisk,
+        savings: savings,
+        customers: customers,
+      ));
+    } on DatabaseException catch (e) {
+      return Result.failure(
+          DatabaseFailure('Failed to build report dashboard.', cause: e));
+    }
+  }
+
   Future<LoanTypeReportSummary> _getLoanTypeSummary(
     Database db,
     String? loanType,
