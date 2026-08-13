@@ -2,13 +2,11 @@
 
 ## Project overview
 
-Offline-first Flutter loan/microfinance management app targeting the Nigerian market. Encrypted local SQLite database, PIN + biometric auth, no backend server.
+Offline-first Flutter loan/microfinance management app targeting the Nigerian market. Encrypted local SQLite database, PIN + biometric auth, optional Supabase cloud sync.
 
 **Package name:** `loantrack` (repository root is `loan_application`)
-
-`App name:` **Adeghe Professional Services**
-
-`App creator:` **AIGHEWI EGHOSA**
+**App name:** Adeghe Professional Services
+**App creator:** AIGHEWI EGHOSA
 
 ## Commands
 
@@ -18,9 +16,10 @@ flutter test                       # Run all tests
 flutter test test/widget_test.dart # Run a single test file
 flutter analyze                    # Static analysis
 flutter build apk                  # Android release build
+flutter build windows --release    # Windows desktop build
 ```
 
-No Makefile, scripts, or CI workflows exist. No custom lint rules beyond default `flutter_lints`. No codegen (build_runner/freezed/json_serializable are NOT in `pubspec.yaml` — see below).
+No Makefile, scripts, or CI workflows exist. No custom lint rules beyond default `flutter_lints`. No codegen — all serialization is manual `toMap()`/`fromMap()`.
 
 ## Architecture
 
@@ -31,49 +30,96 @@ lib/
   main.dart                        # Entry point: ProviderScope -> MyApp
   core/
     constant/app_constants.dart
-    database/database_service.dart  # Encrypted SQLite (sqflite_sqlcipher), 9 tables, migrations v1-v21
+    database/database_service.dart  # Encrypted SQLite (sqflite_sqlcipher)
     di/providers.dart               # Central Riverpod providers
-    router/app_router.dart          # GoRouter config; some screens defined inline
+    router/app_router.dart          # GoRouter config
     security/                       # Biometric, file encryption, secure storage
     services/                       # Backup, document, export services
     theme/app_theme.dart
     utils/                          # Currency, date, inactivity wrapper
   features/
-    auth/       # PIN-based auth + biometrics; auth_provider.dart is the StateNotifier
-    business/   # Business profile, financial settings, backup
-    customers/  # CRUD with search
-    documents/  # Encrypted customer documents (AES-GCM)
-    holidays/   # Holiday management for schedule generation
-    loans/      # Loan creation, schedule generation, calculator
-    payments/   # Payment recording
+    auth/           # PIN-based auth + biometrics
+    business/       # Business profile, financial settings, backup
+    customers/      # CRUD with search
+    documents/      # Encrypted customer documents (AES-GCM)
+    holidays/       # Holiday management for schedule generation
+    loans/          # Loan creation, schedule generation, calculator
+    payments/       # Payment recording
+    savings/        # Customer savings
+    reports/        # Dashboard + sub-reports
+    collection/     # Daily/weekly collection screens
+    groups/         # Customer groups
+    settings/       # App settings, cloud sync
+    search/         # Global search
+    dashboard/      # Home screen
+    notifications/  # Notification bell + list
+    audit_log/      # Audit trail
 ```
-
-**Routing:** GoRouter in `lib/core/router/app_router.dart`. Initial route `/splash`. Uses `state.params['id']` for path params, `state.extra` for objects.
 
 **State management:** Riverpod v2 — `Provider`, `FutureProvider`, `StateProvider`, `StateNotifierProvider`. Screens use `ConsumerWidget`/`ConsumerStatefulWidget`.
 
-**Database:** `sqflite_sqlcipher` — encrypted SQLite. DB file: `loantrack.db`. Key stored in FlutterSecureStorage. Schema version 24 with manual ALTER TABLE + table-recreate migrations in `migrations.dart` (`database_service.dart` holds the fresh-install CREATE SQL and the version constant — keep both in sync). **Note:** `PRAGMA foreign_keys = ON` is enforced.
+**Database:** `sqflite_sqlcipher` — encrypted SQLite. DB file: `loantrack.db`. Key stored in FlutterSecureStorage. Schema version 24 with manual ALTER TABLE + table-recreate migrations in `migrations.dart` (`database_service.dart` holds the fresh-install CREATE SQL and the version constant — keep both in sync). `PRAGMA foreign_keys = ON` is enforced.
 
-**Auth:** Local-only. PIN (salted PBKDF2-HMAC-SHA256, 120k iterations, stored as `pbkdf2-sha256:<iterations>:<base64>`) + optional biometrics. 5-minute auto-lock via `InactivityWrapper` (pointer events + hardware keyboard). `databaseServiceProvider` polls `authProvider` until unlocked before initializing DB.
+**Cloud sync (Supabase):** Optional offline-first replication. Local SQLite is source of truth. Max two owners (email allow-list + RLS). `supabase_schema.sql` must mirror local schema. Documents are end-to-end encrypted before upload.
 
-**Auth hardening (2026-08-04, full-auth audit):**
-- **Escalating PIN lockout (M-1):** `PinLockoutService` doubles the lockout per cycle (5m → 10m → 20m → 40m → PERMANENT) and never resets the cumulative cycle counter on a clock change, so forwarding the device clock cannot restore unlimited guessing. After `maxLockoutCycles` (5) lockouts the only way back in is the recovery password via Forgot PIN (`pin_login_screen.dart` / `forgot_pin_screen.dart` handle the permanent-lock UI).
-- **Recovery password (L-2/L-3):** separate per-purpose salt (`keyRecoverySalt`; `keyPinSalt` fallback keeps old hashes verifiable) + PBKDF2 at 600k iterations. Minimum 16 chars with letters AND digits (`SecureStorageService.recoveryPasswordError`). The PIN keeps 120k iterations on purpose — a 4-digit secret is bounded by the lockout, and 600k would add seconds of unlock latency on low-end phones.
-- **Screen-snapshot protection (M-2):** Android `MainActivity` sets `FLAG_SECURE` (no screenshots/recents previews of financial data). Biometric grants do NOT persist across backgrounding (`biometric_service.dart`).
+## Critical business rules (DO NOT CHANGE without owner decision)
 
-**Document encryption:** `FileEncryptionService` — `[LTD1 header][12-byte IV][AES-GCM ciphertext]`. Max 20 MB. Supported: PDF, PNG, JPG. **Upload gate (2026-08-04, findings F1–F3):** acceptance is by **content, not extension** — `detectDocumentMimeType` (`document_repository.dart`, top-level, unit-tested in `test/documents/document_magic_byte_test.dart`) requires the PDF/PNG/JPEG magic bytes at upload (`_validateSource`), and `decrypt()` re-verifies the recovered plaintext and returns the MIME type detected from the *content* (never the stored metadata), so a renamed `malware.exe` cannot reach a parser and a row whose metadata disagrees with its bytes is not steered into the wrong renderer. Image previews decode at, and never wider than, `AppConstants.maxDocumentImageDimension` (2048) via `cacheWidth`/`cacheHeight` so crafted huge-dimension images cannot exhaust memory. The dedicated lore: stored `mime_type` is derived from content, not the filename; `document_upload_screen.dart` and `document_list_screen.dart` both use `FilePicker` (allowed: pdf/png/jpg/jpeg) for the file path and `ImagePicker` only for the camera.
+### Money rule (NON-NEGOTIABLE)
 
-**Error handling:** Sealed `Result<T>` type (`Success<T>` / `ResultError<T>`) with 11 `Failure` subtypes. No exceptions across repository boundaries.
+Every aggregate over payments MUST:
+1. Filter `p.status = 'completed'` (never sum reversed payments), AND
+2. Subtract savings overpayments: `(p.amount - COALESCE(st.amount, 0.0))` via
+   `LEFT JOIN savings_transactions st ON st.reference_loan_payment_id = p.id AND st.type = 'overpayment'`.
 
-**Entities:** Hand-written `toMap()`/`fromMap()` methods. No code-generated serialization despite dev dependencies.
+Reference pattern: `lib/features/payments/data/payment_repository.dart` `_recalculateScheduleFromPayments` and `lib/features/reports/data/report_repository.dart` query #6.
 
-## Code generation
+**Savings are NEVER included in "Total Collected" / "Total Paid" / any collected-total.** The `- COALESCE(st.amount, 0.0)` subtraction intentionally excludes the savings overpayment surplus. This was the owner's explicit decision; reverting it is a regression.
 
-No codegen. `build_runner`, `freezed`, and `json_serializable` were removed from `pubspec.yaml` — do not re-add them. No `.g.dart` or `.freezed.dart` files exist. No `build.yaml`. All serialization is manual (`toMap()`/`fromMap()`).
+### Overpayment → savings mechanism
+
+Excess over the current installment is ALWAYS credited to the customer's savings account; it is never applied past the installment to the loan.
+
+- Split rule (`computePaymentSplit`, `lib/features/payments/data/payment_logic.dart`):
+  - `cap = (installmentDue != null && installmentDue > 0) ? installmentDue : outstandingBalance`
+  - `loanPaid = min(paymentAmount, cap)`
+  - `surplus = paymentAmount - loanPaid`
+  - `newBalance = max(0, outstandingBalance - loanPaid)`
+- The surplus is stored as a `savings_transactions` row with `type = 'overpayment'`, POSITIVE `amount`, and `reference_loan_payment_id = <payment id>`.
+- `repayment_schedule.paid_amount` must ONLY ever reflect loan-applied amounts.
+
+### Loan types
+
+- **Daily loans:** 1 installment per day, 6 days/week (Mon–Sat), Sunday excluded.
+- **Weekly loans:** 1 installment per week, fixed weekday.
+- Holidays skip both daily and weekly installments.
+- A customer holding both a daily and a weekly loan counts ONCE in any "customers" figure (`COUNT(DISTINCT customer_id)`).
+
+### Customer counts
+
+Customer counts are distinct across loan types. Any "customers" figure must be `COUNT(DISTINCT customer_id)`.
+
+### Collections
+
+- Collection totals: due = unpaid portion of due installments; paid excludes reversed/overpayments.
+- Payment application order is oldest-first.
+- Weekly collection display uses money-date attribution (payment arrival date), not installment-paid state.
+
+## Important invariants (AI must not break these)
+
+- **No codegen:** Do not add `build_runner`, `freezed`, or `json_serializable`. Keep manual `toMap()`/`fromMap()`.
+- **SQL names:** never interpolate table/column names not in the schema (`database_service.dart` + `migrations.dart`). `customers` uses `date_registered`, NOT `created_at`. `test/database/schema_crosscheck_test.dart` enforces this.
+- **Dynamic calls:** do not use `(x as dynamic).member`. Entity fields must be real fields.
+- **Destructive I/O:** never delete the live DB before verifying a backup (temp-write → verify → atomic swap). Backups must include `secure_documents/`.
+- **Settings:** every setting persisted must have a real consumer (session-timeout → `InactivityWrapper`; auto-backup → `BackupService.maybeAutoBackup`; currency → `currencySymbolProvider`).
+- **Dates:** `payment_date`/`due_date` are stored `yyyy-MM-dd` local strings; `savings_transactions.created_at` is ISO-8601 (`T`). Never use `date('now')` (UTC) — pass the Dart local date.
+- **Schedule money:** use `CurrencyUtils.splitEvenly` for installment rounding so Σ installments == `total_repayment`; a loan must be able to reach `completed`.
+- **Numeric safety:** all financial inputs must be finite and non-negative. Use `CurrencyUtils.tryParseAmount` / `tryParsePositiveAmount`. Durations are capped at `AppConstants.maxLoanDuration` (365).
+- **Document encryption:** acceptance is by content, not extension — magic-byte check at upload. Decryption re-verifies content MIME from bytes, never stored metadata.
+- **PIN/recovery:** PIN uses salted PBKDF2-HMAC-SHA256 (120k iters); recovery password uses 600k iters, min 16 chars with letters AND digits.
+- **Biometric grants do NOT persist across backgrounding.**
+- **Notifications:** badge only on Dashboard AppBar; reachable from every screen via AppDrawer. Never a floating button.
 
 ## Testing
-
-Tests in `test/`. Uses `flutter_test`. `mocktail` is used only in `test/cloud/cloud_auth_service_test.dart`.
 
 ```bash
 flutter test                                     # Full suite
@@ -81,250 +127,14 @@ flutter test test/database/schema_crosscheck_test.dart   # SQL-name guard
 flutter test test/auth/pin_lockout_service_test.dart     # PIN lockout
 flutter test test/core/router_auth_guard_test.dart       # Auth redirect
 flutter test test/backup/backup_service_test.dart        # Safe restore
+flutter test test/payments/repayment_integration_audit_test.dart  # Repayment end-to-end
 ```
 
-## Money rule (NON-NEGOTIABLE)
+Keep all tests — they protect financial calculations. Tests are in `test/` and use `flutter_test`.
 
-Every aggregate over payments MUST:
-1. Filter `p.status = 'completed'` (never sum reversed payments), AND
-2. Subtract savings overpayments: `(p.amount - COALESCE(st.amount, 0.0))` via
-   `LEFT JOIN savings_transactions st ON st.reference_loan_payment_id = p.id AND st.type = 'overpayment'`.
+## File conventions
 
-Reference pattern: `lib/features/payments/data/payment_repository.dart` `_recalculateScheduleFromPayments` and `lib/features/reports/data/report_repository.dart` query #6. A new `SUM(p.amount` without this pattern is a bug.
-
-**Owner decision (DO NOT REVERT):** Savings are NEVER included in "Total Collected" / "Total Paid" / any collected-total. The `- COALESCE(st.amount, 0.0)` subtraction above intentionally excludes the savings overpayment surplus so collected-totals reflect only money applied to loans (recorded in `savings_transactions`). This was the owner's explicit decision (2026-08-01); treating the subtraction as a bug and re-adding savings to collected totals is a regression.
-
-**Overpayment → savings mechanism (lock-in, 2026-08-01):** Excess over the current installment is ALWAYS credited to the customer's savings account; it is never applied past the installment to the loan. This only changes if a proven bug exists.
-
-- Split rule (`computePaymentSplit`, `lib/features/payments/data/payment_logic.dart`): `cap = (installmentDue != null && installmentDue > 0) ? installmentDue : outstandingBalance`; `loanPaid = min(paymentAmount, cap)`; `surplus = paymentAmount - loanPaid`; `newBalance = max(0, outstandingBalance - loanPaid)`.
-- Callers pass the installment context into `PaymentRepository.createPayment({..., double? installmentDue})`: `collection_screen.dart` passes `installmentAmount - amountPaid`; `future_schedule_screen.dart` passes the row's `amountDue`; `record_payment_screen.dart` forwards the value routed from `loan_details_screen.dart`. Omitted/zero → the payment caps at the outstanding balance (settlements / quick-pay apply fully to the loan).
-- Storage order: the `payments` row is inserted BEFORE the savings transaction. The surplus is stored as a `savings_transactions` row with `type = 'overpayment'`, a POSITIVE `amount`, and `reference_loan_payment_id = <payment id>`. The loan-applied portion is NOT persisted; it is derived as `payment.amount − surplus`.
-- Reversal (`reversePayment`) reads the linked `overpayment` row back, restores `max(0, amount − surplus)` to the loan, and debits savings by `min(surplus, balance)` with a `type = 'withdrawal'` reversal row. A `clearLoanWithSavings` payment's linked `type = 'withdrawal'` row is refunded as a `type = 'deposit'` row so the savings balance is conserved across the full round trip.
-- `repayment_schedule.paid_amount` must ONLY ever reflect loan-applied amounts (`_recalculateScheduleFromPayments` recomputes it from the money rule).
-
-## Product decisions (lock-in, 2026-08-01)
-
-- **Notification bell:** displayed only on the Dashboard AppBar (badge when count > 0). Notifications stay reachable from every screen via the AppDrawer. It must never render as a floating button that can overlap pushed screens (e.g. "Add Customer").
-- **Reports screen:** a dashboard-style screen (`ReportScreen`) with a Daily/Weekly `SegmentedButton` toggle, summary cards (Total Collected, Net Profit, Total Customers, Outstanding, Expected, Efficiency, Interest, Fees, Savings, Daily/Weekly Disbursed/Collected/Overdue), and a trends table (Period/Collected/Disbursed/Savings In/Savings Out/Customers/Loans). The dashboard also has an export button. Seven sub-report screens are reachable from the AppDrawer: Daily Loan Report, Weekly Loan Report, Overdue Report, Customer Report, Savings Report, Profit Report, Collections Report. The report period is selectable via quick presets (Today, Yesterday, This Week, Last Week, This Month, Last Month, Last 30 Days) or a custom date range (`reportPeriodPresetProvider` drives the chips; `reportStartDateProvider`/`reportEndDateProvider` feed `reportSummaryProvider(dateRange)`); it defaults to this month. The Analytics tab is independent (fixed last 6 months) and ignores the selected period.
-- **Customer counts are distinct:** a customer holding both a daily and a weekly loan counts ONCE, not per loan. Any "customers" figure must be `COUNT(DISTINCT customer_id)` (or distinct in Dart) across loan types.
-- **Savings report:** totals are across ALL customers (net savings held). Per-customer statements live in the savings statement screen / Excel export.
-- **Customer list keeps groups:** the customer list screen keeps the group filter chips (All / each group) PLUS a "No group" chip (via `ungroupedGroupFilter` in `customer_repository.dart`, matching `COALESCE(c.group_id, '') = ''`), and the "Sort by Group" option (`CustomerSortOption.group`). Groups are never removed from the customer list — the "no group" view exists so ungrouped customers can be found deliberately.
-
-## Recurrence-prevention rules
-
-- **SQL names:** never interpolate table/column names that are not in the schema (`database_service.dart` + `migrations.dart`). The `customers` table uses `date_registered`, NOT `created_at`. `test/database/schema_crosscheck_test.dart` parses every `rawQuery`/`query`/`execute` SQL string in `lib/` plus `insert('table', …)` first args and fails if a table, `alias.column`, or bare column is missing from the schema (skips DDL).
-- **Dynamic calls:** do not use `(x as dynamic).member` — enable `avoid_dynamic_calls` in analysis. `Loan.customerName` must be a real field.
-- **Destructive I/O:** never delete the live DB before verifying a backup (temp-write → verify → atomic swap). Backups must include `secure_documents/`.
-- **Settings:** every setting persisted must have a real consumer (session-timeout → `InactivityWrapper`; auto-backup → `BackupService.maybeAutoBackup`; currency → `currencySymbolProvider`).
-- **Dates:** `payment_date`/`due_date` are stored `yyyy-MM-dd` local strings; `savings_transactions.created_at` is ISO-8601 (`T`). Never compare the ISO timestamp with a `'… 23:59:59'` (space) bound — use date-only bounds. Never use `date('now')` (UTC) against local dates — pass the Dart local date.
-- **Schedule money:** use `CurrencyUtils.splitEvenly` (currency_utils.dart) for installment rounding so Σ installments == `total_repayment`; a loan must be able to reach `completed`.
-
-## Gotchas and known issues (live bug log — from AUDIT_PLAN.md audit 2026-07-31)
-
-Verified fixed (Phase 0, 2026-07-31 — all items from the audit have been addressed):
-- **C1** loan-list crash (`Loan.customerName` field + `loan_list_screen.dart`; tests `test/loans/loan_entity_test.dart`).
-- **C2** analytics `customers.created_at` → `DATE(date_registered)` (report_repository; mutation-tested in schema crosscheck).
-- **C3** auto-lock (`main.dart` lifecycle observer + router auth redirect; tests `test/core/router_auth_guard_test.dart`).
-- **C4** restore deletes live DB before validating backup (safe swap in `backup_service.dart`; tests `test/backup/backup_service_test.dart`).
-- **C5** PIN lockout (`pin_lockout_service.dart` + abstract `SecureKeyValueStore`; tests `test/auth/pin_lockout_service_test.dart`).
-- **H1** multi-installment/pay-in-full payments now cap at outstanding balance, only the excess goes to savings (`payment_logic.dart` `computePaymentSplit`; tests `test/payments/payment_logic_test.dart`).
-- **H2/H3** schedule sum == `total_repayment` via `CurrencyUtils.splitEvenly`; edits regenerate schedule + honor `customCollectionAmount` (`loan_providers.dart`).
-- **H4** loan list no longer capped (`loan_repository.dart` `getAllLoans(limit:)` default null).
-- **H5** collection range totals: due = unpaid portion of due installments; paid excludes reversed/overpayments (`collection_repository.dart`).
-- **H6/H7/H8** client report totalPaid follows the money rule; end-of-month savings rows use date-only bounds; cancelled loans excluded from disbursed/interest/fees/expected (`report_repository.dart`).
-- **H9/H14** session-timeout + auto-backup settings now have real consumers (`main.dart` `InactivityWrapper` timeout; `BackupService.maybeAutoBackup()` on unlock).
-- **H10** PIN/recovery hashing is salted PBKDF2-HMAC-SHA256 (120k iters); `keyPinSalt` used (`secure_storage_service.dart`).
-- **H11** `/documents/preview` guards non-`CustomerDocument` `state.extra` (`app_router.dart`).
-- **H12/H13/M15/M16** forgot-PIN/change-PIN use `PinLockoutService`; recovery password ≥8 chars; PIN-setup cancels cleanly; biometric enable requires a successful auth (`security_settings_screen.dart`, `pin_setup_screen.dart`).
-- **M1** reversal restores the exact pre-payment loan status via stored `payments.prior_loan_status` (defaulted loans no longer flip to active).
-- **M2/M5** report loan-type filter flows UI → provider → repository; overdue = unpaid installments with `DATE(due_date) < today` (count and list agree).
-- **M3/M4** savings aggregates exclude reversed payments and include `'overpayment'` type.
-- **M6/M8** dashboard uses Dart-local dates (no `date('now')`) and excludes reversed payments.
-- **M7** legacy `loan_type='monthly'` rows migrated to `'weekly'` (v15 migration).
-- **M9** report total customers is a distinct count, not `daily+weekly` (`report_screen.dart` uses `summary.totalCustomers`).
-- **M10** currency is read from settings (`currencySymbolProvider`); search/notifications/collection/payment/savings UIs no longer hard-code `₦`.
-- **M11** `decryptFile` throws typed `FileEncryptionException` for read/corrupt-file cases (`file_encryption_service.dart`).
-- **M12** backups are ZIP containers that include `secure_documents/`; legacy raw-DB restore still accepted (`backup_service.dart`).
-- **M13** notification queries filter `l.status = 'active'`.
-- **M17** `InactivityWrapper` covers pointer down/move/signal + hardware keyboard.
-- **M18/M19** loan form state resets after save; `saveLoan`/`updateLoan` surface `Result.failure`.
-- **M20/M21** "Share statement" produces a PDF via `StatementService.buildCustomerStatementPdf` + `SharePlus`; statements include non-active loans (`loan_statement_screen.dart`).
-- **M22** customer delete is a soft archive (`customers.status = 'archived'`); loans/payments/documents/history are preserved (`customer_repository.dart`).
-- **M23 (v21, 2026-08-07)** archived customers could not re-register (DB column UNIQUE on `phone`/`nin`/`bvn` blocked it). Fixed via table-recreate migration v21: dropped column-level UNIQUE, created partial unique indexes `idx_customers_phone_unique/nin_unique/bvn_unique` with `WHERE status != 'archived'`. Fresh install DDL + indexes updated; `supabase_schema.sql` mirrored (phone partial index; nin/bvn dropped from cloud). Regression test: `test/database/migration_v21_customers_unique_test.dart`.
-- **L1** export filenames get a unique timestamp suffix — same-day exports no longer overwrite (`export_manager.dart`, `excel_export_service.dart`).
-- **L2** group-delete undo restores the recreated group's membership (`group_repository.dart` returns member ids; `group_management_screen.dart` reassigns them).
-- **L3/L4** holiday date parse falls back to epoch (not `DateTime.now()`); duplicate dates (same day + recurring flag) are rejected; holiday changes regenerate schedules for active loans without payments (`holiday_repository.dart`, `loan_repository.dart` `regenSchedulesForActiveLoans`).
-- **L5** `Payment.fromMap` tolerates a missing `payment_date`.
-- **L6** dead `loans.repayment_day` column dropped via table-recreate (v16 migration); `RepaymentStatus.missed`/`LoanStatus.pending` enum members retained (still used by UI color switches).
-
-Accepted/still-open (documented, not regressions):
-- **Holiday schedule regen** regenerates all active loans. Payment-free loans get a full regeneration; loans with payments keep every non-pending installment exactly as-is and regenerate only the pending tail (continuing due dates from the last kept installment via `ScheduleGenerator.generateContinuationDueDates`, skipping holidays/weekends); fully-paid loans are skipped. `_recalculateScheduleFromPayments` still orders by `due_date`, so paid-installment linkage stays intact.
-
-Phase 2 (second full-app debug pass, 2026-08-01):
-- **C1(2)** FK enforcement moved out of migrations: sqflite runs `onUpgrade` inside a transaction where `PRAGMA foreign_keys` is a no-op, so `_onConfigure` sets `foreign_keys = OFF` and new `_onOpen` sets it `ON`. Without this, the v8/v16 `DROP TABLE loans` table-recreates would cascade into payments/repayment_schedule/documents during upgrade (`database_service.dart`).
-- **H1(2)** loan-cleared-with-savings: `clearLoanWithSavings` stamps `prior_loan_status = 'active'` on the payment and inserts the savings withdrawal `AFTER` the payment row with `reference_loan_payment_id` + `type = 'withdrawal'` (was: null status, unlinked, inserted before). `reversePayment` now refunds the linked withdrawal back into the savings account balance and records a `type = 'deposit'` transaction tied to the payment (`payment_repository.dart`).
-- **Collection args-order** `getCollectionsByDateRange` had filter placeholders before its 8 date `?` slots — SQLite binds positionally, so filters landed in date params. Args reordered to `[start, end] × 4` then `...filters` (`collection_repository.dart`).
-- **Screens route** dead `/customers/:id/payments` removed; real payment history moved to `/loans/:id/payments` (customerId passed via `state.extra` Map); entry button added to `loan_details_screen.dart`.
-- **F1(2) export currency** PDF/Excel exports now thread the configured symbol (`currencySymbolProvider`) instead of the hard-coded `₦`: `ExportManager` collection/report/overdue builders take `currencySymbol` (default `CurrencyUtils.defaultSymbol`); callers `collection_screen.dart`, `report_screen.dart`, `overdue_report_screen.dart`, `collection_statement_screen.dart` pass it. Note `_buildReportPdfBytes` uses a local `fmt` closure (lint: no underscore-prefixed locals).
-- **F2(2)** dead `companyName` param removed from `ExportManager.shareCollectionExcel`.
-- **F3(2)** dead `ExcelExportService.exportFinancialSummaryToXlsx` (+ its `_fmt` and now-unused imports) removed — it was never called.
-- **M14** (fixed 2026-08-05) DB double-open + backup closes DB under active providers. `DatabaseService.database` now memoizes the in-flight open future (`_openFuture`), so concurrent `await database` callers (many providers at unlock) always share ONE connection and a failed open never poisons the memo (`_open()` retries). New `DatabaseService.withExclusiveAccess<T>` runs a close → action → reopen cycle behind a gate: any concurrent `.database` caller waits on the gate instead of opening the live file mid-swap, and the reopen is memoized before waiters proceed. `BackupService.createBackup`/`restoreBackup` (incl. the swap + rollback) run inside `withExclusiveAccess` instead of calling `close()`/reopen directly; the restore rollback happens inside the action so the old file is back in place before the gate reopens. Tests: `test/database/database_service_exclusive_test.dart` (single shared open under concurrency, gate blocks concurrent access during an exclusive block, close invalidates + reopens, failed open retries). Uses `DatabaseService.withOpenOverride` (`@visibleForTesting` open-injection seam) so the mechanics are exercised without a real SQLCipher open.
-
-Numeric-input hardening (2026-08-04, CRITICAL/HIGH findings N1–N5):
-- **N1 (CRITICAL)** loan form crash via `1e309`: `double.tryParse` returns `Infinity` (and `'NaN'` parses to NaN), and `CurrencyUtils.roundToCents(Infinity)` threw `Unsupported operation: Infinity or NaN` from `onChanged`. Every loan-form/financial-defaults field now parses via `CurrencyUtils.tryParseAmount`/`tryParsePositiveAmount` (finite AND non-negative), `roundToCents`/`splitEvenly` return safe values for non-finite input (defence-in-depth), and `LoanCalculator.calculate` can no longer crash on a non-finite principal.
-- **N2 (CRITICAL)** loan-save OOM via huge duration: `int.tryParse` was unbounded, so a 10-digit duration made `CurrencyUtils.splitEvenly` (`List.generate(parts, …)`) and `ScheduleGenerator` allocate billions of rows. Durations are now capped at `AppConstants.maxLoanDuration` (365) at the input site AND in `_buildLoanFromForm` (clear error message).
-- **N3 (HIGH)** payment amount accepted NaN/Infinity: `amount <= 0` guards in `record_payment_screen.dart`/`collection_screen.dart`/`future_schedule_screen.dart` are bypassed by NaN, `computePaymentSplit` only had `assert`s (stripped in release), and `payment_repository.createPayment` inserted the raw amount — NaN → SQLite NULL → `Payment.fromMap (map['amount'] as num)` crash on every payment screen. Now: screen guards check `isFinite`, `computePaymentSplit` throws `ArgumentError` for non-finite/non-positive input, and `createPayment` validates up-front (`payment_repository.dart`).
-- **N4 (HIGH)** financial defaults accepted Infinity/negative: `financial_settings_tab.dart` only checked `.isNaN`, so `1e309` persisted as the string `'Infinity'` and `business_repository.getFinancialSettings` (`double.tryParse('Infinity')`) poisoned every new loan. The tab now rejects non-finite/negative values and caps duration; the repository read-back sanitizes legacy `'Infinity'` rows to 0 (and clamps the duration default to `maxLoanDuration`).
-- **N5 (HIGH)** savings/collection amounts: `savings_section.dart` dialog validator accepted NaN (`val <= 0` is false for NaN) → `recordTransaction` wrote NaN → `roundToCents(NaN)` crash. Validator now checks `isFinite`, the amount read uses `tryParsePositiveAmount`, and `SavingsRepository.recordTransaction` rejects non-finite amounts.
-- **Tests:** `test/payments/payment_logic_test.dart` (invalid-input group), `test/core/currency_utils_numeric_guard_test.dart`, `test/loans/loan_calculator_guard_test.dart`. Full suite 121/121 green; `flutter analyze` clean.
-
-Input-hygiene hardening (2026-08-04, second numeric/input pass, findings #6–#10):
-- **#6 (cloud pull)** `isSaneCloudRow` (`cloud_sync_service.dart`) now rejects numeric columns that are non-finite (`is num && !isFinite`) OR negative. Infinity even passes the Postgres `>= 0` CHECK (CHECK rejects NaN but not +Infinity), yet a pulled `Infinity` would be stored as NULL / corrupt local aggregates — so the client guard is mandatory, not defence-in-depth. `cloudNumericColumns` stays in sync with the server CHECKs. Tests: `test/cloud/cloud_sync_guard_test.dart` (NaN/±Infinity/negative cases).
-- **#7 (input hygiene)** new `lib/core/utils/input_formatters.dart`: `NoControlCharactersFormatter` (const, strips `\x00-\x08 \x0B \x0C \x0E-\x1F \x7F`, preserves tab/LF/CR for multiline fields) + `textFormatters(maxLength:)` (control-strip then length-cap). New `AppConstants` text caps: `maxNameLength=100`, `maxPhoneLength=20`, `maxEmailLength=120`, `maxAddressLength=200`, `maxNotesLength=2000`, `maxGroupNameLength=80`, `maxGroupDescriptionLength=300`, `maxReferenceLength=50`, `maxIdentifierLength=11`. Applied to customer form, loan notes, payment reference/notes, group dialog, holiday dialog, business settings + business details profile + financial-settings penalty-rules fields.
-- **#8 (customer form)** NIN/BVN validators: `_validateNinBvn` requires exactly 11 digits, fields use `FilteringTextInputFormatter.digitsOnly` + `maxIdentifierLength` cap; phone `_validatePhone` (`^\+?[0-9]{7,15}$`); email `_validateEmail`. No free-text field in a data-entry form may accept unbounded/control-character input (`customer_form_screen.dart`).
-- **#9 (repo boundary)** NaN/Infinity must never reach `num` SQLite columns (NaN → SQLite NULL → entity `(as num)` crash): `LoanRepository._validateLoanFinances` (non-finite/negative loan fields, `totalRepayment`/`installment` > 0, each schedule amount/paidAmount) gates `saveLoanAndSchedule`/`updateLoanAndSchedule` with a `ValidationFailure`; `PaymentRepository.clearLoanWithSavings` guards `outstanding.isFinite` and `savingsBalance.isFinite >= 0` before writing.
-- **#10 (session timeout bounds)** `sessionTimeoutMinutesProvider` (business_providers.dart) and the `settings_screen.dart` read-back clamp to `[minSessionTimeoutMinutes=1, maxSessionTimeoutMinutes=120]` with `.toInt()` (int.clamp returns num — a non-int would break DropdownButton's `value`-in-`items` assert); the 120-minute item was added to the dropdown. A corrupt/negative persisted value can no longer throw or crash the settings screen.
-- **Tests:** `test/core/input_formatters_test.dart` (control-strip + cap), `test/cloud/cloud_sync_guard_test.dart` (#6 cases), plus the earlier first-pass files. Full suite 128/128 green; `flutter analyze` clean.
-
-Full audit details + fix plan: `AUDIT_PLAN.md`.
-
-Business-logic security hardening (2026-08-04, findings F1–F5 of the pre-release audit):
-- **F1 (repay-closed-loans / savings inflation):** `PaymentRepository.createPayment` now rejects payments on `completed`/`cancelled` loans at the repository boundary (`loan['status']` check), not just in the UI. A deep-link or direct call can no longer record a payment on a closed loan, which would otherwise credit the entire amount to savings with no loan offset.
-- **F2 (cancel-with-payments reconciliation):** `LoanRepository.cancelLoan` now refuses to cancel a loan that has any `status = 'completed'` payments (returns a `ValidationFailure` telling the operator to reverse payments first). Previously it zeroed `outstanding_balance` while the collected payments still counted toward "Total Collected" and the loan dropped out of "Disbursed", so dashboard totals stopped reconciling. Cancellation of a payment-free loan is unchanged.
-- **F3 (duplicate / same-payment-twice):** `payments.client_request_id TEXT` (v18 migration, `migrations.dart`; fresh-CREATE in `database_service.dart`; mirrored in `supabase_schema.sql`) is a client-supplied idempotency key. `createPayment` checks it inside its transaction and returns the already-recorded payment if it exists, so a retried/double submission of the same logical payment creates exactly one row. Callers supply a stable key: `record_payment_screen.dart` generates one per screen session (reused across submit/retry); collection + future-schedule quick-pay generate one per action. No DB UNIQUE index is used — the schema crosscheck parser only recognises `CREATE INDEX`, and the transactional check plus sqflite's serialized single-connection transactions provide the guarantee.
-- **F5 (concurrent repayment TOCTOU):** `createPayment` applies the loan balance with a compare-and-swap (`UPDATE loans SET outstanding_balance = ?, status = ? WHERE id = ? AND outstanding_balance = ?`); if the stored balance moved since the read (a concurrent/duplicate application), the update affects 0 rows and the payment is rejected with a retry message instead of double-applying against a stale balance.
-- **Tests:** full suite 128/128 green; `flutter analyze` clean.
-
-## Cloud sync (Supabase)
-
-Optional offline-first replication (2026-08-01). The encrypted local SQLite DB stays the source of truth; Supabase mirrors it when one of the (max two) owners signs in (email/password). App unlock remains local-PIN-only.
-
-- **Services:** `lib/core/cloud/` — `supabase_config.dart` (real URL + anon key committed; `isConfigured` is true — never commit the service-role key), `cloud_auth_service.dart`, `cloud_sync_service.dart`, `sync_timestamps.dart`.
-- **Config:** `Supabase.initialize` in `main()` (skipped when placeholders present). Auto-sync runs after unlock in `main.dart` (next to `maybeAutoBackup`); manual trigger on the Cloud Sync screen (`/settings/cloud_sync`).
-- **Change tracking (v17 migration, `migrations.dart`):** every replicated table gets `updated_at TEXT`; triggers `trg_<table>_{ins,upd,del}` stamp it on normal writes and record deletes in `sync_tombstones`. Bookkeeping tables `sync_flags`, `sync_meta`, `sync_tombstones` are NOT replicated.
-- **TIMESTAMP FORMAT (NON-NEGOTIABLE):** all `updated_at` / watermark values MUST use `syncTimestamp()` (`sync_timestamps.dart`) — fixed-width `yyyy-MM-ddTHH:mm:ss.SSSZ` UTC with 3-digit millis. Sync does lexicographic string LWW, so `toIso8601String()` (6-digit micros) or any other format breaks ordering. Same format is produced on the SQLite side by `strftime('%Y-%m-%dT%H:%M:%fZ','now')`.
-- **Pull flag:** the sync service sets `sync_flags.pull_in_progress = '1'` while writing pulled rows so the triggers don't re-stamp them or create tombstones. Never write sync tables from app features.
-- **LWW merge:** push snapshots changed rows then sets `last_pushed_at` (watermark captured AFTER the snapshot so concurrent writes are re-picked next cycle). Pull deletes parents-first (local FK cascades clean children), then upserts rows where remote `updated_at` > local (or local missing and no newer local tombstone).
-- **Documents:** metadata rows replicate like any table (cloud `file_path` is `''`); the encrypted file bytes live in the `documents` storage bucket at `<customer_id>/<document_id>.enc` and are downloaded into `secure_documents/` on pull.
-- **Remote schema:** `supabase_schema.sql` must mirror the local schema (column types + FKs). Any local schema change (new table/column) must be added there AND to `_syncTables`/`_tablePrimaryKeys` in `cloud_sync_service.dart` AND the v17/`createSyncSchema` trigger list if it needs change tracking.
-
-### **Derived cache removal (2026-08-06)**
-- **Repayment schedule cache (v19):** The `repayment_schedule` table is a derived cache recomputed from source data (loan + holidays + completed payments) after every payment/reverse/save/holiday change and after a cloud pull. The table is never replicated — it was removed from `_syncTables` and `_tablePrimaryKeys` in `cloud_sync_service.dart` and `migrations.dart`, and dropped from `supabase_schema.sql`. The derived schedule is the enabler for treating it as disposable: deterministic ids (`<loanId>-<installmentNumber>`), pure function of source data, and rebuilt via `LoanScheduleService` on every relevant event.
-- **Sync workflow:** when a pull completes (`onPullComplete`), the service calls `LoanScheduleService.rebuildAllSchedules()` to regenerate the local cache. No more `repayment_schedule` rows leave or enter the cloud — they are local-only derived rows.
-- **Security hardening (2026-08-04, full-auth audit; two-owner model 2026-08-04):**
-  - **Owner-scoped RLS (C-1):** every cloud table + the `documents` storage bucket is RLS-locked to the rows in `app_owner` (max TWO owner uids; see `supabase_schema.sql`). Owner slots are gated on an operator-maintained email allow-list: `claim_owner` (SECURITY DEFINER RPC, NO parameters, id derived from `auth.uid()` server-side; the old `claim_owner(text)` signature that let the caller nominate an owner is dropped) only grants a slot when `auth.email()` is in the `authorized_owners` table that the operator populates via the dashboard SQL editor FIRST — first-come-first-served owner capture is impossible even if email signups are left ON. `CloudAuthService.signIn` calls `claim_owner` after a successful sign-in (checking the `email_not_authorized` / `full` responses), then verifies with `is_owner()` and signs a non-owner back out. All policies read `auth.uid() in (select id from app_owner)`; `claim_owner` uses a `pg_advisory_xact_lock` + a BEFORE-INSERT trigger (`trg_app_owner_max_two`) so the "at most two owners" invariant cannot be raced. `authorized_owners` has RLS on with NO policies (operator-only, never replicated, not exposed via any RPC). SETUP ORDER IS CRITICAL (API-2, 2026-08-04): turn OFF "Allow new users to sign up" in the dashboard (Settings → Authentication → Providers → Email) FIRST, create BOTH owner accounts (Authentication → Users → Add user) SECOND, and ONLY THEN allow-list their emails in `authorized_owners`. Allow-listing an email before its account exists re-opens the API-2 race — a stranger who self-registered that email while signups were ON gets `claim_owner` → 'ok' and full access to all financial data on the next sync.
-  - **Owner-gated sync:** `CloudSyncService.fullSync` calls `is_owner()` before pushing/pulling and refuses to start (returns a result error) for a non-owner — silent RLS failures can no longer masquerade as "Sync complete".
-  - **Storage key sanitization:** `sanitizeCloudPathPart` (cloud_sync_service.dart) strips `[^A-Za-z0-9_-]` from `customer_id`/`document_id` before building `<customer_id>/<document_id>.enc` so crafted ids cannot escape the bucket prefix.
-  - **Secure session storage (H-1):** `Supabase.initialize` passes `FlutterAuthClientOptions(localStorage: SecureCloudLocalStorage(...), pkceAsyncStorage: SecureCloudAsyncStorage(...))` from `lib/core/cloud/secure_cloud_storage.dart` so the auth session/PKCE verifier live in `flutter_secure_storage`, NOT plaintext SharedPreferences. `AndroidManifest.xml` sets `android:allowBackup="false"` so prefs never reach cloud backups.
-  - **Friendly errors (L-4):** sign-in failures use `CloudAuthService.friendlySignInError` — raw GoTrue messages are never shown (account enumeration). `email_not_authorized` (email not on the allow-list) and `full` (both slots taken) get dedicated messages; the claim-owner RPC failure surfaces a "run the updated supabase_schema.sql" message; a non-owner account gets `CloudAuthService.notOwnerMessage`.
-- **Cloud schema v2 (2026-08-04, findings F2–F4):**
-  - **Regulated identifiers (F2):** `customers.bvn`/`customers.nin` are NEVER replicated — `cloudSensitiveColumns`/`stripSensitiveColumns` (cloud_sync_service.dart) strip them from pushed rows, pulls carry the local values across the OR-REPLACE, and `supabase_schema.sql` drops the columns (`alter table customers drop column if exists nin/bvn`). They stay local-only (SQLCipher at rest, LIKE-searchable). Cloud Sync screen copy states that documents are end-to-end encrypted but the rest of the cloud copy is not.
-  - **Storage hardening (F3):** the `trg_document_object_rules` trigger rejects `documents` bucket objects > 20 MB + encryption overhead (4 KB margin) or keys not matching `^[A-Za-z0-9_-]+/[A-Za-z0-9_-]+\.enc$`. The two owners deliberately SHARE the bucket (upsert overwrites by LWW — matches the row merge); do not add per-owner object namespaces. **Platform note (2026-08-04):** Supabase's `postgres` role is no longer a superuser and cannot create functions inside the `storage` schema (`permission denied for schema storage` in the SQL Editor and Management API), so `supabase_schema.sql` defines the trigger function as `public.enforce_document_object_rules()` and the trigger on `storage.objects` references it there — creating policies and triggers ON `storage.objects` IS still allowed. Do not move the function back into `storage`.
-  - **Residual risk (accepted, 2026-08-04):** documents are end-to-end encrypted before upload, so the server CANNOT scan file content — there is deliberately no server-side AV/MIME/antimalware check. The only content gate is the on-device magic-byte check in `detectDocumentMimeType` (`_validateSource`/`decrypt`). Do not re-add server-side magic-byte/MIME validation: it would only see ciphertext and would not work. ARM/AV scanning would require a client that decrypts and scans before re-encrypting, a design change out of scope.
-  - **Owner revocation (F4):** `remove_owner(text)` SECURITY DEFINER RPC lets an owner revoke the other slot (refuses when it is the last owner). TOTP MFA for both owner accounts and disabling email signups are operator dashboard steps — there is no in-app enrollment; enable MFA via the dashboard (Auth → MFA). No `created_by`/`modified_by` columns exist.
-- **Sync honesty (2026-08-04, findings F5–F7):** `fullSync` now returns an error whenever any push/pull item fails (`failures` counters) or a cycle moved nothing despite local changes — no false "Sync complete". The push watermark is only advanced when every table/tombstone succeeded, so a failed table is retried next cycle instead of being skipped forever. Rows are pushed in full (explicit NULLs included) so field-clearing writes like `changeGroup(id, null)` propagate (postgrest serializes JSON `null`). Remote tombstones are validated (`isValidSyncTimestamp`: format + not future-dated, id ≤ 64 chars, known table) and capped at 500 applied per cycle.
-- **Pull-row integrity + server constraints (2026-08-04, findings API-3/API-4):** every pulled row must pass `isSaneCloudRow(table, row, pk)` before it is written into local SQLite (cloud_sync_service.dart): well-formed non-future `updated_at` (API-3 — blocks LWW poisoning by a 2099-… stamp), a sane primary key, numeric columns holding numbers, `installment_number` holding a whole int (the entity `as int` casts), and enum columns (`loans.status`/`loan_type`, `payments.status`/`type`, `repayment_schedule.status`, `customers.status`, `savings_transactions.type`) holding values the app actually writes. Rejected rows are skipped AND counted as failures so the cycle reports honestly. Server-side, `supabase_schema.sql` adds idempotent CHECK constraints via `add_check_if_not_exists` (amounts ≥ 0, the same status/type enums, holiday flags ∈ {0,1}) so a tampered owner-session client cannot seed garbage the other device would crash on. Keep `cloudNumericColumns`/`cloudIntColumns`/`cloudEnumValues` in sync with those constraints and with the entity enums.
-- **Cross-device document keys (2026-08-04, finding API-6):** the AES-GCM document key is now derived deterministically from the recovery password (`deriveDocumentKey`, PBKDF2-HMAC-SHA256, 600k iterations, FIXED salt `loantrack-doc-key-v1` — never per-device, or cross-device derivation would break). `saveRecoveryPassword` caches the derived key (newest-first, capped at 5) in secure storage; `getFileEncryptionKey` returns the current derived key for NEW encryption, and `getDocumentDecryptionKeys` returns the full candidate list (current + older derived keys + the legacy per-device random key) so `FileEncryptionService.decryptFile` tries each. A second device that enters the SAME recovery password derives the same key and opens synced documents. Legacy per-device files (created before a recovery password existed) still open on their origin device; files encrypted under a previous recovery password open on devices that also have that older key. Changing the recovery password re-derives and appends — keep the old password to read old files. The recovery password is the master for document access: treat it like the database key.
-- **Bucket privacy assertion (2026-08-04, finding API-7):** the `documents` bucket insert uses `on conflict (id) do nothing`, which would leave an earlier PUBLIC bucket alone; re-running `supabase_schema.sql` now also runs `update storage.buckets set public = false where id = 'documents' and public = true` so a mistaken public bucket is corrected.
-- **API-8 (accepted, 2026-08-04):** the Supabase owner session intentionally outlives the local PIN lock (no sign-out on `main.dart` lock). Threat model = device compromise with root, identical to the local DB — same decision documented for the DB key. Do not add sign-out-on-lock without a product decision; it would force an email+password re-sign-in after every background/inactivity lock.
-- **Tests:** `test/database/migration_v17_sync_test.dart` (real SQLite via `sqflite_common_ffi` — dev dependency) validates the migration, stamping, tombstones, and pull-flag suppression. `test/cloud/cloud_auth_service_test.dart` guards the two-owner model: claim_owner called with no caller-supplied id, unlisted email refused (`email_not_authorized`) and signed out, full-slot claim refused (`full`), non-owner rejected + signed out, misconfiguration mapped to the schema message, and storage-path sanitization. `test/cloud/cloud_sync_guard_test.dart` guards `cloudSensitiveColumns`/`stripSensitiveColumns`, `isValidSyncTimestamp`, and `isSaneCloudRow` (future-dated/malformed/wrong-typed rows rejected). `test/security/document_key_derivation_test.dart` guards `deriveDocumentKey` determinism (API-6). `supabase_flutter` is a direct dependency; INTERNET permission added to `AndroidManifest.xml`.
-- **Replicated scope (privacy hardening, 2026-08-04):** `audit_logs` and `settings` were REMOVED from `_tables`/`_tablePrimaryKeys` in `cloud_sync_service.dart` (and from `supabase_schema.sql` expectations). Audit trails (PII in `details`) and device-local settings must never leave the device. Keep them OUT of the sync table list; do not re-add. The v17/`createSyncSchema` triggers on `migrations.dart` still stamp/tombstone them locally (harmless — the service simply never pushes or pulls them).
-
-## Pre-release security fixes (2026-08-04)
-- **C1** fresh-install crash: the `payments` table in `database_service.dart` had a duplicate `status` column declaration; removed so new installs create.
-- **C2** fresh-install crash: `_createIndexes` still created `idx_customers_bvn`/`idx_customers_nin` on the dropped bvn/nin columns; removed.
-- **H3** recovery password minimum raised 12 → 16 chars (`recoveryPasswordError`) per OWASP; still requires letters AND digits.
-- **H2** `BiometricService.authenticate` now returns a `BiometricResult` enum (`success|failed|unavailable|error`) mapping `PlatformException` codes, instead of swallowing every error to `false`. Callers updated in `pin_login_screen.dart` (check `== BiometricResult.success`) and `security_settings_screen.dart`.
-- **H4** `SupabaseConfig` gained key-expiry awareness: `anonKeyExpiresAtEpochSeconds`, `anonKeySecondsToExpiry()`, and `anonKeyExpiryImminent` (warns when the anon key is under `anonKeyExpiryWarningDays` (30) from `exp`). The sync screen shows a warning card. Keep the expiry constant in sync with the `exp` JWT claim (exact value only affects the warning surface, not auth).
-- **H6** background auto-sync is throttled to one attempt per `_minAutoSyncInterval` (5 min) in `cloud_sync_service.syncIfSignedIn`; manual "Sync now" is unaffected.
-- **M3/M4** backup filename appends 8 random hex chars (`adeghe_backup_<ts>_<rand>.ltbackup`) so same-instant exports cannot collide; backup container now encrypted (`LTBK1` AES-GCM, key = `sha256(db_key)`), legacy read kept.
-- **Accepted risks (2026-08-04), documented not fixed:** **M2** no certificate pinning for the Supabase host — TLS is already enforced end-to-end, and pinning against Supabase's CDN CA is rotation-fragile in Flutter/supabase_flutter (a mis-pin bricks all sync for both owners). **L1** exported Excel/PDF are intentionally plaintext share artifacts via `share_plus`; encrypting them would defeat their purpose. Do not add these without a product decision.
-
-Desktop/UX hardening (2026-08-06):
-- **Physical-keyboard PIN entry (desktop):** `PinLoginScreen` and `PinSetupScreen` wrap their body in a `Focus(autofocus: true, onKeyEvent: _handleKeyEvent)`; the handler maps top-row/numpad digit characters (`0x30`–`0x39`, incl. `event.character` from `numpad0`–`numpad9`) to `_onKey` and `LogicalKeyboardKey.backspace` to `_onDelete`, returning `KeyEventResult.handled` only for `KeyDownEvent` (so each press registers once). `flutter/services.dart` is imported for `KeyEvent`/`KeyEventResult`/`LogicalKeyboardKey`. `ChangePinScreen`/`ForgotPinScreen` already use real text fields.
-- **Fingerprint/Windows Hello on PC (biometricOnly):** `BiometricService` gained `_isDesktop` (`!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)`). `authenticate()` passes `biometricOnly: !_isDesktop` — `local_auth_windows` 2.x throws `UnsupportedError("Windows doesn't support the biometricOnly parameter.")` for `biometricOnly: true`, which was silently swallowed by the generic `catch` so the Windows Hello prompt never appeared. `isBiometricAvailable()` returns true on desktop without requiring enrolled biometrics (the OS dialog picks fingerprint/face/PIN). `authenticate()` also handles `LocalAuthException` (local_auth 3.x, thrown for `noBiometricsEnrolled`/`noBiometricHardware`/lockouts/cancel) mapping cancel/timeout/fallback → `error` and everything else → `unavailable` (fall back to PIN). Uses `dart:io` — fine on the Windows/mobile targets; keep the `dart:io` guard (`show Platform`) if a web target is ever added.
-- **Android fingerprint (FragmentActivity):** `local_auth_android` silently refuses to show the BiometricPrompt unless the host activity is a `FragmentActivity` (`LocalAuthPlugin.java` returns `NOT_FRAGMENT_ACTIVITY` → `uiUnavailable` otherwise). `android/app/src/main/kotlin/.../MainActivity.kt` now extends `FlutterFragmentActivity` (was `FlutterActivity`), so the fingerprint prompt can actually appear on Android. `_checkBiometrics` in `pin_login_screen.dart` retries only on `BiometricResult.unavailable` (transient) — `failed`/`error` (wrong scan / user cancelled the dialog) never re-prompt.
-- **Collection sheet exports (blank paid):** in `export_manager.dart`, the "Paid" cell in the collection-sheet PDF table (`_buildCollectionTableForPrint`) and Excel (`_collectionPaidText`) is blank when `amountPaid == 0` instead of rendering `₦0.00` / `0.00` — a blank reads as "nothing collected", not a zero, and stays free for handwritten amounts.
-- **Collection sheet Excel layout (two-column group layout, 2026-08-06):** `ExportManager.buildCollectionExcelBytes` (`@visibleForTesting` bytes builder behind `exportCollectionToExcel`) lays groups out in PAIRS side by side instead of stacking them vertically. Each group is a 3-column slot (Name | Amount | Paid; cols A–C left, E–G right, D blank spacer); daily/weekly loans stay separated inside each group with their own `DAILY LOANS` / `WEEKLY LOANS` + `Name/Amount/Paid` sub-headers. Pair height = the taller of the two blocks, so mixed-size groups never overlap; the next pair starts at `maxHeight + 1` blank row. Ungrouped customers render as an "Ungrouped" group, last (group order stays alphabetical, Ungrouped last). The sheet rolls onto `Collections 2`, `Collections 3`, … after `_collectionMaxRowsPerSheet` (1000) rows. Layout tests: `test/reports/collection_excel_layout_test.dart`. Do not reintroduce `appendRow`-based vertical stacking — the pairing algorithm (`_buildCollectionGroupBlock` + `_writeCollectionBlock`) computes row positions dynamically.
-- **Auto-sync cadence:** `CloudSyncService._minAutoSyncInterval` lowered 5 → 2 minutes. `main.dart` now also runs a 2-minute `Timer.periodic` (`_periodicSyncTimer`/`_startPeriodicSync`/`_stopPeriodicSync`) started on `AuthState.unlocked` and stopped on lock — `_syncInBackground()` calls `syncIfSignedIn` (which no-ops when not signed in/configured) every 2 minutes while the app is open AND unlocked. Sync only runs while the app is open; a fully killed/closed app never syncs. The Cloud Sync screen copy states the "every 2 minutes while it is open" cadence.
-- **Collections Report removed (2026-08-06):** deleted `lib/features/reports/presentation/screens/collections_report_screen.dart`; removed its GoRoute (`reports/collections`) + import from `app_router.dart` and the nav tile from `report_screen.dart`. No references remain in `lib/`.
-- **Sync scope note (verified, not changed):** `repayment_schedule` and `payments` were ALREADY in `_syncTables`/`_tablePrimaryKeys` (parent-before-child order) — the empty loan-details-on-other-device symptom is a pull-timing issue (data arrives on the next 2-min sync), not a missing sync-table wiring. `supabase_schema.sql` mirrors them.
-
-## Audit fixes (2026-08-07)
-- **Reports/dashboard perf:** `includeDetail` flag in `ReportRepository._getLoanTypeSummary` skips heavy client-report/overdue queries for dashboard summary; `getDashboardTrends` builds all bucket queries up front and runs in ONE `Future.wait` batch (was 186+ serial round trips).
-- **Report export filter mismatch:** `daily_loan_report_screen.dart` and `weekly_loan_report_screen.dart` exports now honor `_statusFilter` (was exporting all statuses).
-- **Future schedule totals:** Header "Total Expected", per-day totals, and trailing amounts now use remaining-due `(amountDue - amountPaid).clamp(0, ∞)` instead of full `amountDue` (partially-paid installments were overstating).
-- **Dashboard recent-savings labels:** `isCredit` now true for `overpayment` type; new `typeLabel` getter ("Deposit"/"Overpayment"/"Withdrawal"); screen uses `txn.typeLabel`.
-- **Customers v21 (CRITICAL):** Archived customers couldn't re-register due to DB column UNIQUE vs repo check excluding archived. Migration v21: table-recreate drops column UNIQUE, creates partial unique indexes `idx_customers_phone_unique/nin_unique/bvn_unique` (`WHERE status != 'archived'`). Fresh DDL + indexes updated; supabase_schema.sql mirrored (phone partial index; nin/bvn dropped from cloud). Regression test added.
-- **Statement pickers:** Switched from paginated `customerListProvider` (25 limit) to `allCustomersProvider` (unpaginated) so all customers selectable.
-- **Customer count invalidation:** `customerCountProvider` now invalidated after save/archive/group change.
-- **Migration test crash fix:** `DatabaseMigrations.run` now honors `newVersion` param so v17/v19 tests don't run v20/v21 against minimal fixtures.
-- **DB connection leak:** `databaseServiceProvider` closes SQLCipher connection on dispose (lock), so unlock cycles don't accumulate open handles (`ref.onDispose` + `unawaited(service.close())`).
-- **Global error handlers:** Added `FlutterError.onError` and `PlatformDispatcher.instance.onError` (debug keeps red screen; release logs + keeps app alive).
-- **Notification refresh:** Provider now watches `loanScheduleVersionProvider` so overdue/due-today badge clears immediately after collections.
-- **Audit log UX:** `details` field now displayed in list (was searchable but invisible).
-- **Dead code removed:** Unused `AuditLogRepository.getByDateRange` and `getRecent` methods.
-- **Tests:** Full suite 205 passing; analyzer clean.
-
-## Audit fixes (2026-08-11)
-- **Report invalidation gap:** mutation screens used to `ref.invalidate(reportSummaryProvider)` alone — the dashboard's `reportDashboardProvider`, `dashboardTrendsProvider` and the profit/overdue/customer/savings sub-report providers kept serving stale cached data until a screen re-entered. New single helper `invalidateReportData` (`report_provider.dart`) invalidates all 7 report families at once. Because `WidgetRef` (screens) and `Ref` (providers) share no supertype, the helper accepts the `invalidate` tear-off: call it as `invalidateReportData(ref.invalidate)` (or `_ref.invalidate` inside a notifier). All 17 former `ref.invalidate(reportSummaryProvider)` call sites now use it (`customer_form_screen`, `customer_details_screen` ×5, `savings_section`, `daily_collection_screen`, `weekly_collection_screen`, `future_schedule_screen`, `loan_details_screen` ×2, `loan_providers` ×2, `record_payment_screen`, `payment_history_screen`, `holiday_management_screen`). Also added the missing `futureScheduleProvider` invalidation at every payment/reversal/clear-with-savings/cancel site and `weeklyCollectionListProvider` at savings-mutation and clear-with-savings sites (the weekly list shows live savings balances). Regression test: `test/reports/report_invalidation_test.dart` asserts the helper targets all 7 families. Full suite green; `flutter analyze` clean.
-- **Note:** there is no `dailyCollectionListProvider` — the daily list is `collectionListProvider`, which every payment site already invalidated.
-
-## Dead-code sweep (2026-08-11)
-Verified-by-grep removals (every item had zero callers in `lib/` AND `test/` unless noted; `flutter analyze` clean, full suite 264 passing):
-- **Repository methods:** `SavingsRepository.getAccount`/`createAccount`/`getTotalSavingsBalance` (`savings_repository.dart`), `LoanRepository.countAllLoans` (`loan_repository.dart`), `CollectionRepository.getWeeklyCollection()` (the 150-line unfiltered weekly-list query; its 9 tests were re-pointed at the production `getWeeklyCollectionByDateRange(2020-01-01, 2100-01-01)` so weekly-list semantics stay covered by a wide window), `ReportRepository.getOverdueReport`'s never-passed `{String? loanType}` param + its conditional SQL.
-- **Entity members:** `Payment.copyWith`, `Customer.copyWith`, `PaymentType.advance` (enum + `cloudEnumValues` payments type + the `ck_payments_type` CHECK in `supabase_schema.sql`; legacy DB rows still parse via `Payment.fromMap`'s `firstWhere(orElse: partial)`), `CollectionRow.isPartial`/`isPending`, `WeeklyCollectionRow.statusLabel` (+ its 3 dedicated tests deleted), `WeeklyCollectionRow.isCurrentInstallmentPending`/`currentInstallmentRemaining`.
-- **Report model fields never read anywhere:** `ClientReport.customerId`/`loanId` and `OverdueEntry.loanId`/`groupName`/`guarantorName`/`guarantorPhone` — removed from the models, the `report_repository` SELECTs, and the now-unused `LEFT JOIN customer_groups`. The whole unused `CollectionReportRow` class (`report_models.dart`) was deleted.
-- **Dead widget surface:** `AppNumpad`'s `keyColor`/`keyAlpha`/`borderColor`/`textColor` params were never overridden (both callers used defaults) — removed, defaults hard-coded.
-- **Sub-agent claims verified FALSE (kept):** `getDailyCollection({loanType, groupId})` IS passed (`loanType: 'daily'`, `groupId`) by `collection_provider.dart`; `EmptyState.subtitle` is used by 6+ screens; `LoanRepository.getActiveLoansForCustomer`/`getLoansForCustomer`/`getScheduleForLoan` and `PaymentRepository.updatePaymentNotes` all have real callers. Always grep-verify dead-code claims before deleting.
-
-## Collection payment-date attribution (2026-08-13)
-User-reported bug: a customer with previously-missed (overdue) installments who pays shows as "Paid" on the WRONG week/date — the schedule's installment-paid state was used, so a payment applied to the oldest missed installment lit up the week the missed installment *cleared*, not the week the money actually arrived. Payment application order (oldest-first) is unchanged; only list display/query was fixed.
-- **Weekly query placeholder bug (root cause):** `getWeeklyCollectionByDateRange` (`collection_repository.dart`) bound args positionally but in the wrong order — SQL text order is `collectedThisPeriod BETWEEN (2)` → `overdue < ? (1)` → `tgt` MIN-unpaid `BETWEEN (2)` → `tgt` MIN-any `BETWEEN (2)` → WHERE EXISTS installment `BETWEEN (2)`, while the args were `[start, end, start, end, start, end, today, start, end]`. The overdue `?` was receiving `start`, and both `tgt` ranges were inverted/offset (`(end,start)` / `(end,today)`), so `currentInstallmentNumber` was NULL (payment week) or pointed outside the range (cleared week). Correct args: `[start, end, today, start, end, start, end, start, end]`.
-- **Payment-date visibility:** the weekly WHERE clause now also matches loans with a `payments.status='completed'` row whose `DATE(payment_date)` is in the range (payment-day OR of the existing installment-EXISTS), so a payment on a non-installment day (or late payment clearing an older missed installment) still lists the loan on the period the money was received. 2 extra placeholders → 11 args total.
-- **Pure-payment-day rows:** a new third `tgt` COALESCE fallback picks the first unpaid installment OVERALL (no new placeholders) when the range contains no installment at all, so `currentInstallmentNumber`/quick-pay caps stay meaningful. The two existing fallbacks are unchanged (do not reorder — the existing test asserting in-range paid installments show `status='paid'` depends on fallback #2).
-- **`WeeklyCollectionRow.isPaidForPeriod`** (`weekly_collection_row.dart`): `collectedThisPeriod > 0 || status == 'completed'` — schedule installment-paid state is deliberately NOT used. The weekly tile now renders "Paid" from `isPaidForPeriod`, shows `collectedThisPeriod` as the amount when paid (else `currentInstallmentAmount`), fixes "Overdue 0d" → "Overdue" when `daysOverdue == 0`, and the bulk-selectable/selected filters use `!r.isPaidForPeriod`.
-- **Daily range mode:** `_rowPaid` in `daily_collection_screen.dart` now returns `amountPaid > 0 || isPaid` for ranges (money-date aware, matching the export's "Paid" cell). Single-date mode unchanged (`amountPaid > 0`). The daily range QUERY args were already correct — no query change needed.
-- **Regression tests:** `test/collection/payment_date_attribution_test.dart` (replaces the diagnostic `_repro_user_scenario_test.dart`): weekly payment-week attribution (tgt #3, `collectedThisPeriod=550`), cleared-week shows no money collected, payment-on-non-installment-day visibility with first-unpaid fallback, and daily single-date + range amounts. Full suite 275 passing; `flutter analyze` clean.
-
-## Loan-form audit fixes (2026-08-13, final pre-release QA pass)
-
-- **LFA-1 (HIGH, stale custom amount):** `LoanFormNotifier._loadLoanForEdit` populated the edit screen via `updateField` but only *set* `customInstallmentAmount` when the loan had one — it never cleared the field. `loanFormProvider` is a non-autoDispose singleton, so a custom amount left by a previous create/edit session (typed then backed out without saving) leaked into an unrelated edit: the loan's summary showed the stale "Collection amount" and `_buildLoanFromForm` saved it as `staleCustom × duration`, silently redefining the repayment terms. Fix: new `LoanFormNotifier.loadForEdit(Loan)` clears the custom amount whenever the edited loan has none (`clearCustomInstallment: loan.customCollectionAmount == null`) and re-sets it otherwise; `_loadLoanForEdit` delegates to it (`loan_providers.dart`, `loan_creation_screen.dart`).
-- **LFA-2 (MEDIUM, field/state desync):** the principal and duration `onChanged` handlers pass `clearCustomInstallment: true` (intentionally invalidating the override) but left the visible "Collection amount per period" field text showing the old value — an operator could tweak the principal and save, silently dropping the displayed amount. Both handlers now also `_customCtrl.clear()` so the field and form state always agree (`loan_creation_screen.dart`).
-- **LFA-3 (LOW, recovery dialog):** the PIN-setup recovery dialog (`pin_setup_screen.dart`) was `barrierDismissible: true`, so a tap-outside/system-back dismissed it without the Cancel handler, leaving a silent mid-confirm state (`_isConfirming == true` with both PIN buffers full). Now `barrierDismissible: false` + `PopScope(canPop: false, onPopInvokedWithResult: …)`; both the Cancel button and a back press route through the shared `_cancelRecoverySetup`, which clears the buffers and pops.
-- **LFA-4 (LOW, orphaned replacement file):** `DocumentRepository.replace` deleted the old encrypted file *inside* the same try block as the DB update — if that delete threw (e.g. an I/O error on an unreadable old file), the catch deleted the NEW file the DB row now references and rethrew, orphaning an undecryptable document row. The old-file delete is now best-effort (swallowed); the outer catch still cleans up the replacement if the DB update itself fails (`document_repository.dart`).
-- **Regression tests:** `test/loans/loan_form_edit_test.dart` (loadForEdit clears/keeps/overwrites the custom amount; editing the principal clears the visible field) and `test/documents/document_replace_test.dart` (replace survives an old-file delete failure and keeps the replacement; the DB-update-failure path still removes the orphan). Full suite 290 passing; `flutter analyze` clean. Note: `repayment_schedule` remains in `cloudEnumValues` (`cloud_sync_service.dart`) even though the table is no longer replicated — harmless dead entry, left as-is.
-
-## Repayment integration audit (2026-08-13)
-
-- **P-1 (CRITICAL, missing column crash):** `PaymentRepository.getPaymentsForLoan` ordered by `payment_date DESC, created_at DESC`, but `payments` NEVER had a `created_at` column — not in the fresh-install DDL (`database_service.dart`), any migration (`migrations.dart`), or the cloud mirror (`supabase_schema.sql`). SQLite resolves `ORDER BY` columns against the table, so loading a loan's payment history threw `no such column: created_at` on EVERY real database. The schema crosscheck missed it because it only parses `rawQuery`/`query`/`execute` SQL strings and `insert` table args — the `orderBy:` parameter of `db.query('payments', …)` is not scanned. Fixed via **migration v24** (`ALTER TABLE payments ADD COLUMN created_at TEXT` + back-fill `COALESCE(updated_at, payment_date || 'T00:00:00.000Z')`, idempotent via `PRAGMA table_info` guard), fresh-DDL column added, `_databaseVersion` 23 → 24, `Payment` entity gained an optional `createdAt` (written by `createPayment`/`clearLoanWithSavings`, parsed by `fromMap`), and `supabase_schema.sql` mirrored + the live cloud `payments` table ALTERed and back-filled (required, or payment pushes would fail with a non-existent column). Regression tests: `test/database/migration_v24_payments_created_at_test.dart` (adds + back-fills, preserves existing, and re-runs the exact ordering query).
-- **New audit harness:** `test/payments/repayment_integration_audit_test.dart` — 25 tests on a real in-memory SQLite (production fresh schema + sync schema) exercising full/partial/multiple/overpayment-with-and-without-installment-context/zero/invalid(neg·NaN·Inf)/after-partial/completing/closed-loan/idempotency repayments; downstream effects on reports, daily+weekly collection screens, dashboard, savings, history, cloud `updated_at` stamps; scheduled vs non-payment-date attribution; reversal invariance (partial + overpayment refunds savings + restores exact outstanding); the full `clearLoanWithSavings` path (exact debit, linked withdrawal, insufficient-savings and completed-loan rejection, reversal refunding savings via a `deposit` row); and a `getPaymentsForLoan` same-day `created_at` ordering regression. It caught P-1 and validated the money rule (`outstanding = total_repayment − Σ(completed payment − overpayment surplus)`) end-to-end.
-- **Verification:** full suite green in per-directory batches (root `flutter test` exceeds the 15-min tool timeout on this machine); `flutter analyze` clean.
-
-## Audit fixes (2026-08-09)
-- **Restore document reconciliation (F-14):** `restoreBackup` now replaces `secure_documents/` INSIDE the `withExclusiveAccess` block (atomic with the DB swap, so a document-write failure triggers the same rollback that protects the DB file) and ALWAYS reconciles — any local encrypted document not present in the backup is deleted, so a backup taken with no documents can no longer leave stale files from another dataset behind. Previously the replacement ran after the exclusive block and was skipped entirely when the backup contained no documents (`backup_service.dart`).
-- **deleteBackup path traversal (F-15):** `deleteBackup(fileName)` now rejects any name where `basename(fileName) != fileName` — user-typed names can no longer escape the backup folder (e.g. `../other.ltbackup`).
-- **Null ZIP entry payload (F-17):** a `secure_documents/` archive entry whose content is null (corrupt container) now aborts the restore with a clear error instead of silently restoring a zero-byte document that can never decrypt.
-- **Regression tests:** `test/backup/backup_roundtrip_test.dart` adds: restore reconciles `secure_documents/` to exactly the backup set; restore of a document-free backup clears stale local documents; `deleteBackup` refuses traversal names; `deleteBackup` removes a legitimate file. Full suite 220 passing; analyzer clean.
-
-## Windows audit (2026-08-09) — desktop camera gating
-- **Camera pickers crash on desktop (CRITICAL):** `image_picker_windows-0.2.2` `getImageFromSource(ImageSource.camera)` extends `CameraDelegatingImagePickerPlatform` with NO camera delegate → throws `StateError` on Windows/Linux/macOS. Three entry points offered a camera action unconditionally, so clicking it on Windows crashed the app: `document_upload_screen.dart` ("Scan with camera" sheet tile), `document_list_screen.dart` (same), and `customer_form_screen.dart` passport picker ("Camera" button). All are now gated by `canUseCamera` (`lib/core/utils/platform_utils.dart`, `!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)` → false on desktop). Android/iOS keep the camera option per the design (FilePicker for files, ImagePicker only for camera). New helper file `lib/core/utils/platform_utils.dart` exposes `isDesktopPlatform` / `canUseCamera` — use these for any future desktop-gated UI rather than inlining `Platform.isWindows`.
-- **Verified, no change:** `share_plus` 12.0.2 is Windows-capable (native WinRT share UI via `GetAncestor` + `DataTransferManager.ShowShareUIForWindow`); printing `DownloadableFont.getFont()` falls back to Helvetica offline so PDF exports/statements don't crash when the google_fonts HTTP fetch fails.
-- **Verification:** full suite 220 passing; `flutter analyze --no-pub` clean; `flutter build windows --release` succeeds and the exe launches and stays alive; `flutter build apk --debug` succeeds (Android regression).
-
-## Windows desktop build (packaged with Inno Setup)
-
-First-class desktop port added 2026-08-02. Same encrypted SQLite + PIN/biometric auth as mobile; the DB file lives in the user's Documents folder (`getApplicationDocumentsDirectory()`), key in Windows DPAPI via `flutter_secure_storage`.
-
-- **Encryption on Windows:** `sqflite_sqlcipher` has NO Windows plugin, so `DatabaseService._initDatabase` branches on `Platform.isWindows` and opens via `sqflite_common_ffi` (`databaseFactoryFfi.openDatabase`) using the SQLCipher build of `package:sqlite3`. The key is applied as `PRAGMA key = '<escaped>'` in `onConfigure` (sqflite runs it before the `user_version` check). `verifyDatabaseFile` has the same branch (`_openWindowsDatabaseRaw`). SQLCipher 4 file format — DBs are portable with mobile.
-- **Native lib:** the SQLCipher native build is requested in `pubspec.yaml` via `hooks.user_defines.sqlite3.source: sqlcipher` (the `native_toolchain_c` hook system of sqlite3 3.x). `sqlcipher_flutter_libs` (^0.7.0+eol) is a DEAD stub and was REMOVED — do not re-add it. First `flutter build windows` downloads/builds the native lib (needs VS toolchain).
-- **Windows runner:** scaffolded by `flutter create --platforms=windows .`; window title + version resources set to "Adeghe Professional Services" in `windows/runner/main.cpp` / `Runner.rc`; launcher icon generated from `attached_assets/app_icon_mark_1024_white_bg.png` into `windows/runner/resources/app_icon.ico` (keep `flutter_launcher_icons.windows` as a Map — `windows: true` is invalid in 0.14.x).
-- **Installer:** `windows/installer/setup.iss` (Inno Setup 6). Output `build/installer/AdegheProfessionalServices-Setup-<ver>.exe`, per-user install (`PrivilegesRequired=lowest`), sources from `build/windows/x64/runner/Release`.
-- **Prereqs (host, not committed):** Visual Studio 2022 with the "Desktop development with C++" workload, Windows Developer Mode ON (needed for plugin symlinks), and Inno Setup 6 (`ISCC.exe`). Without them `flutter build windows` and the .iss compile both fail.
-- **Build steps:** `flutter build windows --release` → open `windows/installer/setup.iss` in Inno Setup Studio and Build (or `ISCC.exe windows\installer\setup.iss` from repo root).
-- **No iOS directory (unsupported target):** Only `android/` + `windows/` platform files exist; iOS builds are not configured or supported.
-
-## Other notes
-- **Backup format:** `.ltbackup` files are now `LTBK1`-encrypted ZIP containers (AES-GCM keyed with `sha256(db_key)` — hides the enclosed filenames/sizes). `BackupService` takes `(DatabaseService, SecureStorageService)`. Restore still accepts the legacy raw-SQLite file and the legacy unencrypted ZIP. An encrypted backup from a device with a different DB key cannot be restored (`_decryptContainer` returns null → clear error). `archive: ^3.6.1` is a direct dependency.
-- **DI inconsistency:** Some repositories take `Ref`, others take `DatabaseService` directly. No uniform pattern.
-- **Excel export:** `Excel.rename()` crashes with archive 3.6.1 (unmodifiable list) — never call it; first group reuses `getDefaultSheet()`, later groups use `Sheet_n`. Regression test: `test/excel_encode_test.dart`.
+- **Migrations:** `lib/core/database/migrations.dart`. Fresh-install DDL + `_databaseVersion` in `database_service.dart` — keep both in sync.
+- **Supabase schema:** `supabase_schema.sql` must mirror local schema. Any table/column change must be added there AND to `_syncTables`/`_tablePrimaryKeys` in `cloud_sync_service.dart`.
+- **Sync timestamps:** MUST use `syncTimestamp()` (`sync_timestamps.dart`) — `yyyy-MM-ddTHH:mm:ss.SSSZ` UTC with 3-digit millis. Lexicographic LWW depends on this format.
+- **Windows build:** `windows/installer/setup.iss` (Inno Setup 6). Output: `build/installer/AdegheProfessionalServices-Setup-<ver>.exe`.

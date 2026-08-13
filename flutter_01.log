@@ -1,0 +1,97 @@
+Flutter crash report.
+Please report a bug at https://github.com/flutter/flutter/issues.
+
+## command
+
+flutter test test/collection/daily_collection_payment_date_test.dart
+
+## exception
+
+PathExistsException: PathExistsException: Cannot copy file to 'C:\Users\USEER\Newfolder\loan_application\build\native_assets\windows\sqlcipher.dll', path = 'C:\Users\USEER\Newfolder\loan_application\.dart_tool\hooks_runner\shared\sqlite3\build\download-759f0a28\sqlcipher.dll' (OS Error: Cannot create a file when that file already exists, errno = 183)
+
+```
+#0      _checkForErrorResponse (dart:io/common.dart:58:9)
+#1      _File.copy.<anonymous closure> (dart:io/file_impl.dart:406:7)
+#2      _rootRunUnary (dart:async/zone_root.dart:48:47)
+#3      _CustomZone.runUnary (dart:async/zone.dart:733:19)
+<asynchronous suspension>
+#4      ForwardingFile.copy (package:file/src/forwarding/forwarding_file.dart:29:51)
+<asynchronous suspension>
+#5      ErrorHandlingFile.copy.<anonymous closure> (package:flutter_tools/src/base/error_handling_io.dart:601:28)
+<asynchronous suspension>
+#6      _run (package:flutter_tools/src/base/error_handling_io.dart:1050:14)
+<asynchronous suspension>
+#7      _copyNativeCodeAssetsToBundleOnWindowsLinux (package:flutter_tools/src/isolated/native_assets/native_assets.dart:663:32)
+<asynchronous suspension>
+#8      _copyNativeCodeAssetsForOS (package:flutter_tools/src/isolated/native_assets/native_assets.dart:482:24)
+<asynchronous suspension>
+#9      installCodeAssets (package:flutter_tools/src/isolated/native_assets/native_assets.dart:135:37)
+<asynchronous suspension>
+#10     testCompilerBuildNativeAssets (package:flutter_tools/src/isolated/native_assets/test/native_assets.dart:88:3)
+<asynchronous suspension>
+#11     TestCommand.runCommand (package:flutter_tools/src/commands/test.dart:494:11)
+<asynchronous suspension>
+#12     FlutterCommand.run.<anonymous closure> (package:flutter_tools/src/runner/flutter_command.dart:1630:27)
+<asynchronous suspension>
+#13     AppContext.run.<anonymous closure> (package:flutter_tools/src/base/context.dart:154:19)
+<asynchronous suspension>
+#14     CommandRunner.runCommand (package:args/command_runner.dart:212:13)
+<asynchronous suspension>
+#15     FlutterCommandRunner.runCommand.<anonymous closure> (package:flutter_tools/src/runner/flutter_command_runner.dart:496:9)
+<asynchronous suspension>
+#16     AppContext.run.<anonymous closure> (package:flutter_tools/src/base/context.dart:154:19)
+<asynchronous suspension>
+#17     FlutterCommandRunner.runCommand (package:flutter_tools/src/runner/flutter_command_runner.dart:431:5)
+<asynchronous suspension>
+#18     FlutterCommandRunner.run.<anonymous closure> (package:flutter_tools/src/runner/flutter_command_runner.dart:307:33)
+<asynchronous suspension>
+#19     run.<anonymous closure>.<anonymous closure> (package:flutter_tools/runner.dart:104:11)
+<asynchronous suspension>
+#20     AppContext.run.<anonymous closure> (package:flutter_tools/src/base/context.dart:154:19)
+<asynchronous suspension>
+#21     main (package:flutter_tools/executable.dart:103:3)
+<asynchronous suspension>
+```
+
+## flutter doctor
+
+```
+[✓] Flutter (Channel stable, 3.44.6, on Microsoft Windows [Version 10.0.21996.1], locale en-US) [992ms]
+    • Flutter version 3.44.6 on channel stable at C:\Users\USEER\Documents\flutter
+    • Upstream repository https://github.com/flutter/flutter.git
+    • Framework revision ee80f08bbf (5 weeks ago), 2026-07-08 15:02:06 -0700
+    • Engine revision 83675ed276
+    • Dart version 3.12.2
+    • DevTools version 2.57.0
+    • Feature flags: enable-web, enable-linux-desktop, enable-macos-desktop, enable-windows-desktop, enable-android, enable-ios, cli-animations, enable-native-assets, enable-swift-package-manager, omit-legacy-version-file, enable-lldb-debugging, enable-uiscene-migration
+
+[✓] Windows Version (11 Pro 64-bit, Dev, 2009) [11.7s]
+
+[✓] Android toolchain - develop for Android devices (Android SDK version 36.0.0) [8.6s]
+    • Android SDK at C:\Users\USEER\AppData\Local\Android\sdk
+    • Emulator version 36.6.11.0 (build_id 15507667) (CL:N/A)
+    • Platform android-36.1, build-tools 36.0.0
+    • Java binary at: C:\Program Files\Android\Android Studio\jbr\bin\java
+      This is the JDK bundled with the latest Android Studio installation on this machine.
+      To manually set the JDK path, use: `flutter config --jdk-dir="path/to/jdk"`.
+    • Java version OpenJDK Runtime Environment (build 21.0.10+-14961533-b1163.108)
+    • All Android licenses accepted.
+
+[✓] Chrome - develop for the web [248ms]
+    • Chrome at C:\Users\USEER\AppData\Local\Google\Chrome\Application\chrome.exe
+
+[✓] Visual Studio - develop Windows apps (Visual Studio Community 2026 18.8.2) [243ms]
+    • Visual Studio at C:\Program Files\Microsoft Visual Studio\18\Community
+    • Visual Studio Community 2026 version 18.8.12023.21
+    • Windows 10 SDK version 10.0.26100.0
+
+[✓] Connected device (3 available) [683ms]
+    • Windows (desktop) • windows • windows-x64    • Microsoft Windows [Version 10.0.21996.1]
+    • Chrome (web)      • chrome  • web-javascript • Google Chrome 151.0.7922.137
+    • Edge (web)        • edge    • web-javascript • Microsoft Edge 150.0.4078.83
+
+[✓] Network resources [1,528ms]
+    • All expected network resources are available.
+
+• No issues found!
+```
