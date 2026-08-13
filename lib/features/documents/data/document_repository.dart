@@ -79,7 +79,15 @@ class DocumentRepository {
       final db = await _database;
       await db.update('documents', updated.toMap(),
           where: 'id = ?', whereArgs: [current.id]);
-      await _encryption.delete(current.encryptedPath);
+      // The row now references [replacement]; a failure to remove the old file
+      // must not fall into the catch below, which would delete the new file the
+      // row already points at and orphan an undecryptable document. The old
+      // file is disposable — ignore any delete error.
+      try {
+        await _encryption.delete(current.encryptedPath);
+      } catch (_) {
+        // Old file already gone or unreadable; the DB is the source of truth.
+      }
       return updated;
     } catch (_) {
       await _encryption.delete(replacement);

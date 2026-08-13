@@ -98,26 +98,9 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
 
   Future<void> _loadLoanForEdit() async {
     final loan = widget.existingLoan!;
-    final notifier = ref.read(loanFormProvider.notifier);
-    notifier.updateField(
-      loanType: loan.loanType,
-      principal: loan.amount,
-      interestRatePercent: loan.interestRate,
-      insuranceFeePercent: loan.insuranceFee,
-      commissionPercent: loan.commission,
-      processingFee: loan.processingFee,
-      administrativeFee: loan.administrativeFee,
-      otherCharges: loan.otherCharges,
-      duration: loan.duration,
-      repaymentStartDate: loan.repaymentStartDate,
-      notes: loan.notes ?? '',
-    );
-    if (loan.customCollectionAmount != null &&
-        loan.customCollectionAmount! > 0) {
-      notifier.updateField(
-        customInstallmentAmount: loan.customCollectionAmount,
-      );
-    }
+    // loadForEdit clears any stale custom collection amount left by a
+    // previous create/edit session when this loan has none.
+    ref.read(loanFormProvider.notifier).loadForEdit(loan);
     setState(() => _hasLoaded = true);
   }
 
@@ -207,10 +190,16 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
           _buildTextField(
             label: 'Loan Amount (Principal)',
             controller: _principalCtrl,
-            onChanged: (value) => formNotifier.updateField(
-              principal: CurrencyUtils.tryParseAmount(value) ?? 0.0,
-              clearCustomInstallment: true,
-            ),
+            onChanged: (value) {
+              formNotifier.updateField(
+                principal: CurrencyUtils.tryParseAmount(value) ?? 0.0,
+                clearCustomInstallment: true,
+              );
+              // Keep the visible field in sync with the state: the override is
+              // intentionally invalidated when the principal changes, so the
+              // still-typed amount must not linger and mislead the operator.
+              _customCtrl.clear();
+            },
           ),
           _buildTextField(
             label: 'Interest Rate (%)',
@@ -235,6 +224,7 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
                     : 0,
                 clearCustomInstallment: true,
               );
+              _customCtrl.clear();
             },
           ),
           ExpansionTile(

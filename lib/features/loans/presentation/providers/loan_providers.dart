@@ -178,6 +178,31 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
     }
   }
 
+  /// Populates the form from an existing [loan] for editing. Always clears a
+  /// stale custom collection amount when the edited loan has none — the form
+  /// notifier outlives this screen, so a previous create/edit session that was
+  /// abandoned before saving can otherwise leak its `customInstallmentAmount`
+  /// into an unrelated loan and silently redefine that loan's repayment terms
+  /// (`customAmount × duration`) on save.
+  void loadForEdit(Loan loan) {
+    state = state.copyWith(
+      loanType: loan.loanType,
+      principal: loan.amount,
+      interestRatePercent: loan.interestRate,
+      insuranceFeePercent: loan.insuranceFee,
+      commissionPercent: loan.commission,
+      processingFee: loan.processingFee,
+      administrativeFee: loan.administrativeFee,
+      otherCharges: loan.otherCharges,
+      duration: loan.duration,
+      repaymentStartDate: loan.repaymentStartDate,
+      notes: loan.notes ?? '',
+      customInstallmentAmount: loan.customCollectionAmount,
+      clearCustomInstallment: loan.customCollectionAmount == null,
+    );
+    _recalculate();
+  }
+
   void _recalculate() {
     final result = LoanCalculator.calculate(
       principal: state.principal,

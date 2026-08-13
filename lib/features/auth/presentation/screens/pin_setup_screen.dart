@@ -77,63 +77,79 @@ class _PinSetupScreenState extends ConsumerState<PinSetupScreen> {
   void _showRecoveryDialog() {
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(
-          'Set Recovery Password',
-          style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _recoveryCtrl,
-              decoration: const InputDecoration(labelText: 'Recovery Password'),
-              obscureText: true,
+      // The dialog has real side effects (it clears a half-entered PIN on
+      // dismiss); letting a tap outside or a back press silently dismiss it
+      // leaves a confusing mid-confirm state, so both are intercepted and run
+      // the same cancellation path as the Cancel button.
+      barrierDismissible: false,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (didPop) return;
+          _cancelRecoverySetup(ctx);
+        },
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text(
+            'Set Recovery Password',
+            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: _recoveryCtrl,
+                decoration: const InputDecoration(labelText: 'Recovery Password'),
+                obscureText: true,
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'At least 16 characters, with letters and numbers. '
+                'It is the only way to recover if you forget your PIN.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => _cancelRecoverySetup(ctx),
+              child: const Text('Cancel'),
             ),
-            const SizedBox(height: 8),
-            const Text(
-              'At least 16 characters, with letters and numbers. '
-              'It is the only way to recover if you forget your PIN.',
-              style: TextStyle(fontSize: 12),
+            ElevatedButton(
+              onPressed: () {
+                final recovery = _recoveryCtrl.text.trim();
+                final error = SecureStorageService.recoveryPasswordError(recovery);
+                if (error != null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(error)),
+                  );
+                  return;
+                }
+                Navigator.of(ctx).pop();
+                _savePinWithRecovery(recovery);
+              },
+              child: const Text('Save'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              _recoveryCtrl.clear();
-              setState(() {
-                _pin = '';
-                _confirm = '';
-                _isConfirming = false;
-              });
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                    content:
-                        Text('PIN setup cancelled. Try again when ready.')),
-              );
-            },
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final recovery = _recoveryCtrl.text.trim();
-              final error = SecureStorageService.recoveryPasswordError(recovery);
-              if (error != null) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(error)),
-                );
-                return;
-              }
-              Navigator.of(ctx).pop();
-              _savePinWithRecovery(recovery);
-            },
-            child: const Text('Save'),
-          ),
-        ],
       ),
+    );
+  }
+
+  /// Shared cancellation path for the recovery dialog's Cancel button and for
+  /// a system back press (PopScope) — clears the half-entered PIN/confirm so
+  /// the screen does not stay stuck in "Confirm your PIN".
+  void _cancelRecoverySetup(BuildContext dialogContext) {
+    Navigator.of(dialogContext).pop();
+    _recoveryCtrl.clear();
+    setState(() {
+      _pin = '';
+      _confirm = '';
+      _isConfirming = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+          content: Text('PIN setup cancelled. Try again when ready.')),
     );
   }
 
