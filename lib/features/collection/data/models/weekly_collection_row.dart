@@ -140,4 +140,12 @@ class WeeklyCollectionRow {
 
   /// Whether the current installment is partially paid.
   bool get isCurrentInstallmentPartial => currentInstallmentStatus == 'partial';
+
+  /// Whether the row reads as "Paid" for the viewed period — money received
+  /// within the period (payment-date based) OR the whole loan completed.
+  ///
+  /// The schedule's installment-paid state is deliberately NOT used: a late
+  /// payment that cleared an older missed installment must show as paid only
+  /// on the period the money actually arrived, never on the period it cleared.
+  bool get isPaidForPeriod => collectedThisPeriod > 0 || status == 'completed';
 }

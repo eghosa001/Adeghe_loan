@@ -2,6 +2,7 @@ import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/database/database_service.dart';
+import '../../../core/database/holiday_sql.dart';
 import '../../../features/customers/data/models/customer_entity.dart';
 import 'models/customer_group_entity.dart';
 
@@ -123,16 +124,41 @@ class GroupRepository {
     final dateStr = date.toIso8601String().split('T').first;
     final results = await Future.wait([
       db.rawQuery('''
-        SELECT COALESCE(SUM(COALESCE(l.custom_collection_amount, rs.amount)), 0.0) AS due,
-               COALESCE(SUM(rs.paid_amount), 0.0) AS paid
-        FROM repayment_schedule rs
-        INNER JOIN loans l ON rs.loan_id = l.id
+        SELECT
+          COALESCE(SUM((
+            SELECT COALESCE(SUM(COALESCE(l.custom_collection_amount, rs.amount)), 0.0)
+            FROM repayment_schedule rs
+            WHERE rs.loan_id = l.id AND DATE(rs.due_date) = ?
+              AND $notOnEnabledHolidaySql
+          )), 0.0) AS due,
+          COALESCE(SUM((
+            SELECT COALESCE(SUM(p.amount - COALESCE(st.amount, 0.0)), 0.0)
+            FROM payments p
+            LEFT JOIN savings_transactions st
+              ON st.reference_loan_payment_id = p.id AND st.type = 'overpayment'
+            WHERE p.loan_id = l.id AND p.status = 'completed'
+              AND DATE(p.payment_date) = ?
+          )), 0.0) AS paid
+        FROM loans l
         INNER JOIN customers c ON l.customer_id = c.id
-        WHERE c.group_id = ? AND DATE(rs.due_date) = ? AND l.status = 'active'
-      ''', [groupId, dateStr]),
+        WHERE l.status = 'active' AND c.group_id = ?
+          AND (
+            EXISTS (
+              SELECT 1 FROM repayment_schedule rs
+              WHERE rs.loan_id = l.id AND DATE(rs.due_date) = ?
+                AND $notOnEnabledHolidaySql
+            )
+            OR EXISTS (
+              SELECT 1 FROM payments px
+              WHERE px.loan_id = l.id AND px.status = 'completed'
+                AND DATE(px.payment_date) = ?
+            )
+          )
+      ''', [dateStr, dateStr, groupId, dateStr, dateStr]),
     ]);
     final due = (results[0].first['due'] as num?)?.toDouble() ?? 0.0;
     final paid = (results[0].first['paid'] as num?)?.toDouble() ?? 0.0;
-    return {'due': due, 'paid': paid, 'remaining': due - paid};
+    final remaining = (due - paid).clamp(0.0, double.infinity).toDouble();
+    return {'due': due, 'paid': paid, 'remaining': remaining};
   }
 }

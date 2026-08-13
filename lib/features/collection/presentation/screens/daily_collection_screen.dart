@@ -59,11 +59,6 @@ class _DailyCollectionScreenState extends ConsumerState<DailyCollectionScreen> {
   Widget build(BuildContext context) {
     final collectionAsync = ref.watch(collectionListProvider);
     final selectedDate = ref.watch(collectionDateFilterProvider);
-    final selectedGroup = ref.watch(collectionGroupFilterProvider);
-    final groupsAsync = ref.watch(groupListProvider);
-    final isRangeMode = ref.watch(collectionDateRangeModeProvider);
-    final rangeStart = ref.watch(collectionRangeStartProvider);
-    final rangeEnd = ref.watch(collectionRangeEndProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -170,178 +165,241 @@ class _DailyCollectionScreenState extends ConsumerState<DailyCollectionScreen> {
       bottomNavigationBar: _bulkMode
           ? _buildBulkBottomBar(collectionAsync.valueOrNull ?? const [])
           : null,
-      body: Column(
-        children: [
-          const CollectionTypeToggle(isWeekly: false),
-          // Date mode toggle
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Row(
-              children: [
-                const Icon(Icons.date_range, size: 20),
-                const SizedBox(width: 8),
-                const Text('Date Range', style: TextStyle(fontSize: 13)),
-                const Spacer(),
-                Switch(
-                  value: isRangeMode,
-                  onChanged: (v) {
-                    ref.read(collectionDateRangeModeProvider.notifier).state =
-                        v;
-                  },
-                ),
-              ],
-            ),
-          ),
-          // Date pickers — single or range
-          if (!isRangeMode)
-            _DatePickerTile(
-              selectedDate: selectedDate,
-              onDatePicked: (date) {
-                ref.read(collectionDateFilterProvider.notifier).state = date;
-              },
-            )
-          else
-            _DateRangePickerTile(
-              startDate: rangeStart,
-              endDate: rangeEnd,
-              onStartPicked: (date) {
-                ref.read(collectionRangeStartProvider.notifier).state = date;
-              },
-              onEndPicked: (date) {
-                ref.read(collectionRangeEndProvider.notifier).state = date;
-              },
-            ),
-          groupsAsync.when(
-            loading: () => const SizedBox.shrink(),
-            error: (_, _) => const SizedBox.shrink(),
-            data: (groups) {
-              if (groups.isEmpty) return const SizedBox.shrink();
-              return SizedBox(
-                height: 44,
-                child: ListView(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  scrollDirection: Axis.horizontal,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: FilterChip(
-                        label: const Text('All'),
-                        selected: selectedGroup == null,
-                        onSelected: (_) =>
-                            ref
-                                    .read(
-                                      collectionGroupFilterProvider.notifier,
-                                    )
-                                    .state =
-                                null,
-                      ),
-                    ),
-                    ...groups.map(
-                      (g) => Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: FilterChip(
-                          label: Text(g.name),
-                          selected: selectedGroup == g.id,
-                          onSelected: (_) =>
-                              ref
-                                  .read(collectionGroupFilterProvider.notifier)
-                                  .state = selectedGroup == g.id
-                              ? null
-                              : g.id,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: DebouncedTextField(
-              decoration: const InputDecoration(
-                hintText: 'Search customer...',
-                prefixIcon: Icon(Icons.search, size: 20),
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                border: OutlineInputBorder(),
-              ),
-              onChanged: (v) =>
-                  ref.read(collectionSearchQueryProvider.notifier).state = v,
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Row(
-              children: [
-                const Text('Sort by:', style: TextStyle(fontSize: 12)),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Consumer(
-                    builder: (context, ref, _) {
-                      final sortBy = ref.watch(collectionSortByProvider);
-                      return DropdownButtonHideUnderline(
-                        child: DropdownButton<CollectionSortBy>(
-                          value: sortBy,
-                          isDense: true,
-                          items: const [
-                            DropdownMenuItem(
-                              value: CollectionSortBy.name,
-                              child: Text('Name'),
-                            ),
-                            DropdownMenuItem(
-                              value: CollectionSortBy.amountDue,
-                              child: Text('Amount Due'),
-                            ),
-                            DropdownMenuItem(
-                              value: CollectionSortBy.amountPaid,
-                              child: Text('Amount Paid'),
-                            ),
-                            DropdownMenuItem(
-                              value: CollectionSortBy.outstanding,
-                              child: Text('Outstanding'),
-                            ),
-                          ],
-                          onChanged: (value) =>
-                              ref
-                                      .read(collectionSortByProvider.notifier)
-                                      .state =
-                                  value!,
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: collectionAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('Error: $e')),
-              data: (rows) {
-                if (rows.isEmpty) {
-                  return Center(
-                    child: Text('No daily collections for this date.'),
-                  );
-                }
-                return _buildSummaryAndList(context, rows, isRangeMode);
-              },
-            ),
-          ),
-        ],
+      body: collectionAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(child: Text('Error: $e')),
+        data: (rows) => _buildCollectionView(context, rows),
       ),
     );
   }
 
-  Widget _buildSummaryAndList(
-    BuildContext context,
-    List<CollectionRow> rows, [
-    bool isRangeMode = false,
-  ]) {
+  /// Builds the collection view. In normal mode the filters and summary bar
+  /// stay pinned above a scrolling customer list; in bulk mode the whole upper
+  /// area scrolls away with the customers so the maximum number of rows is
+  /// visible while bulk-selecting. The bulk bottom bar stays fixed via
+  /// [Scaffold.bottomNavigationBar].
+  Widget _buildCollectionView(BuildContext context, List<CollectionRow> rows) {
+    final isRangeMode = ref.watch(collectionDateRangeModeProvider);
+    final selectedDate = ref.watch(collectionDateFilterProvider);
+    final selectedGroup = ref.watch(collectionGroupFilterProvider);
+    final groupsAsync = ref.watch(groupListProvider);
+    final rangeStart = ref.watch(collectionRangeStartProvider);
+    final rangeEnd = ref.watch(collectionRangeEndProvider);
+
+    Widget rowTile(CollectionRow row) {
+      final installmentDue = isRangeMode
+          ? row.installmentAmount
+          : row.installmentAmount - row.schedulePaidAmount;
+      return _CollectionRowTile(
+        row: row,
+        installmentDue: installmentDue > 0 ? installmentDue : 0,
+        paid: _rowPaid(row),
+        onPaymentRecorded: () {
+          ref.invalidate(collectionListProvider);
+        },
+        selectMode: _bulkMode,
+        selected: _selectedLoanIds.contains(row.loanId),
+        onToggleSelected: () => _toggleSelected(row.loanId),
+      );
+    }
+
+    final headers = <Widget>[
+      const CollectionTypeToggle(isWeekly: false),
+      // Date mode toggle
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        child: Row(
+          children: [
+            const Icon(Icons.date_range, size: 20),
+            const SizedBox(width: 8),
+            const Text('Date Range', style: TextStyle(fontSize: 13)),
+            const Spacer(),
+            Switch(
+              value: isRangeMode,
+              onChanged: (v) {
+                ref.read(collectionDateRangeModeProvider.notifier).state = v;
+              },
+            ),
+          ],
+        ),
+      ),
+      // Date pickers — single or range
+      if (!isRangeMode)
+        _DatePickerTile(
+          selectedDate: selectedDate,
+          onDatePicked: (date) {
+            ref.read(collectionDateFilterProvider.notifier).state = date;
+          },
+        )
+      else
+        _DateRangePickerTile(
+          startDate: rangeStart,
+          endDate: rangeEnd,
+          onStartPicked: (date) {
+            ref.read(collectionRangeStartProvider.notifier).state = date;
+          },
+          onEndPicked: (date) {
+            ref.read(collectionRangeEndProvider.notifier).state = date;
+          },
+        ),
+      groupsAsync.when(
+        loading: () => const SizedBox.shrink(),
+        error: (_, _) => const SizedBox.shrink(),
+        data: (groups) {
+          if (groups.isEmpty) return const SizedBox.shrink();
+          return SizedBox(
+            height: 44,
+            child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              scrollDirection: Axis.horizontal,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: FilterChip(
+                    label: const Text('All'),
+                    selected: selectedGroup == null,
+                    onSelected: (_) =>
+                        ref.read(collectionGroupFilterProvider.notifier).state =
+                            null,
+                  ),
+                ),
+                ...groups.map(
+                  (g) => Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: FilterChip(
+                      label: Text(g.name),
+                      selected: selectedGroup == g.id,
+                      onSelected: (_) =>
+                          ref
+                              .read(collectionGroupFilterProvider.notifier)
+                              .state = selectedGroup == g.id
+                          ? null
+                          : g.id,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        child: DebouncedTextField(
+          decoration: const InputDecoration(
+            hintText: 'Search customer...',
+            prefixIcon: Icon(Icons.search, size: 20),
+            isDense: true,
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            border: OutlineInputBorder(),
+          ),
+          onChanged: (v) =>
+              ref.read(collectionSearchQueryProvider.notifier).state = v,
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        child: Row(
+          children: [
+            const Text('Sort by:', style: TextStyle(fontSize: 12)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Consumer(
+                builder: (context, ref, _) {
+                  final sortBy = ref.watch(collectionSortByProvider);
+                  return DropdownButtonHideUnderline(
+                    child: DropdownButton<CollectionSortBy>(
+                      value: sortBy,
+                      isDense: true,
+                      items: const [
+                        DropdownMenuItem(
+                          value: CollectionSortBy.name,
+                          child: Text('Name'),
+                        ),
+                        DropdownMenuItem(
+                          value: CollectionSortBy.amountDue,
+                          child: Text('Amount Due'),
+                        ),
+                        DropdownMenuItem(
+                          value: CollectionSortBy.amountPaid,
+                          child: Text('Amount Paid'),
+                        ),
+                        DropdownMenuItem(
+                          value: CollectionSortBy.outstanding,
+                          child: Text('Outstanding'),
+                        ),
+                      ],
+                      onChanged: (value) =>
+                          ref.read(collectionSortByProvider.notifier).state =
+                              value!,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    ];
+
+    // Normal mode: filters and the summary bar stay pinned; only the customer
+    // list scrolls.
+    if (!_bulkMode) {
+      return Column(
+        children: [
+          ...headers,
+          if (rows.isNotEmpty) _buildSummaryBar(context, rows),
+          Expanded(
+            child: KeyboardRefreshable(
+              onRefresh: () async => ref.invalidate(collectionListProvider),
+              child: rows.isEmpty
+                  ? const Center(
+                      child: Text('No daily collections for this date.'),
+                    )
+                  : ListView.separated(
+                      itemCount: rows.length,
+                      separatorBuilder: (_, _) => const Divider(height: 1),
+                      itemBuilder: (context, index) => rowTile(rows[index]),
+                    ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Bulk mode: the whole upper area scrolls away with the customers so the
+    // maximum number of rows is visible while bulk-selecting.
+    final bodyItems = <Widget>[...headers];
+    if (rows.isEmpty) {
+      bodyItems.add(
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 48),
+          child: Center(child: Text('No daily collections for this date.')),
+        ),
+      );
+    } else {
+      bodyItems.add(_buildSummaryBar(context, rows));
+    }
+
+    return KeyboardRefreshable(
+      onRefresh: () async => ref.invalidate(collectionListProvider),
+      child: ListView.builder(
+        itemCount: bodyItems.length + rows.length,
+        itemBuilder: (context, index) {
+          if (index < bodyItems.length) return bodyItems[index];
+          final row = rows[index - bodyItems.length];
+          // In range mode the payment cap is the first unpaid installment's
+          // remaining amount (amountPaid already aggregates the whole range),
+          // not that amount minus the range's already-paid total — that
+          // double-subtraction would leave an artificially small cap and
+          // push legitimate payment into savings.
+          return Column(children: [rowTile(row), const Divider(height: 1)]);
+        },
+      ),
+    );
+  }
+
+  Widget _buildSummaryBar(BuildContext context, List<CollectionRow> rows) {
     double totalDue = 0;
     double totalPaid = 0;
     int overdueCount = 0;
@@ -351,78 +409,58 @@ class _DailyCollectionScreenState extends ConsumerState<DailyCollectionScreen> {
       if (row.isOverdue) overdueCount++;
     }
 
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _SummaryItem(
-                label: 'Total Due',
-                value: CurrencyUtils.format(totalDue),
-              ),
-              _SummaryItem(
-                label: 'Total Paid',
-                value: CurrencyUtils.format(totalPaid),
-              ),
-              _SummaryItem(
-                label: 'Remaining',
-                value: CurrencyUtils.format(totalDue - totalPaid),
-              ),
-              _SummaryItem(
-                label: 'Overdue',
-                value: overdueCount.toString(),
-                highlight: overdueCount > 0,
-              ),
-            ],
+    return Container(
+      padding: const EdgeInsets.all(16),
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _SummaryItem(
+            label: 'Total Due',
+            value: CurrencyUtils.format(totalDue),
           ),
-        ),
-        Expanded(
-          child: KeyboardRefreshable(
-            onRefresh: () async => ref.invalidate(collectionListProvider),
-            child: ListView.separated(
-              itemCount: rows.length,
-              separatorBuilder: (_, _) => const Divider(height: 1),
-              itemBuilder: (context, index) {
-                final row = rows[index];
-                // In range mode the payment cap is the first unpaid installment's
-                // remaining amount (amountPaid already aggregates the whole range),
-                // not that amount minus the range's already-paid total — that
-                // double-subtraction would leave an artificially small cap and
-                // push legitimate payment into savings.
-                final installmentDue = isRangeMode
-                    ? row.installmentAmount
-                    : row.installmentAmount - row.amountPaid;
-                return _CollectionRowTile(
-                  row: row,
-                  installmentDue: installmentDue > 0 ? installmentDue : 0,
-                  onPaymentRecorded: () {
-                    ref.invalidate(collectionListProvider);
-                  },
-                  selectMode: _bulkMode,
-                  selected: _selectedLoanIds.contains(row.loanId),
-                  onToggleSelected: () => _toggleSelected(row.loanId),
-                );
-              },
-            ),
+          _SummaryItem(
+            label: 'Total Paid',
+            value: CurrencyUtils.format(totalPaid),
           ),
-        ),
-      ],
+          _SummaryItem(
+            label: 'Remaining',
+            value: CurrencyUtils.format(totalDue - totalPaid),
+          ),
+          _SummaryItem(
+            label: 'Overdue',
+            value: overdueCount.toString(),
+            highlight: overdueCount > 0,
+          ),
+        ],
+      ),
     );
   }
+
+  /// Whether the customer is considered "paid" for the viewed period.
+  ///
+  /// Single-date mode: paid when any completed payment was received ON that
+  /// date (`amountPaid` is collected-that-day, so a late payment for a missed
+  /// installment still marks the customer as paid on the day the money came
+  /// in). Range mode: paid when money was collected anywhere in the range
+  /// (`amountPaid` is collected-in-range) OR every in-range installment is
+  /// schedule-paid — matching the export's "Paid" cell, which is also
+  /// payment-date based, so the screen and the sheet always agree on who paid
+  /// within the selected period.
+  bool _rowPaid(CollectionRow row) => _isRangeMode
+      ? (row.amountPaid > 0 || row.isPaid)
+      : row.amountPaid > 0;
 
   /// The current installment's remaining amount, used as the loan-applied cap.
   double _rowInstallmentDue(CollectionRow row, bool isRangeMode) {
     final cap = isRangeMode
         ? row.installmentAmount
-        : row.installmentAmount - row.amountPaid;
+        : row.installmentAmount - row.schedulePaidAmount;
     return cap > 0 ? cap : 0;
   }
 
   Widget _buildBulkBottomBar(List<CollectionRow> rows) {
-    final selectable = rows.where((r) => !r.isPaid).toList();
+    final selectable = rows.where((r) => !_rowPaid(r)).toList();
     final selected = selectable
         .where((r) => _selectedLoanIds.contains(r.loanId))
         .toList();
@@ -460,7 +498,7 @@ class _DailyCollectionScreenState extends ConsumerState<DailyCollectionScreen> {
 
   Future<void> _openBulkCollect(List<CollectionRow> rows) async {
     final selected = rows
-        .where((r) => _selectedLoanIds.contains(r.loanId) && !r.isPaid)
+        .where((r) => _selectedLoanIds.contains(r.loanId) && !_rowPaid(r))
         .toList();
     if (selected.isEmpty) return;
     final items = selected.map((row) {
@@ -500,9 +538,7 @@ class _DailyCollectionScreenState extends ConsumerState<DailyCollectionScreen> {
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(bulkCollectSummary(outcome, draft.total)),
-      ),
+      SnackBar(content: Text(bulkCollectSummary(outcome, draft.total))),
     );
   }
 }
@@ -511,6 +547,7 @@ class _CollectionRowTile extends ConsumerWidget {
   const _CollectionRowTile({
     required this.row,
     required this.installmentDue,
+    required this.paid,
     required this.onPaymentRecorded,
     this.selectMode = false,
     this.selected = false,
@@ -519,6 +556,8 @@ class _CollectionRowTile extends ConsumerWidget {
 
   final CollectionRow row;
   final double installmentDue;
+  /// Whether the customer is considered paid for the viewed date/period.
+  final bool paid;
   final VoidCallback onPaymentRecorded;
   final bool selectMode;
   final bool selected;
@@ -527,7 +566,7 @@ class _CollectionRowTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return ListTile(
-      leading: selectMode && !row.isPaid
+      leading: selectMode && !paid
           ? Checkbox(
               value: selected,
               onChanged: (_) => onToggleSelected?.call(),
@@ -539,10 +578,10 @@ class _CollectionRowTile extends ConsumerWidget {
         '${row.groupName != null ? ' — ${row.groupName}' : ''}',
       ),
       trailing: selectMode
-          ? (row.isPaid
+          ? (paid
                 ? const Icon(Icons.check_circle, color: Colors.green)
                 : null)
-          : row.isPaid
+          : paid
           ? const Icon(Icons.check_circle, color: Colors.green)
           : Row(
               mainAxisSize: MainAxisSize.min,
@@ -558,7 +597,7 @@ class _CollectionRowTile extends ConsumerWidget {
                 ),
               ],
             ),
-      onTap: row.isPaid
+      onTap: paid
           ? null
           : selectMode
           ? onToggleSelected

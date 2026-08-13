@@ -60,10 +60,6 @@ class _WeeklyCollectionScreenState
   @override
   Widget build(BuildContext context) {
     final collectionAsync = ref.watch(weeklyCollectionListProvider);
-    final selectedDate = ref.watch(weeklyCollectionDateFilterProvider);
-    final isRangeMode = ref.watch(weeklyCollectionDateRangeModeProvider);
-    final rangeStart = ref.watch(weeklyCollectionRangeStartProvider);
-    final rangeEnd = ref.watch(weeklyCollectionRangeEndProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -185,147 +181,215 @@ class _WeeklyCollectionScreenState
       bottomNavigationBar: _bulkMode
           ? _buildBulkBottomBar(collectionAsync.valueOrNull ?? const [])
           : null,
-      body: Column(
-        children: [
-          const CollectionTypeToggle(isWeekly: true),
-          // Date mode toggle
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Row(
-              children: [
-                const Icon(Icons.date_range, size: 20),
-                const SizedBox(width: 8),
-                const Text('Date Range', style: TextStyle(fontSize: 13)),
-                const Spacer(),
-                Switch(
-                  value: isRangeMode,
-                  onChanged: (v) {
-                    ref
-                            .read(
-                              weeklyCollectionDateRangeModeProvider.notifier,
-                            )
-                            .state =
-                        v;
-                  },
-                ),
-              ],
-            ),
-          ),
-          // Date pickers — single or range
-          if (!isRangeMode)
-            _WeeklyDatePickerTile(
-              selectedDate: selectedDate,
-              onDatePicked: (date) {
-                ref.read(weeklyCollectionDateFilterProvider.notifier).state =
-                    date;
-              },
-            )
-          else
-            _WeeklyDateRangePickerTile(
-              startDate: rangeStart,
-              endDate: rangeEnd,
-              onStartPicked: (date) {
-                ref.read(weeklyCollectionRangeStartProvider.notifier).state =
-                    date;
-              },
-              onEndPicked: (date) {
-                ref.read(weeklyCollectionRangeEndProvider.notifier).state =
-                    date;
-              },
-            ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: DebouncedTextField(
-              decoration: const InputDecoration(
-                hintText: 'Search customer...',
-                prefixIcon: Icon(Icons.search, size: 20),
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                border: OutlineInputBorder(),
-              ),
-              onChanged: (v) =>
-                  ref.read(weeklyCollectionSearchQueryProvider.notifier).state =
-                      v,
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Row(
-              children: [
-                const Text('Sort by:', style: TextStyle(fontSize: 12)),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Consumer(
-                    builder: (context, ref, _) {
-                      final sortBy = ref.watch(weeklyCollectionSortByProvider);
-                      return DropdownButtonHideUnderline(
-                        child: DropdownButton<CollectionSortBy>(
-                          value: sortBy,
-                          isDense: true,
-                          items: const [
-                            DropdownMenuItem(
-                              value: CollectionSortBy.disbursementDate,
-                              child: Text('Disbursement Date'),
-                            ),
-                            DropdownMenuItem(
-                              value: CollectionSortBy.paymentDay,
-                              child: Text('Payment Day'),
-                            ),
-                            DropdownMenuItem(
-                              value: CollectionSortBy.name,
-                              child: Text('Name'),
-                            ),
-                            DropdownMenuItem(
-                              value: CollectionSortBy.amountDue,
-                              child: Text('Amount Due'),
-                            ),
-                            DropdownMenuItem(
-                              value: CollectionSortBy.amountPaid,
-                              child: Text('Amount Paid'),
-                            ),
-                            DropdownMenuItem(
-                              value: CollectionSortBy.outstanding,
-                              child: Text('Remaining'),
-                            ),
-                          ],
-                          onChanged: (value) =>
-                              ref
-                                      .read(
-                                        weeklyCollectionSortByProvider.notifier,
-                                      )
-                                      .state =
-                                  value!,
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: collectionAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('Error: $e')),
-              data: (rows) {
-                if (rows.isEmpty) {
-                  return const Center(
-                    child: Text('No weekly loans due in this period.'),
-                  );
-                }
-                return _buildSummaryAndList(context, rows);
-              },
-            ),
-          ),
-        ],
+      body: collectionAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(child: Text('Error: $e')),
+        data: (rows) => _buildCollectionView(context, rows),
       ),
     );
   }
 
-  Widget _buildSummaryAndList(
+  /// Builds the collection view. In normal mode the filters and summary bar
+  /// stay pinned above a scrolling customer list; in bulk mode the whole upper
+  /// area scrolls away with the customers so the maximum number of rows is
+  /// visible while bulk-selecting. The bulk bottom bar stays fixed via
+  /// [Scaffold.bottomNavigationBar].
+  Widget _buildCollectionView(
+    BuildContext context,
+    List<WeeklyCollectionRow> rows,
+  ) {
+    final isRangeMode = ref.watch(weeklyCollectionDateRangeModeProvider);
+    final selectedDate = ref.watch(weeklyCollectionDateFilterProvider);
+    final rangeStart = ref.watch(weeklyCollectionRangeStartProvider);
+    final rangeEnd = ref.watch(weeklyCollectionRangeEndProvider);
+
+    Widget rowTile(WeeklyCollectionRow row) {
+      return _WeeklyCollectionRowTile(
+        row: row,
+        onPaymentRecorded: () {
+          ref.invalidate(weeklyCollectionListProvider);
+        },
+        selectMode: _bulkMode,
+        selected: _selectedLoanIds.contains(row.loanId),
+        onToggleSelected: () => _toggleSelected(row.loanId),
+      );
+    }
+
+    final headers = <Widget>[
+      const CollectionTypeToggle(isWeekly: true),
+      // Date mode toggle
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        child: Row(
+          children: [
+            const Icon(Icons.date_range, size: 20),
+            const SizedBox(width: 8),
+            const Text('Date Range', style: TextStyle(fontSize: 13)),
+            const Spacer(),
+            Switch(
+              value: isRangeMode,
+              onChanged: (v) {
+                ref.read(weeklyCollectionDateRangeModeProvider.notifier).state =
+                    v;
+              },
+            ),
+          ],
+        ),
+      ),
+      // Date pickers — single or range
+      if (!isRangeMode)
+        _WeeklyDatePickerTile(
+          selectedDate: selectedDate,
+          onDatePicked: (date) {
+            ref.read(weeklyCollectionDateFilterProvider.notifier).state = date;
+          },
+        )
+      else
+        _WeeklyDateRangePickerTile(
+          startDate: rangeStart,
+          endDate: rangeEnd,
+          onStartPicked: (date) {
+            ref.read(weeklyCollectionRangeStartProvider.notifier).state = date;
+          },
+          onEndPicked: (date) {
+            ref.read(weeklyCollectionRangeEndProvider.notifier).state = date;
+          },
+        ),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        child: DebouncedTextField(
+          decoration: const InputDecoration(
+            hintText: 'Search customer...',
+            prefixIcon: Icon(Icons.search, size: 20),
+            isDense: true,
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            border: OutlineInputBorder(),
+          ),
+          onChanged: (v) =>
+              ref.read(weeklyCollectionSearchQueryProvider.notifier).state = v,
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        child: Row(
+          children: [
+            const Text('Sort by:', style: TextStyle(fontSize: 12)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Consumer(
+                builder: (context, ref, _) {
+                  final sortBy = ref.watch(weeklyCollectionSortByProvider);
+                  return DropdownButtonHideUnderline(
+                    child: DropdownButton<CollectionSortBy>(
+                      value: sortBy,
+                      isDense: true,
+                      items: const [
+                        DropdownMenuItem(
+                          value: CollectionSortBy.disbursementDate,
+                          child: Text('Disbursement Date'),
+                        ),
+                        DropdownMenuItem(
+                          value: CollectionSortBy.paymentDay,
+                          child: Text('Payment Day'),
+                        ),
+                        DropdownMenuItem(
+                          value: CollectionSortBy.name,
+                          child: Text('Name'),
+                        ),
+                        DropdownMenuItem(
+                          value: CollectionSortBy.amountDue,
+                          child: Text('Amount Due'),
+                        ),
+                        DropdownMenuItem(
+                          value: CollectionSortBy.amountPaid,
+                          child: Text('Amount Paid'),
+                        ),
+                        DropdownMenuItem(
+                          value: CollectionSortBy.outstanding,
+                          child: Text('Remaining'),
+                        ),
+                      ],
+                      onChanged: (value) =>
+                          ref
+                                  .read(weeklyCollectionSortByProvider.notifier)
+                                  .state =
+                              value!,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    ];
+
+    // Normal mode: filters and the summary bar stay pinned; only the customer
+    // list scrolls.
+    if (!_bulkMode) {
+      final sectionItems = _sectionItems(rows);
+      return Column(
+        children: [
+          ...headers,
+          if (rows.isNotEmpty) _buildSummaryBar(context, rows),
+          Expanded(
+            child: KeyboardRefreshable(
+              onRefresh: () async =>
+                  ref.invalidate(weeklyCollectionListProvider),
+              child: rows.isEmpty
+                  ? const Center(
+                      child: Text('No weekly loans due in this period.'),
+                    )
+                  : ListView.builder(
+                      itemCount: sectionItems.length,
+                      itemBuilder: (context, index) {
+                        final (day, row) = sectionItems[index];
+                        if (row == null) {
+                          return _PaymentDayHeader(day: day ?? '');
+                        }
+                        return Column(
+                          children: [rowTile(row), const Divider(height: 1)],
+                        );
+                      },
+                    ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Bulk mode: the whole upper area scrolls away with the customers so the
+    // maximum number of rows is visible while bulk-selecting.
+    final sectionItems = _sectionItems(rows);
+    final bodyItems = <Widget>[...headers];
+    if (rows.isEmpty) {
+      bodyItems.add(
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 48),
+          child: Center(child: Text('No weekly loans due in this period.')),
+        ),
+      );
+    } else {
+      bodyItems.add(_buildSummaryBar(context, rows));
+    }
+
+    return KeyboardRefreshable(
+      onRefresh: () async => ref.invalidate(weeklyCollectionListProvider),
+      child: ListView.builder(
+        itemCount: bodyItems.length + sectionItems.length,
+        itemBuilder: (context, index) {
+          if (index < bodyItems.length) return bodyItems[index];
+          final (day, row) = sectionItems[index - bodyItems.length];
+          if (row == null) {
+            return _PaymentDayHeader(day: day ?? '');
+          }
+          return Column(children: [rowTile(row), const Divider(height: 1)]);
+        },
+      ),
+    );
+  }
+
+  Widget _buildSummaryBar(
     BuildContext context,
     List<WeeklyCollectionRow> rows,
   ) {
@@ -340,63 +404,31 @@ class _WeeklyCollectionScreenState
       if (row.isOverdue) overdueCount++;
     }
 
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _SummaryItem(
-                label: 'Expected This Week',
-                value: CurrencyUtils.format(totalExpected),
-              ),
-              _SummaryItem(
-                label: 'Collected This Week',
-                value: CurrencyUtils.format(totalCollectedThisPeriod),
-              ),
-              _SummaryItem(
-                label: 'Total Paid',
-                value: CurrencyUtils.format(totalPaid),
-              ),
-              _SummaryItem(
-                label: 'Overdue',
-                value: overdueCount.toString(),
-                highlight: overdueCount > 0,
-              ),
-            ],
+    return Container(
+      padding: const EdgeInsets.all(16),
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _SummaryItem(
+            label: 'Expected This Week',
+            value: CurrencyUtils.format(totalExpected),
           ),
-        ),
-        Expanded(
-          child: KeyboardRefreshable(
-            onRefresh: () async => ref.invalidate(weeklyCollectionListProvider),
-            child: ListView.builder(
-              itemCount: _sectionItems(rows).length,
-              itemBuilder: (context, index) {
-                final (day, row) = _sectionItems(rows)[index];
-                if (row == null) {
-                  return _PaymentDayHeader(day: day ?? '');
-                }
-                return Column(
-                  children: [
-                    _WeeklyCollectionRowTile(
-                      row: row,
-                      onPaymentRecorded: () {
-                        ref.invalidate(weeklyCollectionListProvider);
-                      },
-                      selectMode: _bulkMode,
-                      selected: _selectedLoanIds.contains(row.loanId),
-                      onToggleSelected: () => _toggleSelected(row.loanId),
-                    ),
-                    const Divider(height: 1),
-                  ],
-                );
-              },
-            ),
+          _SummaryItem(
+            label: 'Collected This Week',
+            value: CurrencyUtils.format(totalCollectedThisPeriod),
           ),
-        ),
-      ],
+          _SummaryItem(
+            label: 'Total Paid',
+            value: CurrencyUtils.format(totalPaid),
+          ),
+          _SummaryItem(
+            label: 'Overdue',
+            value: overdueCount.toString(),
+            highlight: overdueCount > 0,
+          ),
+        ],
+      ),
     );
   }
 
@@ -422,7 +454,8 @@ class _WeeklyCollectionScreenState
   }
 
   Widget _buildBulkBottomBar(List<WeeklyCollectionRow> rows) {
-    final selectable = rows.where((r) => !r.isCurrentInstallmentPaid).toList();
+    final selectable =
+        rows.where((r) => !r.isPaidForPeriod).toList();
     final selected = selectable
         .where((r) => _selectedLoanIds.contains(r.loanId))
         .toList();
@@ -452,15 +485,14 @@ class _WeeklyCollectionScreenState
   }
 
   double _rowDefaultAmount(WeeklyCollectionRow row) {
-    return row.installmentDue > 0
-        ? row.installmentDue
-        : row.outstandingBalance;
+    return row.installmentDue > 0 ? row.installmentDue : row.outstandingBalance;
   }
 
   Future<void> _openBulkCollect(List<WeeklyCollectionRow> rows) async {
     final selected = rows
-        .where((r) =>
-            _selectedLoanIds.contains(r.loanId) && !r.isCurrentInstallmentPaid)
+        .where(
+          (r) => _selectedLoanIds.contains(r.loanId) && !r.isPaidForPeriod,
+        )
         .toList();
     if (selected.isEmpty) return;
     final items = selected.map((row) {
@@ -468,7 +500,8 @@ class _WeeklyCollectionScreenState
         loanId: row.loanId,
         customerId: row.customerId,
         customerName: row.customerName,
-        subtitle: 'Week ${row.currentInstallmentNumber}'
+        subtitle:
+            'Week ${row.currentInstallmentNumber}'
             ' • ${row.currentInstallmentDueDate}',
         defaultAmount: _rowDefaultAmount(row),
         installmentDue: row.installmentDue,
@@ -498,9 +531,7 @@ class _WeeklyCollectionScreenState
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(bulkCollectSummary(outcome, draft.total)),
-      ),
+      SnackBar(content: Text(bulkCollectSummary(outcome, draft.total))),
     );
   }
 }
@@ -562,11 +593,16 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
         CurrencyUtils.defaultSymbol;
     final theme = Theme.of(context);
 
-    // Status indicator widget
+    // Status indicator widget. A customer shows as "Paid" when money was
+    // received in the viewed period (payment-date based) OR the whole loan is
+    // completed — NOT when the schedule marks the current installment paid, so
+    // a late payment that cleared an older missed installment reads as
+    // "collected" on the period it happened, never on the period it cleared.
+    final paidForPeriod = row.isPaidForPeriod;
     Widget statusIndicator;
     String statusText;
 
-    if (row.isCurrentInstallmentPaid) {
+    if (paidForPeriod) {
       statusIndicator = const Icon(
         Icons.check_circle,
         color: Colors.green,
@@ -582,7 +618,7 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
       statusText = 'Partial';
     } else if (row.isOverdue) {
       statusIndicator = Icon(Icons.warning, color: Colors.red, size: 20);
-      statusText = 'Overdue ${row.daysOverdue}d';
+      statusText = row.daysOverdue > 0 ? 'Overdue ${row.daysOverdue}d' : 'Overdue';
     } else {
       statusIndicator = const Icon(
         Icons.schedule,
@@ -592,8 +628,15 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
       statusText = 'Pending';
     }
 
+    // The amount shown next to the status is what was actually collected in
+    // the viewed period when paid (matches the green tick), otherwise the
+    // current installment's due amount.
+    final displayAmount = paidForPeriod && row.collectedThisPeriod > 0
+        ? row.collectedThisPeriod
+        : row.currentInstallmentAmount;
+
     return ListTile(
-      leading: selectMode && !row.isCurrentInstallmentPaid
+      leading: selectMode && !paidForPeriod
           ? Checkbox(
               value: selected,
               onChanged: (_) => onToggleSelected?.call(),
@@ -617,12 +660,16 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
             'Week ${row.currentInstallmentNumber} • ${row.currentInstallmentDueDate}',
           ),
           Text(
-            '${CurrencyUtils.format(row.currentInstallmentAmount, symbol: currency)}  •  $statusText',
+            '${CurrencyUtils.format(displayAmount, symbol: currency)}  •  $statusText',
             style: TextStyle(
-              color: row.daysOverdue > 0
+              color: paidForPeriod
+                  ? Colors.green
+                  : row.daysOverdue > 0
                   ? Colors.red
                   : theme.colorScheme.onSurfaceVariant,
-              fontWeight: row.daysOverdue > 0
+              fontWeight: paidForPeriod
+                  ? FontWeight.normal
+                  : row.daysOverdue > 0
                   ? FontWeight.bold
                   : FontWeight.normal,
             ),
@@ -631,7 +678,7 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
       ),
       isThreeLine: false,
       trailing: selectMode
-          ? (row.isCurrentInstallmentPaid
+          ? (paidForPeriod
                 ? Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -643,7 +690,7 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
                     ],
                   )
                 : null)
-          : row.isCurrentInstallmentPaid
+          : paidForPeriod
           ? Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -687,7 +734,7 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
                 ),
               ],
             ),
-      onTap: row.isCurrentInstallmentPaid
+      onTap: paidForPeriod
           ? null
           : selectMode
           ? onToggleSelected

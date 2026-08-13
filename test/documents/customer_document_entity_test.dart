@@ -19,4 +19,21 @@ void main() {
     expect(restored.isPdf, isTrue);
     expect(restored.encryptedPath, document.encryptedPath);
   });
+
+  test(
+      'document mapping falls back to the epoch for a malformed uploaded_at '
+      '(cloud-tamper guard)', () {
+    final restored = CustomerDocument.fromMap({
+      'id': 'DOC-1',
+      'customer_id': 'CUS-1',
+      'loan_id': null,
+      'doc_type': 'other',
+      'file_path': '/secure/DOC-1.enc',
+      'original_name': 'x.pdf',
+      'mime_type': 'application/pdf',
+      'uploaded_at': 'not-a-date',
+    });
+
+    expect(restored.uploadedAt, DateTime.fromMillisecondsSinceEpoch(0));
+  });
 }

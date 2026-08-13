@@ -75,6 +75,7 @@ class CustomerDocument {
         encryptedPath: map['file_path']! as String,
         originalName: map['original_name'] as String? ?? 'Document',
         mimeType: map['mime_type'] as String? ?? 'application/octet-stream',
-        uploadedAt: DateTime.parse(map['uploaded_at']! as String),
+        uploadedAt: DateTime.tryParse(map['uploaded_at']! as String) ??
+            DateTime.fromMillisecondsSinceEpoch(0),
       );
 }

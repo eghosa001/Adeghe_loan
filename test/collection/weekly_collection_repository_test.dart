@@ -554,6 +554,88 @@ void main() {
     );
   });
 
+  test('collectedThisPeriod counts completed payments received inside the range only (money rule)',
+      () async {
+    final db = await openDb();
+    addTearDown(db.close);
+    await seedWeeklyLoan(db, 'L1', 'C1', 'Ada'); // installments 2026-08-05..
+
+    // Inside the viewed week: 550 applied (P1) + 550 reversed (P3, excluded).
+    await db.insert('payments', {
+      'id': 'P1',
+      'loan_id': 'L1',
+      'customer_id': 'C1',
+      'amount': 550,
+      'status': 'completed',
+      'payment_date': '2026-08-06',
+    });
+    // Outside the viewed week: must NOT count toward this week's collection.
+    await db.insert('payments', {
+      'id': 'P2',
+      'loan_id': 'L1',
+      'customer_id': 'C1',
+      'amount': 550,
+      'status': 'completed',
+      'payment_date': '2026-08-20',
+    });
+    await db.insert('payments', {
+      'id': 'P3',
+      'loan_id': 'L1',
+      'customer_id': 'C1',
+      'amount': 550,
+      'status': 'reversed',
+      'payment_date': '2026-08-06',
+    });
+
+    final result = await repo(db)
+        .getWeeklyCollectionByDateRange(DateTime(2026, 8, 3), DateTime(2026, 8, 7));
+    result.when(
+      success: (rows) {
+        expect(rows, hasLength(1));
+        // amountPaid is all-time (money rule); collectedThisPeriod is the
+        // subset received within the viewed range.
+        expect(rows.first.amountPaid, closeTo(1100.0, 0.001));
+        expect(rows.first.collectedThisPeriod, closeTo(550.0, 0.001));
+      },
+      failure: (f) => fail('query failed: $f'),
+    );
+  });
+
+  test('collectedThisPeriod subtracts overpayment surplus (money rule)',
+      () async {
+    final db = await openDb();
+    addTearDown(db.close);
+    await seedWeeklyLoan(db, 'L1', 'C1', 'Ada');
+
+    // 700 received, of which 150 went to savings as an overpayment → 550 applied.
+    await db.insert('payments', {
+      'id': 'P2',
+      'loan_id': 'L1',
+      'customer_id': 'C1',
+      'amount': 700,
+      'status': 'completed',
+      'payment_date': '2026-08-06',
+    });
+    await db.insert('savings_transactions', {
+      'id': 'S1',
+      'customer_id': 'C1',
+      'amount': 150,
+      'type': 'overpayment',
+      'reference_loan_payment_id': 'P2',
+      'created_at': '2026-08-06T10:00:00.000Z',
+    });
+
+    final result = await repo(db)
+        .getWeeklyCollectionByDateRange(DateTime(2026, 8, 3), DateTime(2026, 8, 7));
+    result.when(
+      success: (rows) {
+        expect(rows, hasLength(1));
+        expect(rows.first.collectedThisPeriod, closeTo(550.0, 0.001));
+      },
+      failure: (f) => fail('query failed: $f'),
+    );
+  });
+
   test('paymentDaySortValue groups by repayment day Monday to Sunday', () async {
     final db = await openDb();
     addTearDown(db.close);

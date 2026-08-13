@@ -21,14 +21,29 @@ class CollectionRepository {
       final dateStr = date.toIso8601String().split('T').first;
       final todayStr = DateTime.now().toIso8601String().split('T').first;
 
+      // A loan is shown for the selected date when it either has an
+      // installment due that day (non-holiday) OR received a completed payment
+      // on that day. The second clause is what lets a late payment that was
+      // applied to an older missed installment still appear as "Paid" on the
+      // day the money was actually received.
       final conditions = <String>[
-        'DATE(rs.due_date) = ?',
         "l.status = 'active'",
-        notOnEnabledHolidaySql,
+        '''
+          (rs.loan_id IS NOT NULL
+           OR EXISTS (
+             SELECT 1 FROM payments px
+             WHERE px.loan_id = l.id AND px.status = 'completed'
+               AND DATE(px.payment_date) = ?
+           )
+          )
+        ''',
       ];
-      // The overdue subquery placeholder binds first (it sits in the SELECT
-      // list, before the WHERE clause), so todayStr leads the args.
-      final args = <dynamic>[todayStr, dateStr];
+      // Placeholder order (positional binding): the amountPaid correlated
+      // subquery binds first (`DATE(p.payment_date) = ?` in the SELECT list),
+      // then the overdue subquery's `?` (today's date), then the LEFT JOIN's
+      // due-date `?`, then the payment-visibility EXISTS `?`, then the WHERE
+      // filter placeholders (c.group_id, l.loan_type).
+      final args = <dynamic>[dateStr, todayStr, dateStr, dateStr];
 
       if (groupId != null && groupId.isNotEmpty) {
         conditions.add('c.group_id = ?');
@@ -48,10 +63,20 @@ class CollectionRepository {
           c.phone AS phone,
           l.id AS loanId,
           l.loan_type AS loanType,
-          COALESCE(l.custom_collection_amount, rs.amount) AS amountDue,
-          rs.paid_amount AS amountPaid,
-          rs.amount AS installmentAmount,
-          rs.status AS scheduleStatus,
+          CASE WHEN rs.loan_id IS NULL THEN 0.0
+               ELSE COALESCE(l.custom_collection_amount, rs.amount)
+          END AS amountDue,
+          COALESCE((
+            SELECT SUM(p.amount - COALESCE(st.amount, 0.0))
+            FROM payments p
+            LEFT JOIN savings_transactions st
+              ON st.reference_loan_payment_id = p.id AND st.type = 'overpayment'
+            WHERE p.loan_id = l.id AND p.status = 'completed'
+              AND DATE(p.payment_date) = ?
+          ), 0.0) AS amountPaid,
+          COALESCE(rs.amount, 0.0) AS installmentAmount,
+          COALESCE(rs.paid_amount, 0.0) AS schedulePaidAmount,
+          COALESCE(rs.status, 'pending') AS scheduleStatus,
           l.outstanding_balance AS outstandingBalance,
           l.status AS status,
           l.notes AS remarks,
@@ -62,11 +87,14 @@ class CollectionRepository {
             WHERE rs2.loan_id = l.id AND rs2.status != 'paid'
               AND DATE(rs2.due_date) < ?
           ), 0.0) AS overdueAmount
-        FROM repayment_schedule rs
-        INNER JOIN loans l ON rs.loan_id = l.id
+        FROM loans l
         INNER JOIN customers c ON l.customer_id = c.id
         LEFT JOIN customer_groups cg ON c.group_id = cg.id
+        LEFT JOIN repayment_schedule rs
+          ON rs.loan_id = l.id AND DATE(rs.due_date) = ?
+            AND $notOnEnabledHolidaySql
         WHERE $whereClause
+        GROUP BY l.id
         ORDER BY c.full_name COLLATE NOCASE ASC
       ''', args);
 
@@ -83,6 +111,8 @@ class CollectionRepository {
           amountDue: amountDue,
           amountPaid: amountPaid,
           installmentAmount: installmentAmount,
+          schedulePaidAmount:
+              (row['schedulePaidAmount'] as num?)?.toDouble() ?? 0.0,
           outstandingBalance:
               (row['outstandingBalance'] as num?)?.toDouble() ?? 0.0,
           status: row['status'] as String? ?? '',
@@ -233,14 +263,18 @@ cg.name AS groupName,
       final endStr = end.toIso8601String().split('T').first;
       final todayStr = DateTime.now().toIso8601String().split('T').first;
 
-      // Filter by installments whose due_date falls within the range.
+      // A loan is shown for the range when it either has an installment due in
+      // the range (non-holiday) OR received a completed payment in the range —
+      // the second clause is what lets a payment received on a non-installment
+      // day (or a late payment applied to an older missed installment) still
+      // appear as "Paid" on the day/period the money was actually received.
       //
-      // A loan stays visible while the range covers ANY of its installments â€”
-      // including already-paid ones â€” so a paid installment keeps showing as
-      // "Paid" (mirrors the Daily Collection sheet). The row's installment
-      // fields come from the FIRST installment in range, preferring an unpaid
-      // one; when every installment in range is paid the first (paid)
-      // installment is shown so the green tick/Paid state is preserved.
+      // The row's installment fields come from the FIRST installment in range,
+      // preferring an unpaid one; when every installment in range is paid the
+      // first (paid) installment is shown so the green tick/Paid state is
+      // preserved. When the range contains NO installment at all (a pure
+      // payment-day row) the first unpaid installment overall is shown instead,
+      // so the quick-pay cap and "current installment" stay meaningful.
       final rows = await db.rawQuery('''
         SELECT
           c.id AS customerId,
@@ -258,6 +292,14 @@ cg.name AS groupName,
           l.start_date AS paymentAnchorDate,
           l.status AS status,
           COALESCE(SUM(p.amount - COALESCE(st.amount, 0.0)), 0.0) AS amountPaid,
+          COALESCE((
+            SELECT SUM(p2.amount - COALESCE(st2.amount, 0.0))
+            FROM payments p2
+            LEFT JOIN savings_transactions st2
+              ON st2.reference_loan_payment_id = p2.id AND st2.type = 'overpayment'
+            WHERE p2.loan_id = l.id AND p2.status = 'completed'
+              AND DATE(p2.payment_date) BETWEEN ? AND ?
+          ), 0.0) AS collectedThisPeriod,
           COALESCE((
             SELECT rs.amount
             FROM repayment_schedule rs
@@ -302,6 +344,11 @@ cg.name AS groupName,
                FROM repayment_schedule rs
                WHERE rs.loan_id = t.loan_id
                  AND DATE(rs.due_date) BETWEEN ? AND ?
+                 AND $notOnEnabledHolidaySql),
+              (SELECT MIN(rs.installment_number)
+               FROM repayment_schedule rs
+               WHERE rs.loan_id = t.loan_id
+                 AND rs.status != 'paid'
                  AND $notOnEnabledHolidaySql)
             )
           )
@@ -310,15 +357,30 @@ cg.name AS groupName,
         LEFT JOIN savings_transactions st
           ON st.reference_loan_payment_id = p.id AND st.type = 'overpayment'
         WHERE l.loan_type = 'weekly' AND l.status IN ('active', 'completed')
-          AND EXISTS (
-            SELECT 1 FROM repayment_schedule rs
-            WHERE rs.loan_id = l.id
-              AND DATE(rs.due_date) BETWEEN ? AND ?
-              AND $notOnEnabledHolidaySql
+          AND (
+            EXISTS (
+              SELECT 1 FROM repayment_schedule rs
+              WHERE rs.loan_id = l.id
+                AND DATE(rs.due_date) BETWEEN ? AND ?
+                AND $notOnEnabledHolidaySql
+            )
+            OR EXISTS (
+              SELECT 1 FROM payments px
+              WHERE px.loan_id = l.id AND px.status = 'completed'
+                AND DATE(px.payment_date) BETWEEN ? AND ?
+            )
           )
         GROUP BY l.id
         ORDER BY l.start_date ASC, c.full_name COLLATE NOCASE ASC
-      ''', [todayStr, startStr, endStr, startStr, endStr, startStr, endStr]);
+      ''', [
+        startStr, endStr, todayStr, startStr, endStr, startStr, endStr,
+        startStr, endStr, startStr, endStr,
+      ]);
+      // Placeholder order (positional binding — the SQL text binds in this
+      // exact order): collectedThisPeriod (BETWEEN), the overdue `?` (today),
+      // the tgt derived table's two MIN installment subqueries (each BETWEEN),
+      // the installment-visibility EXISTS (BETWEEN), then the payment
+      // visibility EXISTS (BETWEEN).
 
       final weeklyRows = rows.map((row) {
         final currentInstallmentDueDate = row['currentInstallmentDueDate'] as String? ?? '';
@@ -336,10 +398,12 @@ cg.name AS groupName,
           }
         }
 
-        double collectedThisPeriod = 0.0;
-        if (currentInstallmentStatus == 'paid' || currentInstallmentStatus == 'partial') {
-          collectedThisPeriod = currentInstallmentPaidAmount;
-        }
+        // What was actually collected within the viewed period — completed
+        // payments received in the date range (money rule). This attributes a
+        // late payment for an older missed installment to the week the money
+        // was received (vs. the installment's due week).
+        final collectedThisPeriod =
+            (row['collectedThisPeriod'] as num?)?.toDouble() ?? 0.0;
 
         return WeeklyCollectionRow(
           customerId: row['customerId'] as String? ?? '',
