@@ -98,10 +98,22 @@ class _WeeklyCollectionScreenState
                     : await repo.getWeeklyCollectionByDate(
                         ref.read(weeklyCollectionDateFilterProvider),
                       );
-                final rows = rowsResult.when(
+                var rows = rowsResult.when(
                   success: (rows) => rows,
                   failure: (f) => throw f,
                 );
+                // Honor the search box: the export must match what the list
+                // shows (the repository query itself has no search param, the
+                // provider filters client-side).
+                final query =
+                    ref.read(weeklyCollectionSearchQueryProvider).trim();
+                if (query.isNotEmpty) {
+                  rows = rows
+                      .where((r) => r.customerName
+                          .toLowerCase()
+                          .contains(query.toLowerCase()))
+                      .toList();
+                }
                 // Use the selected date for the report title/filename
                 final selectedDate = isRange
                     ? ref.read(weeklyCollectionRangeStartProvider)
@@ -410,22 +422,30 @@ class _WeeklyCollectionScreenState
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _SummaryItem(
-            label: 'Expected This Week',
-            value: CurrencyUtils.format(totalExpected),
+          Expanded(
+            child: _SummaryItem(
+              label: 'Expected This Week',
+              value: CurrencyUtils.format(totalExpected),
+            ),
           ),
-          _SummaryItem(
-            label: 'Collected This Week',
-            value: CurrencyUtils.format(totalCollectedThisPeriod),
+          Expanded(
+            child: _SummaryItem(
+              label: 'Collected This Week',
+              value: CurrencyUtils.format(totalCollectedThisPeriod),
+            ),
           ),
-          _SummaryItem(
-            label: 'Total Paid',
-            value: CurrencyUtils.format(totalPaid),
+          Expanded(
+            child: _SummaryItem(
+              label: 'Total Paid',
+              value: CurrencyUtils.format(totalPaid),
+            ),
           ),
-          _SummaryItem(
-            label: 'Overdue',
-            value: overdueCount.toString(),
-            highlight: overdueCount > 0,
+          Expanded(
+            child: _SummaryItem(
+              label: 'Overdue',
+              value: overdueCount.toString(),
+              highlight: overdueCount > 0,
+            ),
           ),
         ],
       ),
@@ -528,6 +548,7 @@ class _WeeklyCollectionScreenState
       items: draft.items,
       amounts: draft.amounts,
       method: draft.method,
+      requestId: draft.requestId,
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -762,7 +783,8 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
     final currency =
         ref.read(currencySymbolProvider).valueOrNull ??
         CurrencyUtils.defaultSymbol;
-    final amountCtrl = TextEditingController(text: amount.toStringAsFixed(0));
+    final amountCtrl =
+        TextEditingController(text: amount.toStringAsFixed(2));
     // Stable id for THIS payment action: reused if the confirm is retried so a
     // timeout/retry can never double-record the same logical payment (F3).
     final requestId = const Uuid().v4();

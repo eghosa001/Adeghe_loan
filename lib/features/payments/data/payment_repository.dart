@@ -277,6 +277,7 @@ class PaymentRepository {
         remarks: remarks,
         priorLoanStatus: priorLoanStatus,
         clientRequestId: clientRequestId,
+        createdAt: DateTime.now(),
       );
       await txn.insert('payments', payment.toMap());
 
@@ -455,7 +456,9 @@ class PaymentRepository {
       'payments',
       where: 'loan_id = ?',
       whereArgs: [loanId],
-      orderBy: 'payment_date DESC',
+      // created_at breaks the same-day tie (payment_date is a date-only
+      // string) so payments recorded minutes apart render in a stable order.
+      orderBy: 'payment_date DESC, created_at DESC',
     );
     return rows.map((e) => Payment.fromMap(e)).toList(growable: false);
   }
@@ -525,6 +528,7 @@ class PaymentRepository {
         // restore 'active' instead of leaving it stuck on 'completed' with a
         // positive outstanding balance.
         priorLoanStatus: 'active',
+        createdAt: DateTime.now(),
       );
       await txn.insert('payments', payment.toMap());
 

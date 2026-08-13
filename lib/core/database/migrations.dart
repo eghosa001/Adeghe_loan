@@ -34,6 +34,7 @@ class DatabaseMigrations {
     if (pending(21)) await _v21(db);
     if (pending(22)) await _v22(db);
     if (pending(23)) await _v23(db);
+    if (pending(24)) await _v24(db);
   }
 
   /// v20 — indexes backing the money-rule join and common date-range filters.
@@ -206,6 +207,24 @@ class DatabaseMigrations {
         'UPDATE documents SET updated_at = ? WHERE updated_at IS NULL', [now]);
     await db.execute(
         'UPDATE holidays SET updated_at = ? WHERE updated_at IS NULL', [now]);
+  }
+
+  /// v24 — add `payments.created_at`, the same-day tie-breaker that
+  /// `getPaymentsForLoan` has always ordered by. The column was referenced in
+  /// the repository's `ORDER BY payment_date DESC, created_at DESC` but never
+  /// existed in the schema (fresh DDL or any migration), so loading a loan's
+  /// payment history threw `no such column: created_at` on every device.
+  /// Existing rows are back-filled so their order is stable; new inserts write
+  /// a real ISO-8601 timestamp.
+  static Future<void> _v24(Database db) async {
+    final columns = await db.rawQuery('PRAGMA table_info(payments)');
+    final hasColumn = columns.any((c) => c['name'] == 'created_at');
+    if (!hasColumn) {
+      await db.execute('ALTER TABLE payments ADD COLUMN created_at TEXT');
+    }
+    await db.execute(
+        "UPDATE payments SET created_at = COALESCE(updated_at, "
+        "payment_date || 'T00:00:00.000Z') WHERE created_at IS NULL");
   }
 
   /// Tables that get cloud-sync change tracking (updated_at stamping +

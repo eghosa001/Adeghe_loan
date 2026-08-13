@@ -101,6 +101,11 @@ class _PinSetupScreenState extends ConsumerState<PinSetupScreen> {
                 controller: _recoveryCtrl,
                 decoration: const InputDecoration(labelText: 'Recovery Password'),
                 obscureText: true,
+                inputFormatters: [
+                  // PBKDF2 cost scales with password length; a huge paste would
+                  // add seconds of unlock latency on low-end phones.
+                  LengthLimitingTextInputFormatter(128),
+                ],
               ),
               const SizedBox(height: 8),
               const Text(

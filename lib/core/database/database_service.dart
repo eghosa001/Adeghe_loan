@@ -12,7 +12,7 @@ import '../security/secure_storage_service.dart';
 import 'migrations.dart';
 
 class DatabaseService {
-  static const int _databaseVersion = 23;
+  static const int _databaseVersion = 24;
   final SecureStorageService _secureStorage;
 
   /// Test-only replacement for [_initDatabase], letting tests exercise the
@@ -398,6 +398,7 @@ class DatabaseService {
         status TEXT NOT NULL DEFAULT 'completed',
         prior_loan_status TEXT,
         client_request_id TEXT,
+        created_at TEXT,
         updated_at TEXT,
         FOREIGN KEY (loan_id) REFERENCES loans (id) ON DELETE CASCADE,
         FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE

@@ -45,6 +45,14 @@ class BusinessRepository {
     final db = await _db;
     final maps = await db.query('settings');
     final map = {for (var e in maps) e['key'] as String: e['value'] as String};
+    final hasLoanDefaults = const [
+      'default_interest',
+      'default_insurance',
+      'default_commission',
+      'default_processing',
+      'default_loan_duration_days',
+      'default_loan_type',
+    ].any(map.containsKey);
     return FinancialSettings(
       currency: map['currency'] ?? '₦',
       defaultInterestRate: _finiteDouble(map['default_interest']),
@@ -54,6 +62,7 @@ class BusinessRepository {
       defaultPenaltyRules: map['default_penalty_rules'] ?? '',
       defaultLoanDurationDays: _finiteDuration(map['default_loan_duration_days']),
       defaultLoanType: map['default_loan_type'] ?? 'daily',
+      hasStoredLoanDefaults: hasLoanDefaults,
     );
   }
 

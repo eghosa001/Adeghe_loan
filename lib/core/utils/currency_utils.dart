@@ -41,8 +41,17 @@ class CurrencyUtils {
   /// `Unsupported operation: Infinity or NaN`. Input callers are expected to
   /// reject those values up-front; this is defence-in-depth so a stray
   /// non-finite amount can never crash a screen mid-render.
-  static double roundToCents(num amount) =>
-      amount.isFinite ? (amount * 100).round() / 100 : 0;
+  ///
+  /// A finite-but-huge value (e.g. `1e307`, which `double.tryParse` also
+  /// returns) is guarded too: `amount * 100` overflows to Infinity before
+  /// `.round()`, which throws. When the scaled product is not finite the
+  /// original (finite) amount is returned unchanged rather than crashing.
+  static double roundToCents(num amount) {
+    if (!amount.isFinite) return 0;
+    final scaled = amount * 100;
+    if (!scaled.isFinite) return amount.toDouble();
+    return scaled.round() / 100;
+  }
 
   /// Splits [total] into [parts] equal installments, distributing any
   /// rounding remainder (in cents) across the first few installments so
@@ -50,9 +59,23 @@ class CurrencyUtils {
   /// matters for repayment schedules — silently dropping a rounding
   /// error into the last installment is a common source of "why is my
   /// loan balance off by a cent" bugs.
+  ///
+  /// Non-finite totals return an empty list. A finite-but-huge total whose
+  /// cent conversion (`total * 100`) overflows Infinity falls back to raw
+  /// equal shares with the residual folded into the final installment, so the
+  /// sum still equals [total] and no `.round()` on Infinity is reached.
   static List<double> splitEvenly(double total, int parts) {
     if (parts <= 0 || !total.isFinite) return const [];
-    final totalCents = (total * 100).round();
+    final scaled = total * 100;
+    if (!scaled.isFinite) {
+      final base = total / parts;
+      if (!base.isFinite) return List.filled(parts, 0.0);
+      return List<double>.generate(
+        parts,
+        (i) => i == parts - 1 ? total - base * (parts - 1) : base,
+      );
+    }
+    final totalCents = scaled.round();
     final baseCents = totalCents ~/ parts;
     final remainder = totalCents - (baseCents * parts);
 

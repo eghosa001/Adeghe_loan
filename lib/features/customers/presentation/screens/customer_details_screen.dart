@@ -381,7 +381,15 @@ class _ProfileTab extends ConsumerWidget {
       Center(
           child: Text(customer.fullName,
               style: Theme.of(context).textTheme.headlineSmall)),
-      Center(child: Text(customer.id)),
+      Center(
+        child: Text(
+          customer.id,
+          style: Theme.of(context).textTheme.bodySmall,
+          textAlign: TextAlign.center,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
       if (groupName != null) ...[
         const SizedBox(height: 4),
         Center(
@@ -397,7 +405,15 @@ class _ProfileTab extends ConsumerWidget {
       // Active Loans section
       activeLoans.when(
         loading: () => const SizedBox.shrink(),
-        error: (_, _) => const SizedBox.shrink(),
+        error: (e, _) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Text(
+            'Could not load active loans: $e',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.error,
+            ),
+          ),
+        ),
         data: (loans) {
           if (loans.isEmpty) return const SizedBox.shrink();
           return Card(

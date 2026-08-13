@@ -142,10 +142,20 @@ class WeeklyCollectionRow {
   bool get isCurrentInstallmentPartial => currentInstallmentStatus == 'partial';
 
   /// Whether the row reads as "Paid" for the viewed period — money received
-  /// within the period (payment-date based) OR the whole loan completed.
+  /// within the period (payment-date based), OR the whole loan completed, OR
+  /// the current (in-range) installment is already fully paid.
   ///
-  /// The schedule's installment-paid state is deliberately NOT used: a late
-  /// payment that cleared an older missed installment must show as paid only
-  /// on the period the money actually arrived, never on the period it cleared.
-  bool get isPaidForPeriod => collectedThisPeriod > 0 || status == 'completed';
+  /// The schedule's installment-paid state is deliberately NOT the primary
+  /// signal: a late payment that cleared an older missed installment must show
+  /// as paid only on the period the money actually arrived, never on the
+  /// period it cleared (money-date attribution). It is used only as a
+  /// fallback: when a customer paid the current week's installment in an
+  /// EARLIER period (paid early), no money arrives in this period, but the
+  /// in-range installment is already 'paid' — the row must read "Paid", not
+  /// "Pending", or a collector could double-charge (the quick-pay default
+  /// would fall through to the whole outstanding balance).
+  bool get isPaidForPeriod =>
+      collectedThisPeriod > 0 ||
+      status == 'completed' ||
+      currentInstallmentStatus == 'paid';
 }

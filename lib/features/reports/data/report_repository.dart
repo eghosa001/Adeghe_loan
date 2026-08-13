@@ -414,11 +414,13 @@ class ReportRepository {
             : [startStr, endStr],
       ),
       // 7: Expected collections (sum of unpaid portion of installments due in
-      //    period) — only for active loans; cancelled/defaulted are not expected
+      //    period) — only for active loans; cancelled/defaulted are not
+      //    expected. Excludes installments on an enabled holiday, matching the
+      //    overdue/collected queries (money is never expected on a holiday).
       db.rawQuery(
         'SELECT COALESCE(SUM(rs.amount - COALESCE(rs.paid_amount, 0)), 0) AS total FROM repayment_schedule rs '
         'JOIN loans l ON rs.loan_id = l.id '
-        "WHERE rs.due_date BETWEEN ? AND ? AND rs.status != 'paid' AND l.status = 'active'$ltClause",
+        "WHERE rs.due_date BETWEEN ? AND ? AND rs.status != 'paid' AND l.status = 'active' AND $notOnEnabledHolidaySql$ltClause",
         ltParam != null
             ? [startStr, endStr, ltParam]
             : [startStr, endStr],
@@ -491,7 +493,7 @@ class ReportRepository {
         'c.guarantor_1_phone AS guarantorPhone, '
         'l.loan_type AS loanType, '
         'l.amount AS amountBorrowed, '
-        'CASE WHEN l.loan_type = \'weekly\' THEN DATE(l.start_date, \'-7 days\') ELSE l.loan_date END AS loanDate, '
+        'CASE WHEN l.loan_type = \'weekly\' THEN l.loan_date ELSE l.loan_date END AS loanDate, '
         'l.outstanding_balance AS outstandingBalance, '
         'l.status AS loanStatus, '
         'l.interest_rate AS interestRate, '
@@ -870,11 +872,12 @@ class ReportRepository {
           cursor = bucketEnd.add(const Duration(days: 1));
         }
       } else {
-        var cursor = DateTime(start.year, start.month, 1);
-        final lastMonth = DateTime(end.year, end.month, 1);
-        while (!cursor.isAfter(lastMonth)) {
-          final monthEnd = DateTime(cursor.year, cursor.month + 1, 0);
-          buckets.add((cursor, monthEnd, _monthLabel(cursor)));
+        var cursor = start;
+        while (true) {
+          var bucketEnd = DateTime(cursor.year, cursor.month + 1, 0);
+          if (bucketEnd.isAfter(end)) bucketEnd = end;
+          buckets.add((cursor, bucketEnd, _monthLabel(cursor)));
+          if (!bucketEnd.isBefore(end)) break;
           cursor = DateTime(cursor.year, cursor.month + 1, 1);
         }
       }

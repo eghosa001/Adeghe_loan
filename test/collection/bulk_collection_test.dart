@@ -7,6 +7,7 @@ void main() {
   group('BulkCollectDraft.total', () {
     test('sums the confirmed amounts', () {
       final draft = BulkCollectDraft(
+        requestId: 'req-1',
         items: const [],
         amounts: const [100, 250.5, 49.5],
         method: PaymentMethod.cash,
@@ -16,6 +17,7 @@ void main() {
 
     test('ignores non-finite amounts so a corrupt draft cannot blow up', () {
       final draft = BulkCollectDraft(
+        requestId: 'req-2',
         items: const [],
         amounts: const [100, double.nan, double.infinity, 50],
         method: PaymentMethod.cash,

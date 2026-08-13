@@ -137,9 +137,9 @@ class _CollectionStatementScreenState extends ConsumerState<CollectionStatementS
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  _SummaryItem(label: 'Total Due', value: CurrencyUtils.format(totalDue, symbol: _currencySymbol)),
-                  _SummaryItem(label: 'Total Paid', value: CurrencyUtils.format(totalPaid, symbol: _currencySymbol)),
-                  _SummaryItem(label: 'Remaining', value: CurrencyUtils.format(totalDue - totalPaid, symbol: _currencySymbol)),
+                  Expanded(child: _SummaryItem(label: 'Total Due', value: CurrencyUtils.format(totalDue, symbol: _currencySymbol))),
+                  Expanded(child: _SummaryItem(label: 'Total Paid', value: CurrencyUtils.format(totalPaid, symbol: _currencySymbol))),
+                  Expanded(child: _SummaryItem(label: 'Remaining', value: CurrencyUtils.format(totalDue - totalPaid, symbol: _currencySymbol))),
                 ],
               ),
             ),

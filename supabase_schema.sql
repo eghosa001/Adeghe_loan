@@ -370,6 +370,7 @@ create table if not exists payments (
   status text not null default 'completed',
   prior_loan_status text,
   client_request_id text,
+  created_at text,
   updated_at text
 );
 create index if not exists idx_payments_loan on payments(loan_id);

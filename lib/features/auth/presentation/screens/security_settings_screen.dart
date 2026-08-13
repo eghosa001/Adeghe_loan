@@ -39,30 +39,18 @@ class _SecuritySettingsScreenState
             content: Text('Biometric not available on this device')));
         return;
       }
-      // Confirm before enabling rather than requiring a successful scan,
-      // so users can turn biometrics on even if their device has a
-      // temporary hardware issue or no fingerprint is currently enrolled.
+      // A successful scan is required BEFORE enabling (documented lock-in):
+      // enabling must never be possible without proving the enrolled biometric
+      // actually works, otherwise a broken/absent enrolment silently "enables"
+      // a feature that can never unlock the app.
+      final result = await _bio.authenticate();
       if (!mounted) return;
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Enable fingerprint unlock?'),
-          content: const Text(
-              'You will need to scan your fingerprint each time you open the app. Make sure you have at least one fingerprint enrolled in your device settings.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Enable'),
-            ),
-          ],
-        ),
-      );
-      if (!mounted) return;
-      if (confirmed != true) return;
+      if (result != BiometricResult.success) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'Authentication failed. Biometrics not enabled.')));
+        return;
+      }
     }
     await _storage.setBiometricEnabled(val);
     if (!mounted) return;

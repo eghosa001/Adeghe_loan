@@ -5,6 +5,7 @@ import 'package:loantrack/core/utils/currency_utils.dart';
 import 'package:loantrack/core/utils/date_utils.dart';
 import 'package:loantrack/core/utils/input_formatters.dart';
 import 'package:loantrack/core/widgets/keyboard_scrollable.dart';
+import 'package:loantrack/features/business/presentation/providers/business_providers.dart';
 import 'package:loantrack/features/loans/data/models/loan_entity.dart';
 import 'package:loantrack/features/loans/presentation/providers/loan_providers.dart';
 
@@ -23,6 +24,7 @@ class LoanCreationScreen extends ConsumerStatefulWidget {
 
 class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
   bool _hasLoaded = false;
+  bool _saving = false;
 
   // Controllers seed the text fields when editing. Without them every field is
   // blank on the edit screen even though the form state was loaded — the user
@@ -64,14 +66,26 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
 
   /// Resets the form to the daily defaults and mirrors them into the visible
   /// text fields (the form notifier outlives this screen, so a previous visit
-  /// may have left it on another type).
-  void _initCreateMode() {
+  /// may have left it on another type). When the operator has saved financial
+  /// defaults (Settings → Financial Defaults), those terms are applied instead
+  /// of the built-in constants.
+  Future<void> _initCreateMode() async {
     if (!mounted) return;
     final notifier = ref.read(loanFormProvider.notifier);
     notifier.selectLoanType(LoanType.daily);
+    try {
+      final settings = await ref.read(financialSettingsProvider.future);
+      notifier.applyFinancialDefaults(settings);
+    } catch (_) {
+      // Settings unreachable (DB not ready) — keep the built-in defaults.
+    }
+    if (!mounted) return;
     final state = ref.read(loanFormProvider);
     _interestCtrl.text = _fmtAmount(state.interestRatePercent);
     _durationCtrl.text = state.duration.toString();
+    _insuranceCtrl.text = _fmtAmount(state.insuranceFeePercent);
+    _commissionCtrl.text = _fmtAmount(state.commissionPercent);
+    _processingCtrl.text = _fmtAmount(state.processingFee);
   }
 
   /// Whole values render without a trailing `.0`; small fractions keep them
@@ -123,34 +137,44 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.save),
-            onPressed: () async {
-              try {
-                if (isEdit) {
-                  await formNotifier.updateLoan(
-                    widget.existingLoan!,
-                    widget.customerId,
-                  );
-                } else {
-                  await formNotifier.saveLoan(widget.customerId);
-                }
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        isEdit ? 'Loan updated!' : 'Loan created successfully!',
-                      ),
-                    ),
-                  );
-                  Navigator.pop(context);
-                }
-              } catch (e) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error: ${e.toString()}')),
-                  );
-                }
-              }
-            },
+            // In-flight guard: a double-tap must not fire two concurrent
+            // `saveLoan` calls (each mints a fresh loan id) and create a
+            // duplicate loan row.
+            onPressed: _saving
+                ? null
+                : () async {
+                    setState(() => _saving = true);
+                    try {
+                      if (isEdit) {
+                        await formNotifier.updateLoan(
+                          widget.existingLoan!,
+                          widget.customerId,
+                        );
+                      } else {
+                        await formNotifier.saveLoan(widget.customerId);
+                      }
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              isEdit
+                                  ? 'Loan updated!'
+                                  : 'Loan created successfully!',
+                            ),
+                          ),
+                        );
+                        Navigator.pop(context);
+                      }
+                    } catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Error: ${e.toString()}')),
+                        );
+                      }
+                    } finally {
+                      if (mounted) setState(() => _saving = false);
+                    }
+                  },
           ),
         ],
       ),
@@ -213,6 +237,7 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
                 ? 'Duration (Days)'
                 : 'Duration (Weeks)',
             controller: _durationCtrl,
+            isDecimal: false,
             onChanged: (value) {
               final parsedDuration = int.tryParse(value);
               formNotifier.updateField(
@@ -334,13 +359,15 @@ class _LoanCreationScreenState extends ConsumerState<LoanCreationScreen> {
     required TextEditingController controller,
     required ValueChanged<String> onChanged,
     String? hint,
+    bool isDecimal = true,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),
       child: TextFormField(
         controller: controller,
         decoration: InputDecoration(labelText: label, hintText: hint),
-        keyboardType: TextInputType.number,
+        keyboardType:
+            TextInputType.numberWithOptions(decimal: isDecimal),
         inputFormatters: const [NoControlCharactersFormatter()],
         onChanged: onChanged,
       ),

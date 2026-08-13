@@ -31,6 +31,11 @@ class Payment {
   /// creating a duplicate. Null for legacy/records written without one.
   final String? clientRequestId;
 
+  /// When the payment was recorded. Backs `getPaymentsForLoan`'s same-day
+  /// tie-break ordering (`created_at DESC`); null only for rows written before
+  /// the v24 migration added the column.
+  final DateTime? createdAt;
+
   Payment({
     required this.id,
     required this.loanId,
@@ -46,6 +51,7 @@ class Payment {
     this.remarks,
     this.priorLoanStatus,
     this.clientRequestId,
+    this.createdAt,
   });
 
   Map<String, dynamic> toMap() => {
@@ -63,6 +69,7 @@ class Payment {
         'status': status.name,
         'prior_loan_status': priorLoanStatus,
         'client_request_id': clientRequestId,
+        'created_at': createdAt?.toIso8601String(),
       };
 
   factory Payment.fromMap(Map<String, Object?> map) => Payment(
@@ -88,5 +95,8 @@ class Payment {
         remarks: map['remarks'] as String?,
         priorLoanStatus: map['prior_loan_status'] as String?,
         clientRequestId: map['client_request_id'] as String?,
+        createdAt: map['created_at'] == null
+            ? null
+            : DateTime.tryParse(map['created_at'] as String),
       );
 }

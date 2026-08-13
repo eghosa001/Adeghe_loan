@@ -8,6 +8,13 @@ class FinancialSettings {
   final int defaultLoanDurationDays;
   final String defaultLoanType;
 
+  /// Whether the operator has actually saved any loan-default values into the
+  /// settings table (interest/duration/type/fees). A fresh install has an
+  /// empty settings table, so the loan form must keep its built-in per-type
+  /// defaults instead of applying the 0%/30-day placeholders returned by the
+  /// entity constructor.
+  final bool hasStoredLoanDefaults;
+
   FinancialSettings({
     this.currency = '₦',
     this.defaultInterestRate = 0.0,
@@ -17,5 +24,6 @@ class FinancialSettings {
     this.defaultPenaltyRules = '',
     this.defaultLoanDurationDays = 30,
     this.defaultLoanType = 'daily',
+    this.hasStoredLoanDefaults = false,
   });
 }

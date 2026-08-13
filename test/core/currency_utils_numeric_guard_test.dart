@@ -16,6 +16,12 @@ void main() {
       expect(CurrencyUtils.roundToCents(double.infinity), 0);
       expect(CurrencyUtils.roundToCents(double.negativeInfinity), 0);
     });
+
+    test('finite-but-huge value does not overflow (1e307 crash guard)', () {
+      // amount * 100 overflows Infinity; must not throw on .round().
+      expect(CurrencyUtils.roundToCents(1e307), 1e307);
+      expect(CurrencyUtils.roundToCents(1e300).isFinite, isTrue);
+    });
   });
 
   group('splitEvenly', () {
@@ -32,6 +38,13 @@ void main() {
     test('non-positive parts return an empty list', () {
       expect(CurrencyUtils.splitEvenly(1000, 0), isEmpty);
       expect(CurrencyUtils.splitEvenly(1000, -5), isEmpty);
+    });
+
+    test('finite-but-huge total does not overflow (1e307 crash guard)', () {
+      final amounts = CurrencyUtils.splitEvenly(1e307, 3);
+      expect(amounts.length, 3);
+      expect(amounts.every((a) => a.isFinite), isTrue);
+      expect(amounts.fold<double>(0, (a, b) => a + b), closeTo(1e307, 1e293));
     });
   });
 

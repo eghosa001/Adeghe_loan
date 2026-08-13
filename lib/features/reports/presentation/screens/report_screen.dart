@@ -158,7 +158,7 @@ class ReportScreen extends ConsumerWidget {
         ref.read(currencySymbolProvider).valueOrNull ??
         CurrencyUtils.defaultSymbol;
     final data = _buildExportData(
-      dashboard.summary,
+      dashboard,
       trends,
       periodLabel,
       currencySymbol,
@@ -195,11 +195,12 @@ class ReportScreen extends ConsumerWidget {
   }
 
   ReportExportData _buildExportData(
-    ReportSummary s,
+    ReportDashboardData dashboard,
     DashboardTrends t,
     String periodLabel,
     String currencySymbol,
   ) {
+    final s = dashboard.summary;
     String fmt(num v) => CurrencyUtils.format(v, symbol: currencySymbol);
     final cards = <ReportCard>[
       ReportCard('Total Collected', fmt(s.totalCollected)),
@@ -216,7 +217,10 @@ class ReportScreen extends ConsumerWidget {
         ),
       ),
       ReportCard('Efficiency', '${s.collectionEfficiency.toStringAsFixed(1)}%'),
-      ReportCard('Total Customers', '${s.totalCustomers}'),
+      ReportCard(
+        'Total Customers',
+        '${dashboard.customers.totalCustomers}',
+      ),
       ReportCard('Active Loans', '${s.activeLoans}'),
       ReportCard('Completed Loans', '${s.completedLoans}'),
       ReportCard('Defaulted Loans', '${s.defaultedLoans}'),
@@ -476,13 +480,16 @@ class _PrimaryKpis extends StatelessWidget {
 
     String fmt(num v) => CurrencyUtils.format(v, symbol: currencySymbol);
 
-    final items = <(String, String, IconData, Color, String)>[
+    // Last tuple element marks "lower is better" metrics (Outstanding,
+    // Expected) so their delta colors are inverted — a fall is good (green).
+    final items = <(String, String, IconData, Color, String, bool)>[
       (
         'Total Collected',
         fmt(s.totalCollected),
         Icons.savings_rounded,
         AppTheme.secondaryColor,
         _deltaLabel(s.totalCollected, p.totalCollected),
+        false,
       ),
       (
         'Total Disbursed',
@@ -490,6 +497,7 @@ class _PrimaryKpis extends StatelessWidget {
         Icons.payments_rounded,
         Theme.of(context).colorScheme.primary,
         _deltaLabel(s.totalDisbursed, p.totalDisbursed),
+        false,
       ),
       (
         'Net Profit',
@@ -497,6 +505,7 @@ class _PrimaryKpis extends StatelessWidget {
         Icons.trending_up_rounded,
         s.netProfit < 0 ? AppTheme.errorColor : Colors.green,
         _deltaLabel(s.netProfit, p.netProfit),
+        false,
       ),
       (
         'Outstanding',
@@ -504,6 +513,7 @@ class _PrimaryKpis extends StatelessWidget {
         Icons.account_balance_rounded,
         Theme.of(context).colorScheme.tertiary,
         _deltaLabel(outstanding, prevOutstanding),
+        true,
       ),
       (
         'Expected',
@@ -511,6 +521,7 @@ class _PrimaryKpis extends StatelessWidget {
         Icons.event_available_rounded,
         Theme.of(context).colorScheme.secondary,
         _deltaLabel(expected, prevExpected),
+        true,
       ),
       (
         'Efficiency',
@@ -518,6 +529,7 @@ class _PrimaryKpis extends StatelessWidget {
         Icons.speed_rounded,
         AppTheme.accentColor,
         _ppDeltaLabel(s.collectionEfficiency, p.collectionEfficiency),
+        false,
       ),
     ];
 
@@ -532,13 +544,14 @@ class _PrimaryKpis extends StatelessWidget {
       ),
       itemCount: items.length,
       itemBuilder: (context, index) {
-        final (label, value, icon, color, delta) = items[index];
+        final (label, value, icon, color, delta, deltaInverted) = items[index];
         return _KpiCard(
           label: label,
           value: value,
           icon: icon,
           accent: color,
           delta: delta,
+          deltaInverted: deltaInverted,
         );
       },
     );
@@ -552,6 +565,7 @@ class _KpiCard extends StatelessWidget {
     required this.icon,
     required this.accent,
     required this.delta,
+    this.deltaInverted = false,
   });
 
   final String label;
@@ -559,6 +573,10 @@ class _KpiCard extends StatelessWidget {
   final IconData icon;
   final Color accent;
   final String delta;
+
+  /// True when a falling value is an improvement (Outstanding, Expected) so
+  /// the delta chip is colored accordingly.
+  final bool deltaInverted;
 
   @override
   Widget build(BuildContext context) {
@@ -605,7 +623,8 @@ class _KpiCard extends StatelessWidget {
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
-                color: _deltaColor(positive, delta),
+                color: _deltaColor(positive, delta,
+                    inverted: deltaInverted),
               ),
             ),
           ],
@@ -783,11 +802,14 @@ class _TodaySection extends StatelessWidget {
                               ),
                             ),
                           ),
-                          Text(
-                            '${today.topCollectors[i].count} payments',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          Expanded(
+                            child: Text(
+                              '${today.topCollectors[i].count} payments',
+                              textAlign: TextAlign.end,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -812,8 +834,7 @@ class _TodaySection extends StatelessWidget {
 
   String _progressLabel(TodayCollection today) {
     if (today.dueToday <= 0) return 'All clear';
-    final pct = ((today.collectedAmount / (today.collectedAmount + today.dueToday)) * 100)
-        .clamp(0.0, 100.0);
+    final pct = ((today.collectedAmount / today.dueToday) * 100).clamp(0.0, 100.0);
     return '${pct.toStringAsFixed(0)}%';
   }
 
@@ -1876,9 +1897,10 @@ String _ppDeltaLabel(double current, double previous) {
   return '${diff >= 0 ? '+' : ''}${diff.toStringAsFixed(1)}pp vs prev';
 }
 
-Color _deltaColor(bool positive, String delta) {
+Color _deltaColor(bool positive, String delta, {bool inverted = false}) {
   if (delta == 'No change' || delta == 'New') {
     return AppTheme.primaryColor;
   }
-  return positive ? Colors.green : AppTheme.errorColor;
+  final good = inverted ? !positive : positive;
+  return good ? Colors.green : AppTheme.errorColor;
 }

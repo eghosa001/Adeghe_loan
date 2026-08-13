@@ -4,6 +4,7 @@ import 'package:loantrack/core/constants/app_constants.dart';
 import 'package:loantrack/core/di/providers.dart';
 import 'package:loantrack/core/error/failure.dart';
 import 'package:loantrack/features/customers/presentation/providers/customer_providers.dart';
+import 'package:loantrack/features/business/data/models/financial_settings_entity.dart';
 import 'package:loantrack/features/dashboard/presentation/providers/dashboard_provider.dart';
 import 'package:loantrack/features/collection/presentation/providers/collection_provider.dart';
 import 'package:loantrack/features/reports/presentation/providers/report_provider.dart';
@@ -135,6 +136,32 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
     selectLoanType(LoanType.daily);
   }
 
+  /// Applies the operator-saved financial defaults (Settings → Financial
+  /// Defaults) to a NEW loan. Only applied when defaults were actually stored
+  /// (`hasStoredLoanDefaults`); a fresh install with an empty settings table
+  /// keeps the built-in per-type AppConstants defaults instead of being
+  /// pre-filled with the entity's 0%/30-day placeholders.
+  void applyFinancialDefaults(FinancialSettings settings) {
+    if (!settings.hasStoredLoanDefaults) return;
+    final type = settings.defaultLoanType == LoanType.weekly.name
+        ? LoanType.weekly
+        : LoanType.daily;
+    final duration = (settings.defaultLoanDurationDays >= 1 &&
+            settings.defaultLoanDurationDays <= AppConstants.maxLoanDuration)
+        ? settings.defaultLoanDurationDays
+        : state.duration;
+    state = state.copyWith(
+      loanType: type,
+      interestRatePercent: settings.defaultInterestRate,
+      insuranceFeePercent: settings.defaultInsuranceFee,
+      commissionPercent: settings.defaultCommission,
+      processingFee: settings.defaultProcessingFee,
+      duration: duration,
+      clearCustomInstallment: true,
+    );
+    _recalculate();
+  }
+
   void updateField({
     LoanType? loanType,
     double? principal,
@@ -240,6 +267,12 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
     if (!state.principal.isFinite || state.principal <= 0) {
       throw Exception('Loan amount must be a valid number greater than zero.');
     }
+    if (state.principal > AppConstants.maxLoanAmount) {
+      throw Exception(
+        'Loan amount cannot exceed '
+        '${CurrencyUtils.format(AppConstants.maxLoanAmount)}.',
+      );
+    }
 
     final effectiveInstallment = state.effectiveInstallment;
     if (effectiveInstallment <= 0) {
@@ -306,6 +339,7 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
         _ref.invalidate(collectionListProvider);
         invalidateReportData(_ref.invalidate);
         _ref.invalidate(activeLoansForCustomerProvider(customerId));
+        _ref.invalidate(allLoansForCustomerProvider(customerId));
         _ref.invalidate(allLoansProvider);
         logAuditAction(
           _ref,
@@ -369,6 +403,7 @@ class LoanFormNotifier extends StateNotifier<LoanFormData> {
         _ref.invalidate(collectionListProvider);
         invalidateReportData(_ref.invalidate);
         _ref.invalidate(activeLoansForCustomerProvider(customerId));
+        _ref.invalidate(allLoansForCustomerProvider(customerId));
         _ref.invalidate(allLoansProvider);
         logAuditAction(
           _ref,

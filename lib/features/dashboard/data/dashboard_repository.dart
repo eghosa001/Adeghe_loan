@@ -75,7 +75,11 @@ class DashboardRepository {
           where: "status = 'completed'",
           orderBy: 'payment_date DESC',
           limit: AppConstants.recentItemsLimit),
-        db.rawQuery('SELECT COALESCE(SUM(balance), 0.0) AS total FROM savings_accounts'),
+        db.rawQuery(
+          'SELECT COALESCE(SUM(sa.balance), 0.0) AS total FROM savings_accounts sa '
+          'INNER JOIN customers c ON sa.customer_id = c.id '
+          "WHERE c.status != 'archived'",
+        ),
         db.rawQuery('SELECT COUNT(*) AS count FROM customer_groups'),
         db.rawQuery(
           'SELECT st.id, sa.customer_id AS customerId, c.full_name AS customerName, '

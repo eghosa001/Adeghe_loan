@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
@@ -301,6 +303,26 @@ class CustomerRepository {
     }
     if (customer.first['status'] != CustomerStatus.archived.value) {
       throw Exception('Only archived customers can be permanently deleted');
+    }
+    // Delete the encrypted document files BEFORE the CASCADE delete removes
+    // the `documents` rows — the paths must be read first, and a leftover
+    // .enc file on disk would otherwise orphan the deleted customer's data.
+    final docRows = await db.query(
+      'documents',
+      columns: const ['file_path'],
+      where: 'customer_id = ?',
+      whereArgs: [id],
+    );
+    for (final row in docRows) {
+      final path = row['file_path'] as String?;
+      if (path == null || path.isEmpty) continue;
+      try {
+        final f = File(path);
+        if (await f.exists()) await f.delete();
+      } catch (_) {
+        // Best-effort: an unreadable/orphaned file must not block the hard
+        // delete of the customer record itself.
+      }
     }
     // The CASCADE DELETE on foreign keys will remove all related data:
     // loans -> payments, repayment_schedule

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/security/secure_storage_service.dart';
@@ -85,7 +86,17 @@ class _ForgotPinScreenState extends ConsumerState<ForgotPinScreen> {
       _isLoading = true;
       _message = '';
     });
-    final ok = await _storage.verifyRecoveryPassword(_controller.text);
+    bool ok;
+    try {
+      ok = await _storage.verifyRecoveryPassword(_controller.text);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _message = 'Verification failed. Please try again.';
+      });
+      return;
+    }
     if (!mounted) return;
     setState(() => _isLoading = false);
     if (ok) {
@@ -166,7 +177,12 @@ class _ForgotPinScreenState extends ConsumerState<ForgotPinScreen> {
                 obscureText: true,
                 enabled: !isLocked,
                 decoration:
-                    const InputDecoration(labelText: 'Recovery Password')),
+                    const InputDecoration(labelText: 'Recovery Password'),
+                inputFormatters: [
+                  // PBKDF2 cost scales with password length; a huge paste would
+                  // add seconds of unlock latency on low-end phones.
+                  LengthLimitingTextInputFormatter(128),
+                ]),
             const SizedBox(height: 12),
             ElevatedButton(
                 onPressed: (_isLoading || isLocked) ? null : _verifyRecovery,

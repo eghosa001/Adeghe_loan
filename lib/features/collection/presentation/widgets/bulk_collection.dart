@@ -40,17 +40,22 @@ class BulkCollectItem {
 }
 
 /// Confirmed draft from the bulk-collection dialog — one editable amount per
-/// selected item plus the shared payment method.
+/// selected item plus the shared payment method. [requestId] is minted once per
+/// dialog session (not per submission) so a retried `recordBulkPayments` of the
+/// SAME confirmed draft reuses the same per-item idempotency keys and can never
+/// double-record a payment that already landed (F3).
 class BulkCollectDraft {
   const BulkCollectDraft({
     required this.items,
     required this.amounts,
     required this.method,
+    required this.requestId,
   });
 
   final List<BulkCollectItem> items;
   final List<double> amounts;
   final PaymentMethod method;
+  final String requestId;
 
   double get total =>
       amounts.fold(0.0, (sum, amount) => sum + (amount.isFinite ? amount : 0));
@@ -68,32 +73,38 @@ class BulkCollectOutcome {
 }
 
 /// Shows the batch-collection dialog. Returns a [BulkCollectDraft] when the
-/// collector confirms, or null when cancelled.
+/// collector confirms, or null when cancelled. The draft carries a requestId
+/// minted per dialog session (see [BulkCollectDraft.requestId]).
 Future<BulkCollectDraft?> showBulkCollectDialog(
   BuildContext context,
   List<BulkCollectItem> items, {
   required String currencySymbol,
 }) {
+  final requestId = const Uuid().v4();
   return showDialog<BulkCollectDraft>(
     context: context,
     builder: (_) => _BulkCollectDialog(
       items: items,
       currencySymbol: currencySymbol,
+      requestId: requestId,
     ),
   );
 }
 
-/// Records every draft payment via [PaymentRepository.createPayment] — one
-/// idempotent `clientRequestId` per customer (fresh UUID), the selected method,
-/// the business owner as collector and the item's installment cap — then
-/// invalidates the same provider families the per-row quick-pay path touches
-/// (both collection lists, dashboard, savings, reports, future schedule, loan
-/// details/schedule and payment history). Returns the per-customer outcome.
+/// Records every draft payment via [PaymentRepository.createPayment] — a
+/// stable idempotent `clientRequestId` per customer derived from the draft's
+/// per-session [BulkCollectDraft.requestId] (`<requestId>-<index>`), the
+/// selected method, the business owner as collector and the item's installment
+/// cap — then invalidates the same provider families the per-row quick-pay path
+/// touches (both collection lists, dashboard, savings, reports, future
+/// schedule, loan details/schedule and payment history). Returns the
+/// per-customer outcome.
 Future<BulkCollectOutcome> recordBulkPayments(
   WidgetRef ref, {
   required List<BulkCollectItem> items,
   required List<double> amounts,
   required PaymentMethod method,
+  required String requestId,
 }) async {
   final failures = <String>[];
   var success = 0;
@@ -117,7 +128,7 @@ Future<BulkCollectOutcome> recordBulkPayments(
           method: method,
           collector: collectorName,
           installmentDue: item.installmentDue > 0 ? item.installmentDue : null,
-          clientRequestId: const Uuid().v4(),
+          clientRequestId: '$requestId-$i',
         );
         logAuditAction(
           ref,
@@ -244,10 +255,12 @@ class _BulkCollectDialog extends StatefulWidget {
   const _BulkCollectDialog({
     required this.items,
     required this.currencySymbol,
+    required this.requestId,
   });
 
   final List<BulkCollectItem> items;
   final String currencySymbol;
+  final String requestId;
 
   @override
   State<_BulkCollectDialog> createState() => _BulkCollectDialogState();
@@ -262,7 +275,7 @@ class _BulkCollectDialogState extends State<_BulkCollectDialog> {
     super.initState();
     _controllers = widget.items
         .map((item) => TextEditingController(
-              text: item.defaultAmount.toStringAsFixed(0),
+              text: item.defaultAmount.toStringAsFixed(2),
             ))
         .toList();
     for (final controller in _controllers) {
@@ -308,6 +321,7 @@ class _BulkCollectDialogState extends State<_BulkCollectDialog> {
         items: widget.items,
         amounts: amounts,
         method: _method,
+        requestId: widget.requestId,
       ),
     );
   }

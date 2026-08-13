@@ -87,7 +87,14 @@ class _PaymentCard extends StatelessWidget {
       ref.read(currencySymbolProvider).valueOrNull ??
       CurrencyUtils.defaultSymbol;
 
-  String _formatDate(DateTime d) => DateFormat('dd MMM yyyy, hh:mm a').format(d);
+  String _formatDate(DateTime d) {
+    // `payment_date` is a date-only string (yyyy-MM-dd), so its parsed DateTime
+    // carries a midnight time — rendering a fake "12:00 AM" would be misleading.
+    if (d.hour == 0 && d.minute == 0 && d.second == 0) {
+      return DateFormat('dd MMM yyyy').format(d);
+    }
+    return DateFormat('dd MMM yyyy, hh:mm a').format(d);
+  }
 
   String _methodLabel(PaymentMethod m) {
     switch (m) {

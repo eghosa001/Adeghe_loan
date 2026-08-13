@@ -41,6 +41,14 @@ class _InactivityWrapperState extends State<InactivityWrapper> {
   }
 
   @override
+  void didUpdateWidget(covariant InactivityWrapper oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Re-arm when the configured session-timeout setting changes so the new
+    // timeout applies without a restart.
+    if (oldWidget.timeout != widget.timeout) _resetTimer();
+  }
+
+  @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_onKeyEvent);
     _timer?.cancel();

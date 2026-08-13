@@ -25,9 +25,20 @@ class CollectionRepository {
       // installment due that day (non-holiday) OR received a completed payment
       // on that day. The second clause is what lets a late payment that was
       // applied to an older missed installment still appear as "Paid" on the
-      // day the money was actually received.
+      // day the money was actually received. Completed loans are only shown on
+      // a day they actually received a completed payment (typically the day the
+      // final payment closed the loan) — otherwise a fully-paid loan would
+      // clutter every later list while its past installments are all paid.
       final conditions = <String>[
-        "l.status = 'active'",
+        '''
+          (l.status = 'active'
+           OR EXISTS (
+             SELECT 1 FROM payments pc
+             WHERE pc.loan_id = l.id AND pc.status = 'completed'
+               AND DATE(pc.payment_date) = ?
+           )
+          )
+        ''',
         '''
           (rs.loan_id IS NOT NULL
            OR EXISTS (
@@ -41,9 +52,10 @@ class CollectionRepository {
       // Placeholder order (positional binding): the amountPaid correlated
       // subquery binds first (`DATE(p.payment_date) = ?` in the SELECT list),
       // then the overdue subquery's `?` (today's date), then the LEFT JOIN's
-      // due-date `?`, then the payment-visibility EXISTS `?`, then the WHERE
-      // filter placeholders (c.group_id, l.loan_type).
-      final args = <dynamic>[dateStr, todayStr, dateStr, dateStr];
+      // due-date `?`, then the payment-visibility EXISTS `?`, then the
+      // completed-loan payment EXISTS `?` (the new first WHERE condition),
+      // then the filter placeholders (c.group_id, l.loan_type).
+      final args = <dynamic>[dateStr, todayStr, dateStr, dateStr, dateStr];
 
       if (groupId != null && groupId.isNotEmpty) {
         conditions.add('c.group_id = ?');
@@ -139,7 +151,29 @@ class CollectionRepository {
       final todayStr = DateTime.now().toIso8601String().split('T').first;
       // Include completed loans so paid installments remain visible for
       // historical/reference purposes (paid weekly loans should still show).
-      final conditions = <String>["l.status IN ('active','completed')"];
+      final conditions = <String>[
+        "l.status IN ('active','completed')",
+        // A loan is shown for the range when it either has an installment due
+        // in the range (non-holiday) OR received a completed payment in the
+        // range — the second clause keeps a payment received on a
+        // non-installment day (weekend/holiday) or a late payment clearing an
+        // older missed installment visible on the period the money arrived.
+        '''
+          (
+            EXISTS (
+              SELECT 1 FROM repayment_schedule rs2
+              WHERE rs2.loan_id = l.id
+                AND DATE(rs2.due_date) BETWEEN ? AND ?
+                AND $notOnEnabledHolidaySql
+            )
+            OR EXISTS (
+              SELECT 1 FROM payments px
+              WHERE px.loan_id = l.id AND px.status = 'completed'
+                AND DATE(px.payment_date) BETWEEN ? AND ?
+            )
+          )
+        ''',
+      ];
       final args = <dynamic>[];
 
       if (groupId != null && groupId.isNotEmpty) {
@@ -157,10 +191,12 @@ class CollectionRepository {
       // use BETWEEN ? AND ? for the amountPaid correlated subquery, the
       // installmentAmount and scheduleStatus subqueries, and the
       // repayment_schedule join, PLUS one overdue subquery `?` (today's date)
-      // that sits in the SELECT list just before the join. Order in the SQL
+      // that sits in the SELECT list just before the join, PLUS the WHERE
+      // OR-EXISTS payment-day visibility clause (4 args). Order in the SQL
       // text: amountPaid, installmentAmount, scheduleStatus (each 2 args), the
-      // overdue `?`, then the join's BETWEEN, then the WHERE filter
-      // placeholders (c.group_id, l.loan_type).
+      // overdue `?`, the join's BETWEEN, the visibility OR-EXISTS (installment
+      // BETWEEN, payment BETWEEN), then the WHERE filter placeholders
+      // (c.group_id, l.loan_type).
       //
       // NOTE: the payments aggregate is a correlated subquery, NOT a join â€” a
       // join would cross-multiply against the (per-installment) repayment
@@ -212,13 +248,13 @@ cg.name AS groupName,
         FROM loans l
         INNER JOIN customers c ON l.customer_id = c.id
         LEFT JOIN customer_groups cg ON c.group_id = cg.id
-        INNER JOIN repayment_schedule rs
+        LEFT JOIN repayment_schedule rs
           ON rs.loan_id = l.id AND DATE(rs.due_date) BETWEEN ? AND ?
             AND $notOnEnabledHolidaySql
         WHERE $whereClause
         GROUP BY l.id
         ORDER BY c.full_name COLLATE NOCASE ASC
-      ''', [startStr, endStr, startStr, endStr, startStr, endStr, todayStr, startStr, endStr, ...args]);
+      ''', [startStr, endStr, startStr, endStr, startStr, endStr, todayStr, startStr, endStr, startStr, endStr, startStr, endStr, ...args]);
 
       final collectionRows = rows.map((row) {
         final amountPaid = (row['amountPaid'] as num?)?.toDouble() ?? 0.0;

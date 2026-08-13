@@ -74,7 +74,16 @@ class _BusinessDetailsTabState extends ConsumerState<BusinessDetailsTab> {
       email: _emailCtrl.text.trim(),
       regNo: _regCtrl.text.trim(),
     );
-    await ref.read(businessProfileProvider.notifier).saveProfile(profile);
+    try {
+      await ref.read(businessProfileProvider.notifier).saveProfile(profile);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save profile: $e')),
+        );
+      }
+      return;
+    }
     if (!mounted) return;
     setState(() => _isEditing = false);
     ScaffoldMessenger.of(context).showSnackBar(
@@ -188,7 +197,8 @@ class _BusinessDetailsTabState extends ConsumerState<BusinessDetailsTab> {
                     const InputDecoration(labelText: 'Business Name'),
                 inputFormatters:
                     textFormatters(maxLength: AppConstants.maxNameLength),
-                validator: (v) => v!.isEmpty ? 'Required' : null),
+                validator: (v) =>
+                    v == null || v.trim().isEmpty ? 'Required' : null),
             const SizedBox(height: 12),
             TextFormField(
                 controller: _ownerCtrl,

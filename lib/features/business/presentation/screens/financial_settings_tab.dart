@@ -47,7 +47,10 @@ class _FinancialSettingsTabState extends ConsumerState<FinancialSettingsTab> {
     _processingCtrl.text = s.defaultProcessingFee.toString();
     _penaltyCtrl.text = s.defaultPenaltyRules;
     _durationCtrl.text = s.defaultLoanDurationDays.toString();
-    _loanType = s.defaultLoanType;
+    // Sanitize legacy values (e.g. a pre-v15 'monthly' row): the dropdown only
+    // offers daily/weekly, and `DropdownButtonFormField.initialValue` throws if
+    // the value is not among the items.
+    _loanType = s.defaultLoanType == 'weekly' ? 'weekly' : 'daily';
     _hasPrefilled = true;
   }
 
@@ -171,7 +174,10 @@ class _FinancialSettingsTabState extends ConsumerState<FinancialSettingsTab> {
                 controller: _currencyCtrl,
                 decoration:
                     const InputDecoration(labelText: 'Currency Symbol'),
-                validator: (v) => v!.isEmpty ? 'Required' : null),
+                maxLength: 8,
+                inputFormatters: const [NoControlCharactersFormatter()],
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Required' : null),
             const SizedBox(height: 12),
             TextFormField(
                 controller: _interestCtrl,

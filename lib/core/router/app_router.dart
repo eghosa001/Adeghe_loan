@@ -22,6 +22,7 @@ import '../../features/documents/presentation/screens/document_list_screen.dart'
 import '../../features/documents/presentation/screens/document_upload_screen.dart';
 import '../../features/documents/presentation/screens/secure_preview_screen.dart';
 import '../../features/loans/data/models/loan_entity.dart';
+import '../../features/loans/presentation/providers/loan_providers.dart';
 import '../../features/loans/presentation/screens/loan_creation_screen.dart';
 import '../../features/loans/presentation/screens/loan_details_screen.dart';
 import '../../features/loans/presentation/screens/loan_list_screen.dart';
@@ -231,8 +232,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             path: 'edit',
             builder: (context, state) {
               final loan = state.extra as Loan?;
+              if (loan == null) {
+                // No object passed (deep link / state restore): resolve the
+                // loan from the path id instead of silently opening a blank
+                // create form with an empty customer id.
+                return _EditLoanLoader(
+                  loanId: state.pathParameters['id']!,
+                );
+              }
               return LoanCreationScreen(
-                customerId: loan?.customerId ?? '',
+                customerId: loan.customerId,
                 existingLoan: loan,
               );
             },
@@ -598,6 +607,33 @@ class OnboardingScreen extends StatelessWidget {
           onPressed: () => GoRouter.of(context).go('/auth/pin'),
           child: const Text('Continue'),
         ),
+      ),
+    );
+  }
+}
+
+/// Resolves a loan by id for the `/loans/:id/edit` route when navigation did
+/// not pass the `Loan` object (deep link / state restore). Prevents a blank
+/// create form with an empty customer id from being opened.
+class _EditLoanLoader extends ConsumerWidget {
+  const _EditLoanLoader({required this.loanId});
+
+  final String loanId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final loanAsync = ref.watch(loanDetailsProvider(loanId));
+    return loanAsync.when(
+      data: (loan) => LoanCreationScreen(
+        customerId: loan.customerId,
+        existingLoan: loan,
+      ),
+      loading: () => const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      ),
+      error: (e, _) => Scaffold(
+        appBar: AppBar(title: const Text('Edit Loan')),
+        body: Center(child: Text('Failed to load loan: $e')),
       ),
     );
   }

@@ -41,12 +41,6 @@ class LoanDetailsScreen extends ConsumerWidget {
                   actions: [
                     if (loan.status == LoanStatus.active)
                       IconButton(
-                        icon: const Icon(Icons.savings_outlined),
-                        tooltip: 'Clear with Savings',
-                        onPressed: () => _clearWithSavings(context, ref, loan),
-                      ),
-                    if (loan.status == LoanStatus.active)
-                      IconButton(
                         icon: const Icon(Icons.payment),
                         tooltip: 'Record Payment',
                         onPressed: () {
@@ -62,32 +56,58 @@ class LoanDetailsScreen extends ConsumerWidget {
                           );
                         },
                       ),
-                    if (loan.status == LoanStatus.active)
-                      IconButton(
-                        icon: const Icon(Icons.edit_outlined),
-                        tooltip: 'Edit Loan',
-                        onPressed: () =>
-                            context.push('/loans/${loan.id}/edit', extra: loan),
-                      ),
-                    if (loan.status == LoanStatus.active)
-                      IconButton(
-                        icon: const Icon(Icons.cancel_outlined, color: Colors.redAccent),
-                        tooltip: 'Cancel Loan',
-                        onPressed: () => _cancelLoan(context, ref, loan),
-                      ),
-                    IconButton(
-                      icon: const Icon(Icons.calendar_month_outlined),
-                      tooltip: 'Repayment Calendar',
-                      onPressed: () => context
-                          .push('/loans/$loanId/repayment-calendar', extra: loan),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.receipt_long_outlined),
-                      tooltip: 'Payment History',
-                      onPressed: () => context.push(
-                        '/loans/$loanId/payments',
-                        extra: {'customerId': loan.customerId},
-                      ),
+                    // Overflow menu: an active loan used to push six icon
+                    // buttons onto the AppBar, which overflows on narrow
+                    // phones. The most-used action stays direct; the rest live
+                    // behind the menu.
+                    PopupMenuButton<String>(
+                      icon: const Icon(Icons.more_vert),
+                      tooltip: 'More',
+                      onSelected: (value) {
+                        switch (value) {
+                          case 'clear':
+                            _clearWithSavings(context, ref, loan);
+                          case 'edit':
+                            context.push('/loans/${loan.id}/edit', extra: loan);
+                          case 'cancel':
+                            _cancelLoan(context, ref, loan);
+                          case 'calendar':
+                            context.push(
+                              '/loans/$loanId/repayment-calendar',
+                              extra: loan,
+                            );
+                          case 'payments':
+                            context.push(
+                              '/loans/$loanId/payments',
+                              extra: {'customerId': loan.customerId},
+                            );
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        if (loan.status == LoanStatus.active)
+                          const PopupMenuItem(
+                            value: 'clear',
+                            child: Text('Clear with Savings'),
+                          ),
+                        if (loan.status == LoanStatus.active)
+                          const PopupMenuItem(
+                            value: 'edit',
+                            child: Text('Edit Loan'),
+                          ),
+                        if (loan.status == LoanStatus.active)
+                          const PopupMenuItem(
+                            value: 'cancel',
+                            child: Text('Cancel Loan'),
+                          ),
+                        const PopupMenuItem(
+                          value: 'calendar',
+                          child: Text('Repayment Calendar'),
+                        ),
+                        const PopupMenuItem(
+                          value: 'payments',
+                          child: Text('Payment History'),
+                        ),
+                      ],
                     ),
                   ],
                   flexibleSpace: FlexibleSpaceBar(
@@ -239,7 +259,14 @@ class LoanDetailsScreen extends ConsumerWidget {
           invalidateReportData(ref.invalidate);
           ref.invalidate(futureScheduleProvider);
           ref.invalidate(allLoansProvider);
+          ref.invalidate(activeLoansForCustomerProvider(loan.customerId));
+          ref.invalidate(allLoansForCustomerProvider(loan.customerId));
           logAuditAction(ref, 'CANCEL', 'Loan ${loan.id} cancelled');
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Loan cancelled.')),
+            );
+          }
         },
         failure: (f) {
           if (context.mounted) {

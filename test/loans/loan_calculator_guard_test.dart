@@ -45,6 +45,13 @@ void main() {
     expect(r.installmentAmount, 0);
   });
 
+  test('finite-but-huge principal does not overflow (1e307 crash guard)', () {
+    final r = run(principal: 1e307, duration: 10);
+    expect(r.totalRepayment.isFinite, isTrue);
+    expect(r.installmentAmount.isFinite, isTrue);
+    expect(r.interestAmount.isFinite, isTrue);
+  });
+
   test('non-positive duration returns zeros instead of crashing', () {
     final r = run(principal: 10000, duration: 0);
     expect(r.installmentAmount, 0);

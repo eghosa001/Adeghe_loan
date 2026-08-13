@@ -415,22 +415,30 @@ class _DailyCollectionScreenState extends ConsumerState<DailyCollectionScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _SummaryItem(
-            label: 'Total Due',
-            value: CurrencyUtils.format(totalDue),
+          Expanded(
+            child: _SummaryItem(
+              label: 'Total Due',
+              value: CurrencyUtils.format(totalDue),
+            ),
           ),
-          _SummaryItem(
-            label: 'Total Paid',
-            value: CurrencyUtils.format(totalPaid),
+          Expanded(
+            child: _SummaryItem(
+              label: 'Total Paid',
+              value: CurrencyUtils.format(totalPaid),
+            ),
           ),
-          _SummaryItem(
-            label: 'Remaining',
-            value: CurrencyUtils.format(totalDue - totalPaid),
+          Expanded(
+            child: _SummaryItem(
+              label: 'Remaining',
+              value: CurrencyUtils.format(totalDue - totalPaid),
+            ),
           ),
-          _SummaryItem(
-            label: 'Overdue',
-            value: overdueCount.toString(),
-            highlight: overdueCount > 0,
+          Expanded(
+            child: _SummaryItem(
+              label: 'Overdue',
+              value: overdueCount.toString(),
+              highlight: overdueCount > 0,
+            ),
           ),
         ],
       ),
@@ -535,6 +543,7 @@ class _DailyCollectionScreenState extends ConsumerState<DailyCollectionScreen> {
       items: draft.items,
       amounts: draft.amounts,
       method: draft.method,
+      requestId: draft.requestId,
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -623,7 +632,8 @@ class _CollectionRowTile extends ConsumerWidget {
     final currency =
         ref.read(currencySymbolProvider).valueOrNull ??
         CurrencyUtils.defaultSymbol;
-    final amountCtrl = TextEditingController(text: amount.toStringAsFixed(0));
+    final amountCtrl =
+        TextEditingController(text: amount.toStringAsFixed(2));
     // Stable id for THIS payment action: reused if the confirm is retried so a
     // timeout/retry can never double-record the same logical payment (F3).
     final requestId = const Uuid().v4();

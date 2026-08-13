@@ -40,6 +40,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ref.invalidate(appSettingsProvider);
       // Apply the new timeout immediately (main.dart watches this provider).
       ref.invalidate(sessionTimeoutMinutesProvider);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save session timeout: $e')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _sessionTimeoutLoading = false);
     }
@@ -50,6 +56,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final repo = await ref.read(businessRepoProvider.future);
       await repo.saveSettings({'auto_backup_enabled': enabled ? '1' : '0'});
       ref.invalidate(appSettingsProvider);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to update auto-backup: $e')),
+        );
+      }
     } finally {
       if (mounted) setState(() {});
     }
@@ -189,25 +201,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             subtitle: const Text('Remind to backup daily'),
             value: autoBackup,
             onChanged: (v) => _updateAutoBackup(v),
-          ),
-
-          const Divider(),
-
-          // ── Export ──
-          _SectionHeader(title: 'Export'),
-          ListTile(
-            leading: const Icon(Icons.file_download_outlined),
-            title: const Text('Export Data'),
-            subtitle: const Text('Export loans, customers, groups to Excel'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => context.push('/loans'),
-          ),
-          ListTile(
-            leading: const Icon(Icons.description_outlined),
-            title: const Text('Statements'),
-            subtitle: const Text('Loan, savings, and collection statements'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => context.push('/statements/loan'),
           ),
 
           const Divider(),
