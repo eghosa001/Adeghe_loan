@@ -477,7 +477,7 @@ final allLoansForCustomerProvider = FutureProvider.family<List<Loan>, String>((
 
 final loanSearchQueryProvider = StateProvider<String>((ref) => '');
 
-final loanStatusFilterProvider = StateProvider<String?>((ref) => null);
+final loanStatusFilterProvider = StateProvider<String?>((ref) => 'active');
 
 final loanTypeFilterProvider = StateProvider<String?>((ref) => null);
 
