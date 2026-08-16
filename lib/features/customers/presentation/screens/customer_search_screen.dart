@@ -54,6 +54,9 @@ class CustomerListScreen extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: DebouncedTextField(
+              // Re-seed from the query provider so the typed search survives
+              // pagination/refresh reloads.
+              initialValue: ref.watch(customerSearchQueryProvider),
               onChanged: (value) {
                 ref.read(customerSearchQueryProvider.notifier).state = value;
                 ref.read(customerPageProvider.notifier).state = 0;

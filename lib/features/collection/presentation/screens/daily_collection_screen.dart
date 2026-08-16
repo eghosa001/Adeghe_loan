@@ -293,6 +293,9 @@ class _DailyCollectionScreenState extends ConsumerState<DailyCollectionScreen> {
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         child: DebouncedTextField(
+          // Re-seed from the query provider so the typed search survives a
+          // hard reload (Refresh/F5/after recording a payment).
+          initialValue: ref.watch(collectionSearchQueryProvider),
           decoration: const InputDecoration(
             hintText: 'Search customer...',
             prefixIcon: Icon(Icons.search, size: 20),

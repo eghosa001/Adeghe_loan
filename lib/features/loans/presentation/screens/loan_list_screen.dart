@@ -113,6 +113,9 @@ class LoanListScreen extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: DebouncedTextField(
+              // Re-seed from the query provider so the typed search survives
+              // status-tab/refresh reloads.
+              initialValue: ref.watch(loanSearchQueryProvider),
               onChanged: (value) =>
                   ref.read(loanSearchQueryProvider.notifier).state = value,
               decoration: const InputDecoration(

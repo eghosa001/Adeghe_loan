@@ -10,10 +10,13 @@ import '../utils/platform_utils.dart';
 /// `Scrollable` has keyboard focus). On touch platforms it is a transparent
 /// passthrough that does not steal focus.
 ///
-/// The widget autofocuses itself so it receives arrow keys on pages where
-/// nothing else is focused; if a descendant (e.g. a text field) takes focus
-/// instead, its own key handling wins and this wrapper only sees keys the
-/// descendant did not consume.
+/// The widget focuses itself so it receives arrow keys on pages where nothing
+/// else is focused — but it NEVER steals focus from a text field the user is
+/// typing in (a plain `Focus(autofocus: true)` would re-request focus every
+/// time the widget remounts, e.g. when an async reload swaps the subtree under
+/// the search field, closing the keyboard mid-typing). If a descendant (e.g. a
+/// text field) takes focus instead, its own key handling wins and this wrapper
+/// only sees keys the descendant did not consume.
 class KeyboardScrollable extends StatefulWidget {
   const KeyboardScrollable({super.key, required this.child});
 
@@ -36,6 +39,7 @@ class _KeyboardScrollableState extends State<KeyboardScrollable> {
     super.initState();
     if (isDesktopPlatform) {
       _scheduleCapture();
+      _scheduleAutofocus();
     }
   }
 
@@ -59,6 +63,30 @@ class _KeyboardScrollableState extends State<KeyboardScrollable> {
     // Capture after the frame so any scrollable that just appeared in this
     // build is already mounted when we walk the element tree.
     SchedulerBinding.instance.addPostFrameCallback((_) => _captureScrollable());
+  }
+
+  /// Requests focus for the scroll area so arrow keys work without the user
+  /// clicking into the list first — but only when nothing editable is focused.
+  /// A `TextField`'s focus node points at the [EditableText] it builds, so
+  /// checking for that widget (here or in the ancestry) reliably detects "the
+  /// user is typing" and lets us avoid yanking focus (and the on-screen
+  /// keyboard) away mid-keystroke.
+  void _scheduleAutofocus() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final primary = FocusManager.instance.primaryFocus;
+      final primaryContext = primary?.context;
+      if (primaryContext == null) {
+        _focusNode.requestFocus();
+        return;
+      }
+      final focusedIsEditable =
+          primaryContext.widget is EditableText ||
+              primaryContext.findAncestorWidgetOfExactType<EditableText>() != null;
+      if (!focusedIsEditable) {
+        _focusNode.requestFocus();
+      }
+    });
   }
 
   void _captureScrollable() {
@@ -132,7 +160,6 @@ class _KeyboardScrollableState extends State<KeyboardScrollable> {
     if (!isDesktopPlatform) return widget.child;
     return Focus(
       focusNode: _focusNode,
-      autofocus: true,
       onKeyEvent: _onKeyEvent,
       child: widget.child,
     );
