@@ -47,21 +47,21 @@ class _FakeCollectionRepository extends CollectionRepository {
   @override
   Future<Result<List<WeeklyCollectionRow>>> getWeeklyCollectionByDate(
       DateTime date) async {
-    return Result.success([
+    return Result.success(List.unmodifiable([
       _row('L1', 'Alice Weekly'),
       _row('L2', 'Bob Daily'),
       _row('L3', 'Charlie Falls'),
-    ]);
+    ]));
   }
 
   @override
   Future<Result<List<WeeklyCollectionRow>>> getWeeklyCollectionByDateRange(
       DateTime start, DateTime end) async {
-    return Result.success([
+    return Result.success(List.unmodifiable([
       _row('L1', 'Alice Weekly'),
       _row('L2', 'Bob Daily'),
       _row('L3', 'Charlie Falls'),
-    ]);
+    ]));
   }
 }
 

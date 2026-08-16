@@ -78,7 +78,7 @@ final collectionListProvider = FutureProvider<List<CollectionRow>>((ref) async {
     failure: (f) => throw f,
   );
   final filtered = query.trim().isEmpty
-      ? rows
+      ? rows.toList()
       : rows.where((r) =>
           r.customerName.toLowerCase().contains(query.trim().toLowerCase()))
           .toList();
@@ -156,7 +156,7 @@ final weeklyCollectionListProvider =
     failure: (f) => throw f,
   );
   final filtered = query.trim().isEmpty
-      ? rows
+      ? rows.toList()
       : rows
           .where((r) => r.customerName
               .toLowerCase()
