@@ -164,8 +164,8 @@ void main() {
       CollectionRepository(_FakeDatabaseService(db));
 
   test(
-      'weekly: a late payment shows as collected in the payment week with the '
-      'correct current installment (tgt binding fix)', () async {
+      'weekly: a late payment shows as collected in the WEEK IT PAYS FOR, not '
+      'the week the money arrived (installment-week attribution)', () async {
     final db = await openDb();
     addTearDown(db.close);
     // Weekly installments: Mon 07-27, Mon 08-03, Mon 08-10, Mon 08-17 (550 each).
@@ -179,26 +179,44 @@ void main() {
       "UPDATE loans SET outstanding_balance = 1650 WHERE id = 'L1'",
     );
 
-    final result = await repo(db).getWeeklyCollectionByDateRange(
-        DateTime(2026, 8, 10), DateTime(2026, 8, 14));
-    result.when(
+    // The week the money PAYS FOR (W1, 07-27): shows as paid with the applied
+    // amount — NOT 0 as under the old money-date rule.
+    final paidWeek = await repo(db).getWeeklyCollectionByDateRange(
+        DateTime(2026, 7, 27), DateTime(2026, 7, 31));
+    paidWeek.when(
       success: (rows) {
         expect(rows, hasLength(1));
         final row = rows.first;
-        // The row's "current installment" is the first unpaid one in range (W3),
-        // not Week 0 — the args binding bug used to leave it NULL/inverted.
+        expect(row.currentInstallmentNumber, 1);
+        expect(row.currentInstallmentStatus, 'paid');
+        expect(row.collectedThisPeriod, closeTo(550.0, 0.001));
+        expect(row.isPaidForPeriod, isTrue);
+        expect(row.installmentDue, closeTo(0.0, 0.001));
+      },
+      failure: (f) => fail('query failed: $f'),
+    );
+
+    // The week the money ARRIVED (08-10): the row is tied to its in-range
+    // installment (W3), which is still unpaid — nothing collected there.
+    final arrivalWeek = await repo(db).getWeeklyCollectionByDateRange(
+        DateTime(2026, 8, 10), DateTime(2026, 8, 14));
+    arrivalWeek.when(
+      success: (rows) {
+        expect(rows, hasLength(1));
+        final row = rows.first;
         expect(row.currentInstallmentNumber, 3);
         expect(row.currentInstallmentDueDate, '2026-08-10');
         expect(row.currentInstallmentStatus, 'pending');
-        // The money received in the viewed week (payment-date attribution).
-        expect(row.collectedThisPeriod, closeTo(550.0, 0.001));
+        expect(row.collectedThisPeriod, closeTo(0.0, 0.001));
+        expect(row.isPaidForPeriod, isFalse);
         expect(row.installmentDue, closeTo(550.0, 0.001));
       },
       failure: (f) => fail('query failed: $f'),
     );
   });
 
-  test('weekly: the cleared week does NOT show money collected there', () async {
+  test('weekly: the cleared week shows the money — the row is the week paid for',
+      () async {
     final db = await openDb();
     addTearDown(db.close);
     await seedWeekly(db, 'L1', 'C1', 'Ada', DateTime(2026, 7, 27));
@@ -210,26 +228,25 @@ void main() {
     );
 
     // Viewing the week whose installment the payment cleared (07-27): the loan
-    // must still show (it has an installment there) but NOT as paid — no money
-    // was received in that week. The paid in-range installment is displayed so
-    // the current-installment context is preserved.
+    // shows as PAID, because that is the week the 550 pays for.
     final result = await repo(db).getWeeklyCollectionByDateRange(
         DateTime(2026, 7, 27), DateTime(2026, 7, 31));
     result.when(
       success: (rows) {
         expect(rows, hasLength(1));
         final row = rows.first;
-        expect(row.collectedThisPeriod, closeTo(0.0, 0.001));
+        expect(row.collectedThisPeriod, closeTo(550.0, 0.001));
         expect(row.currentInstallmentNumber, 1);
         expect(row.currentInstallmentStatus, 'paid');
+        expect(row.isPaidForPeriod, isTrue);
       },
       failure: (f) => fail('query failed: $f'),
     );
   });
 
   test(
-      'weekly: a payment received on a non-installment day still lists the '
-      'loan, showing the first unpaid installment', () async {
+      'weekly: a payment received on a non-installment day lights up the week '
+      'it pays for, and the non-installment day itself is empty', () async {
     final db = await openDb();
     addTearDown(db.close);
     await seedWeekly(db, 'L1', 'C1', 'Ada', DateTime(2026, 7, 27));
@@ -239,19 +256,132 @@ void main() {
     await insertPayment(db, 'L1', 'C1', 'P1', 550, '2026-08-12');
     await markInstallmentPaid(db, 'L1', 1, 550);
 
-    final result = await repo(db).getWeeklyCollectionByDateRange(
+    // The non-installment day itself now shows nothing (visibility is driven
+    // by installments only, not by money received).
+    final nonInstallmentDay = await repo(db).getWeeklyCollectionByDateRange(
         DateTime(2026, 8, 12), DateTime(2026, 8, 12));
-    result.when(
+    nonInstallmentDay.when(
+      success: (rows) => expect(rows, isEmpty),
+      failure: (f) => fail('query failed: $f'),
+    );
+
+    // The week the money pays for (W1): paid with the applied amount.
+    final paidWeek = await repo(db).getWeeklyCollectionByDateRange(
+        DateTime(2026, 7, 27), DateTime(2026, 7, 31));
+    paidWeek.when(
       success: (rows) {
         expect(rows, hasLength(1));
         final row = rows.first;
+        expect(row.currentInstallmentNumber, 1);
+        expect(row.currentInstallmentStatus, 'paid');
         expect(row.collectedThisPeriod, closeTo(550.0, 0.001));
-        // No installment falls on 08-12; the row falls back to the first
-        // unpaid installment overall (W2, 08-03) so quick-pay caps correctly.
-        expect(row.currentInstallmentNumber, 2);
-        expect(row.currentInstallmentDueDate, '2026-08-03');
-        expect(row.installmentDue, closeTo(550.0, 0.001));
+        expect(row.isPaidForPeriod, isTrue);
       },
+      failure: (f) => fail('query failed: $f'),
+    );
+  });
+
+  test(
+      'weekly: the owner example — 550 due Wednesday, paid Saturday, shows on '
+      'Wednesday as paid and never on Saturday', () async {
+    final db = await openDb();
+    addTearDown(db.close);
+    // Weekly installments anchored to Wednesday 08-05.
+    await seedWeekly(db, 'L1', 'C1', 'Ada', DateTime(2026, 8, 5));
+
+    // Ada pays the 550 for Wednesday 08-05 on Saturday 08-08.
+    await insertPayment(db, 'L1', 'C1', 'P1', 550, '2026-08-08');
+    await markInstallmentPaid(db, 'L1', 1, 550);
+
+    // Saturday itself: no weekly installment → empty.
+    final saturday = await repo(db).getWeeklyCollectionByDateRange(
+        DateTime(2026, 8, 8), DateTime(2026, 8, 8));
+    saturday.when(
+      success: (rows) => expect(rows, isEmpty),
+      failure: (f) => fail('query failed: $f'),
+    );
+
+    // Wednesday 08-05 (the week it pays for): paid with the 550.
+    final wednesday = await repo(db).getWeeklyCollectionByDateRange(
+        DateTime(2026, 8, 5), DateTime(2026, 8, 5));
+    wednesday.when(
+      success: (rows) {
+        expect(rows, hasLength(1));
+        final row = rows.first;
+        expect(row.currentInstallmentDueDate, '2026-08-05');
+        expect(row.currentInstallmentStatus, 'paid');
+        expect(row.collectedThisPeriod, closeTo(550.0, 0.001));
+        expect(row.isPaidForPeriod, isTrue);
+      },
+      failure: (f) => fail('query failed: $f'),
+    );
+
+    // Next Wednesday 08-12: the loan is still listed but that week is unpaid.
+    final nextWeek = await repo(db).getWeeklyCollectionByDateRange(
+        DateTime(2026, 8, 12), DateTime(2026, 8, 12));
+    nextWeek.when(
+      success: (rows) {
+        expect(rows, hasLength(1));
+        final row = rows.first;
+        expect(row.currentInstallmentNumber, 2);
+        expect(row.currentInstallmentStatus, 'pending');
+        expect(row.collectedThisPeriod, closeTo(0.0, 0.001));
+      },
+      failure: (f) => fail('query failed: $f'),
+    );
+  });
+
+  test(
+      'daily: a weekend payment counts on the PRECEDING Friday; Saturday and '
+      'Sunday themselves are always empty', () async {
+    final db = await openDb();
+    addTearDown(db.close);
+    // Daily installments Mon 08-03 .. Fri 08-07 (1000 each).
+    await seedDaily(db, 'L1', 'C1', 'Ada', DateTime(2026, 8, 3));
+
+    // Ada pays her Friday installment (1000) on Saturday 08-08.
+    await insertPayment(db, 'L1', 'C1', 'P1', 1000, '2026-08-08');
+    await markInstallmentPaid(db, 'L1', 5, 1000);
+
+    // Saturday and Sunday views are empty (no daily collection on weekends).
+    final saturday = await repo(db).getDailyCollection(DateTime(2026, 8, 8));
+    saturday.when(
+      success: (rows) => expect(rows, isEmpty),
+      failure: (f) => fail('query failed: $f'),
+    );
+    final sunday = await repo(db).getDailyCollection(DateTime(2026, 8, 9));
+    sunday.when(
+      success: (rows) => expect(rows, isEmpty),
+      failure: (f) => fail('query failed: $f'),
+    );
+
+    // The preceding Friday: the loan shows with the weekend money collected.
+    final friday = await repo(db).getDailyCollection(DateTime(2026, 8, 7));
+    friday.when(
+      success: (rows) {
+        expect(rows, hasLength(1));
+        expect(rows.first.amountPaid, closeTo(1000.0, 0.001));
+      },
+      failure: (f) => fail('query failed: $f'),
+    );
+
+    // A range ending on Friday absorbs the weekend into its totals.
+    final fridayEndRange = await repo(db).getCollectionsByDateRange(
+        DateTime(2026, 8, 3), DateTime(2026, 8, 7), loanType: 'daily');
+    fridayEndRange.when(
+      success: (rows) {
+        expect(rows, hasLength(1));
+        expect(rows.first.amountPaid, closeTo(1000.0, 0.001));
+      },
+      failure: (f) => fail('query failed: $f'),
+    );
+
+    // A range that starts on the weekend WITHOUT its Friday stays empty: the
+    // Saturday money belongs to the Friday before the range.
+    final weekendOnly = await repo(db).getCollectionsByDateRange(
+        DateTime(2026, 8, 8), DateTime(2026, 8, 9), loanType: 'daily');
+    weekendOnly.when(
+      success: (rows) => expect(rows, isEmpty),
       failure: (f) => fail('query failed: $f'),
     );
   });

@@ -278,6 +278,21 @@ Future<Database> openFullSchemaDb() async {
   return db;
 }
 
+/// The collection date a payment made TODAY counts toward under the weekend
+/// rule: today itself on weekdays, the preceding Friday on Saturday/Sunday.
+/// Lets tests view the correct Daily Collection day regardless of the run date.
+DateTime attributedToday() {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  if (today.weekday == DateTime.saturday) {
+    return today.subtract(const Duration(days: 1));
+  }
+  if (today.weekday == DateTime.sunday) {
+    return today.subtract(const Duration(days: 2));
+  }
+  return today;
+}
+
 class _Harness {
   _Harness(this.db) {
     service = _FakeDatabaseService(db);
@@ -766,6 +781,10 @@ void main() {
       final startOfToday = DateTime(today.year, today.month, today.day);
       final endOfToday =
           DateTime(today.year, today.month, today.day, 23, 59, 59);
+      // The Daily Collection counts today's payment on its ATTRIBUTED date
+      // (weekday today, preceding Friday on a weekend), so view that day and a
+      // range that always contains it.
+      final day = attributedToday();
 
       // ── Report summary (dashboard "Total Collected") ─────────────────
       final summary = (await h.reportRepo
@@ -779,7 +798,7 @@ void main() {
 
       // ── Collection screen (range view) ───────────────────────────────
       final range = (await h.collectionRepo
-              .getCollectionsByDateRange(startOfToday, endOfToday))
+              .getCollectionsByDateRange(day.subtract(const Duration(days: 7)), day))
           .dataOrNull;
       expect(range, isNotNull);
       expect(range!.single.amountPaid, closeTo(1000, 0.001),
@@ -788,7 +807,7 @@ void main() {
 
       // ── Collection screen (single-day view) ──────────────────────────
       final singleDay = (await h.collectionRepo
-              .getDailyCollection(startOfToday))
+              .getDailyCollection(day))
           .dataOrNull;
       expect(singleDay, isNotNull);
       expect(singleDay!.single.amountPaid, closeTo(1000, 0.001));
@@ -829,6 +848,9 @@ void main() {
       final today = DateTime.now();
       final start = DateTime(today.year, today.month, today.day);
       final end = DateTime(today.year, today.month, today.day, 23, 59, 59);
+      // Today's payments are attributed to today (weekday) or the preceding
+      // Friday (weekend) on the Daily Collection.
+      final day = attributedToday();
 
       final loan = await h.loanRow('L1');
       expect((loan['outstanding_balance'] as num).toDouble(), 2500);
@@ -838,7 +860,7 @@ void main() {
       expect(summary.totalCollected, closeTo(7500, 0.001));
 
       final range = (await h.collectionRepo
-              .getCollectionsByDateRange(start, end))
+              .getCollectionsByDateRange(day.subtract(const Duration(days: 7)), day))
           .dataOrNull!;
       expect(range.single.amountPaid, closeTo(7500, 0.001));
 
@@ -855,9 +877,13 @@ void main() {
       addTearDown(db.close);
       final h = _Harness(db);
       await h.seedCustomer('C1', 'ADA');
+      // Fixed mid-week start so the weekly list shows the loan on the exact
+      // installment day (the row is the week the money pays for, regardless of
+      // the payment's real arrival date).
       await h.seedLoan(
           loanId: 'L1', customerId: 'C1', loanType: LoanType.weekly,
-          amount: 2000, interestRate: 10, duration: 4);
+          amount: 2000, interestRate: 10, duration: 4,
+          startDate: DateTime(2026, 8, 5));
 
       await h.paymentRepo.createPayment(
         loanId: 'L1', customerId: 'C1', amount: 550,
@@ -865,12 +891,9 @@ void main() {
         installmentDue: 550,
       );
 
-      final today = DateTime.now();
-      final start = DateTime(today.year, today.month, today.day);
-      final end = DateTime(today.year, today.month, today.day, 23, 59, 59);
-
       final weekly = (await h.collectionRepo
-              .getWeeklyCollectionByDateRange(start, end))
+              .getWeeklyCollectionByDateRange(
+                  DateTime(2026, 8, 5), DateTime(2026, 8, 5)))
           .dataOrNull!;
       expect(weekly, hasLength(1));
       expect(weekly.single.amountPaid, closeTo(550, 0.001));
@@ -949,13 +972,20 @@ void main() {
       await db.update('payments', {'payment_date': '2026-08-08'},
           where: 'id = ?', whereArgs: [offPayment.id]);
 
-      final offDate = (await h.collectionRepo
+      // Saturday itself is ALWAYS empty — daily collection has no weekend rows.
+      final weekend = (await h.collectionRepo
               .getDailyCollection(DateTime(2026, 8, 8)))
           .dataOrNull!;
-      expect(offDate, hasLength(1),
-          reason: 'a non-installment payment day must still list the loan');
-      expect(offDate.single.amountPaid, closeTo(500, 0.001),
-          reason: 'collected on the money-arrival date, not the schedule');
+      expect(weekend, isEmpty,
+          reason: 'a weekend day must never list a daily collection');
+
+      // The Saturday money counts on the PRECEDING Friday (2026-08-07), which
+      // also has a scheduled installment, so the loan shows there as collected.
+      final friday = (await h.collectionRepo
+              .getDailyCollection(DateTime(2026, 8, 7)))
+          .dataOrNull!;
+      expect(friday.single.amountPaid, closeTo(500, 0.001),
+          reason: 'a Saturday payment is attributed to the preceding Friday');
 
       // The other days show their own money, nothing cross-contaminated.
       final otherDay = (await h.collectionRepo

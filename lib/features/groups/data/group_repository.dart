@@ -120,8 +120,28 @@ class GroupRepository {
   }
 
   Future<Map<String, double>> getCollectionSummary(String groupId, DateTime date) async {
+    // The daily collection has no weekend rows: a weekend payment is counted on
+    // the preceding Friday, so a weekend date reads empty (the group card shows
+    // today's collection).
+    if (date.weekday == DateTime.saturday || date.weekday == DateTime.sunday) {
+      return {'due': 0.0, 'paid': 0.0, 'remaining': 0.0};
+    }
     final db = await _database;
     final dateStr = date.toIso8601String().split('T').first;
+    // A payment's ATTRIBUTED date: its own date, except Saturday/Sunday which
+    // count on the preceding Friday (same rule as the Daily Collection).
+    const payDateSql = '''
+      CASE
+        WHEN strftime('%w', p.payment_date) = '6' THEN date(p.payment_date, '-1 day')
+        WHEN strftime('%w', p.payment_date) = '0' THEN date(p.payment_date, '-2 days')
+        ELSE date(p.payment_date)
+      END''';
+    const payVisibleSql = '''
+      CASE
+        WHEN strftime('%w', px.payment_date) = '6' THEN date(px.payment_date, '-1 day')
+        WHEN strftime('%w', px.payment_date) = '0' THEN date(px.payment_date, '-2 days')
+        ELSE date(px.payment_date)
+      END''';
     final results = await Future.wait([
       db.rawQuery('''
         SELECT
@@ -137,7 +157,7 @@ class GroupRepository {
             LEFT JOIN savings_transactions st
               ON st.reference_loan_payment_id = p.id AND st.type = 'overpayment'
             WHERE p.loan_id = l.id AND p.status = 'completed'
-              AND DATE(p.payment_date) = ?
+              AND $payDateSql = ?
           )), 0.0) AS paid
         FROM loans l
         INNER JOIN customers c ON l.customer_id = c.id
@@ -151,7 +171,7 @@ class GroupRepository {
             OR EXISTS (
               SELECT 1 FROM payments px
               WHERE px.loan_id = l.id AND px.status = 'completed'
-                AND DATE(px.payment_date) = ?
+                AND $payVisibleSql = ?
             )
           )
       ''', [dateStr, dateStr, groupId, dateStr, dateStr]),

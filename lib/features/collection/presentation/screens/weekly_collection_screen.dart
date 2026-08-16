@@ -614,11 +614,11 @@ class _WeeklyCollectionRowTile extends ConsumerWidget {
         CurrencyUtils.defaultSymbol;
     final theme = Theme.of(context);
 
-    // Status indicator widget. A customer shows as "Paid" when money was
-    // received in the viewed period (payment-date based) OR the whole loan is
-    // completed — NOT when the schedule marks the current installment paid, so
-    // a late payment that cleared an older missed installment reads as
-    // "collected" on the period it happened, never on the period it cleared.
+    // Status indicator widget. A customer shows as "Paid" when the displayed
+    // week's installment is fully paid OR the whole loan is completed — the row
+    // represents the week the money pays for, so a late payment for an older
+    // missed installment reads as "Paid" on that installment's week, never on
+    // the week the money arrived.
     final paidForPeriod = row.isPaidForPeriod;
     Widget statusIndicator;
     String statusText;

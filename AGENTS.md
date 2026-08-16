@@ -102,7 +102,8 @@ Customer counts are distinct across loan types. Any "customers" figure must be `
 
 - Collection totals: due = unpaid portion of due installments; paid excludes reversed/overpayments.
 - Payment application order is oldest-first.
-- Weekly collection display uses money-date attribution (payment arrival date), not installment-paid state.
+- Weekly collection display is installment-WEEK attribution (the week the money PAYS FOR), not the payment arrival date. A weekly row is tied to its in-range installment; `collectedThisPeriod` = that installment's schedule `paid_amount` (money-rule safe). A late payment for an older missed installment lights up THAT installment's week, never the week the money arrived.
+- Daily collection has NO Saturday/Sunday rows. A payment received Sat/Sun counts on the PRECEDING Friday ("as monday is a new week"), so Friday absorbs Fri + Sat + Sun; a range attributes payments by that same weekend→Friday rule.
 
 ## Important invariants (AI must not break these)
 

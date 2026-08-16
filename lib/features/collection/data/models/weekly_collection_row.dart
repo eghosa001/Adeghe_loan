@@ -74,8 +74,12 @@ class WeeklyCollectionRow {
   final String currentInstallmentStatus;
   /// Days overdue for the current installment (0 if not overdue).
   final int daysOverdue;
-  /// Amount collected for the current collection period (this week's installment).
-  /// Empty/0 when no payment has been made for this installment yet.
+  /// Amount already paid towards the displayed (in-range) week's installment —
+  /// the schedule's `paid_amount`, which is money-rule safe (it is recalculated
+  /// from completed payments minus overpayment surpluses credited to savings).
+  /// The row represents the week the money PAYS FOR, not the week it arrived:
+  /// a late payment for an older missed installment shows on that installment's
+  /// week. 0 when nothing has been applied to the displayed installment yet.
   final double collectedThisPeriod;
   /// Total accumulation of the customer's overdue — the sum of every past
   /// installment (due before today) that is not fully paid, following the
@@ -141,21 +145,16 @@ class WeeklyCollectionRow {
   /// Whether the current installment is partially paid.
   bool get isCurrentInstallmentPartial => currentInstallmentStatus == 'partial';
 
-  /// Whether the row reads as "Paid" for the viewed period — money received
-  /// within the period (payment-date based), OR the whole loan completed, OR
-  /// the current (in-range) installment is already fully paid.
+  /// Whether the row reads as "Paid" for the viewed period — the whole loan is
+  /// completed, OR the displayed (in-range) installment is fully paid.
   ///
-  /// The schedule's installment-paid state is deliberately NOT the primary
-  /// signal: a late payment that cleared an older missed installment must show
-  /// as paid only on the period the money actually arrived, never on the
-  /// period it cleared (money-date attribution). It is used only as a
-  /// fallback: when a customer paid the current week's installment in an
-  /// EARLIER period (paid early), no money arrives in this period, but the
+  /// This is week-based, matching the new attribution rule: the row represents
+  /// the week the customer pays FOR, so it is paid exactly when that week's
+  /// installment is paid. A customer who paid the current week's installment in
+  /// an EARLIER period (paid early) has no money arrive in this period, but the
   /// in-range installment is already 'paid' — the row must read "Paid", not
-  /// "Pending", or a collector could double-charge (the quick-pay default
-  /// would fall through to the whole outstanding balance).
+  /// "Pending", or a collector could double-charge (the quick-pay default would
+  /// fall through to the whole outstanding balance).
   bool get isPaidForPeriod =>
-      collectedThisPeriod > 0 ||
-      status == 'completed' ||
-      currentInstallmentStatus == 'paid';
+      status == 'completed' || currentInstallmentStatus == 'paid';
 }

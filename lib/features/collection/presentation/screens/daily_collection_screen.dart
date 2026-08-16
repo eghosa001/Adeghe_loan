@@ -181,6 +181,13 @@ class _DailyCollectionScreenState extends ConsumerState<DailyCollectionScreen> {
   Widget _buildCollectionView(BuildContext context, List<CollectionRow> rows) {
     final isRangeMode = ref.watch(collectionDateRangeModeProvider);
     final selectedDate = ref.watch(collectionDateFilterProvider);
+    // Weekends have no daily collection: the viewed date is a weekend only in
+    // single-date mode (range mode spans Mon..Fri installments instead).
+    final viewedWeekend = !isRangeMode &&
+        (selectedDate.weekday == DateTime.saturday ||
+            selectedDate.weekday == DateTime.sunday);
+    const emptyMessage = 'No daily collections for this date.';
+    const weekendMessage = 'No daily collections on weekends.';
     final selectedGroup = ref.watch(collectionGroupFilterProvider);
     final groupsAsync = ref.watch(groupListProvider);
     final rangeStart = ref.watch(collectionRangeStartProvider);
@@ -353,8 +360,8 @@ class _DailyCollectionScreenState extends ConsumerState<DailyCollectionScreen> {
             child: KeyboardRefreshable(
               onRefresh: () async => ref.invalidate(collectionListProvider),
               child: rows.isEmpty
-                  ? const Center(
-                      child: Text('No daily collections for this date.'),
+                  ? Center(
+                      child: Text(viewedWeekend ? weekendMessage : emptyMessage),
                     )
                   : ListView.separated(
                       itemCount: rows.length,
@@ -372,9 +379,11 @@ class _DailyCollectionScreenState extends ConsumerState<DailyCollectionScreen> {
     final bodyItems = <Widget>[...headers];
     if (rows.isEmpty) {
       bodyItems.add(
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 48),
-          child: Center(child: Text('No daily collections for this date.')),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 48),
+          child: Center(
+            child: Text(viewedWeekend ? weekendMessage : emptyMessage),
+          ),
         ),
       );
     } else {
@@ -447,14 +456,15 @@ class _DailyCollectionScreenState extends ConsumerState<DailyCollectionScreen> {
 
   /// Whether the customer is considered "paid" for the viewed period.
   ///
-  /// Single-date mode: paid when any completed payment was received ON that
-  /// date (`amountPaid` is collected-that-day, so a late payment for a missed
-  /// installment still marks the customer as paid on the day the money came
-  /// in). Range mode: paid when money was collected anywhere in the range
-  /// (`amountPaid` is collected-in-range) OR every in-range installment is
-  /// schedule-paid — matching the export's "Paid" cell, which is also
-  /// payment-date based, so the screen and the sheet always agree on who paid
-  /// within the selected period.
+  /// Single-date mode: paid when any completed payment is ATTRIBUTED to that
+  /// date (`amountPaid` is collected-that-day — a payment received on a
+  /// weekend counts on the preceding Friday, and a late payment for a missed
+  /// installment still marks the customer as paid on the day the money is
+  /// counted toward). Range mode: paid when money was attributed anywhere in
+  /// the range (`amountPaid` is collected-in-range) OR every in-range
+  /// installment is schedule-paid — matching the export's "Paid" cell, which
+  /// is also payment-date based, so the screen and the sheet always agree on
+  /// who paid within the selected period.
   bool _rowPaid(CollectionRow row) => _isRangeMode
       ? (row.amountPaid > 0 || row.isPaid)
       : row.amountPaid > 0;
@@ -778,7 +788,7 @@ class _DatePickerTile extends StatelessWidget {
         icon: const Icon(Icons.chevron_left),
         tooltip: 'Previous day',
         onPressed: () =>
-            onDatePicked(selectedDate.subtract(const Duration(days: 1))),
+            onDatePicked(_previousWeekday(selectedDate)),
       ),
       title: Text(AppDateUtils.formatDate(selectedDate)),
       subtitle: Text(AppDateUtils.formatRelative(selectedDate)),
@@ -786,7 +796,7 @@ class _DatePickerTile extends StatelessWidget {
         icon: const Icon(Icons.chevron_right),
         tooltip: 'Next day',
         onPressed: () =>
-            onDatePicked(selectedDate.add(const Duration(days: 1))),
+            onDatePicked(_nextWeekday(selectedDate)),
       ),
       onTap: () async {
         final now = DateTime.now();
@@ -800,6 +810,24 @@ class _DatePickerTile extends StatelessWidget {
       },
     );
   }
+}
+
+DateTime _previousWeekday(DateTime date) {
+  var day = date.subtract(const Duration(days: 1));
+  while (day.weekday == DateTime.saturday ||
+      day.weekday == DateTime.sunday) {
+    day = day.subtract(const Duration(days: 1));
+  }
+  return day;
+}
+
+DateTime _nextWeekday(DateTime date) {
+  var day = date.add(const Duration(days: 1));
+  while (day.weekday == DateTime.saturday ||
+      day.weekday == DateTime.sunday) {
+    day = day.add(const Duration(days: 1));
+  }
+  return day;
 }
 
 class _SummaryItem extends StatelessWidget {

@@ -554,13 +554,14 @@ void main() {
     );
   });
 
-  test('collectedThisPeriod counts completed payments received inside the range only (money rule)',
+  test('collectedThisPeriod reflects money APPLIED to the in-range installment (schedule paid_amount, money rule)',
       () async {
     final db = await openDb();
     addTearDown(db.close);
     await seedWeeklyLoan(db, 'L1', 'C1', 'Ada'); // installments 2026-08-05..
 
-    // Inside the viewed week: 550 applied (P1) + 550 reversed (P3, excluded).
+    // Inside the viewed week: 550 applied to installment 1 (P1). The reversed
+    // P3 must never count.
     await db.insert('payments', {
       'id': 'P1',
       'loan_id': 'L1',
@@ -569,7 +570,13 @@ void main() {
       'status': 'completed',
       'payment_date': '2026-08-06',
     });
-    // Outside the viewed week: must NOT count toward this week's collection.
+    await db.update(
+      'repayment_schedule',
+      {'status': 'paid', 'paid_amount': 550},
+      where: "loan_id = 'L1' AND installment_number = 1",
+    );
+    // Outside the viewed week: money that would apply to a LATER installment
+    // (due 08-12, outside the range) must NOT count toward this week.
     await db.insert('payments', {
       'id': 'P2',
       'loan_id': 'L1',
@@ -593,7 +600,7 @@ void main() {
       success: (rows) {
         expect(rows, hasLength(1));
         // amountPaid is all-time (money rule); collectedThisPeriod is the
-        // subset received within the viewed range.
+        // amount applied to the displayed in-range installment only.
         expect(rows.first.amountPaid, closeTo(1100.0, 0.001));
         expect(rows.first.collectedThisPeriod, closeTo(550.0, 0.001));
       },
@@ -607,7 +614,8 @@ void main() {
     addTearDown(db.close);
     await seedWeeklyLoan(db, 'L1', 'C1', 'Ada');
 
-    // 700 received, of which 150 went to savings as an overpayment → 550 applied.
+    // 700 received, of which 150 went to savings as an overpayment → 550 applied
+    // to installment 1 (the recalc leaves the schedule at the applied amount).
     await db.insert('payments', {
       'id': 'P2',
       'loan_id': 'L1',
@@ -624,6 +632,11 @@ void main() {
       'reference_loan_payment_id': 'P2',
       'created_at': '2026-08-06T10:00:00.000Z',
     });
+    await db.update(
+      'repayment_schedule',
+      {'status': 'paid', 'paid_amount': 550},
+      where: "loan_id = 'L1' AND installment_number = 1",
+    );
 
     final result = await repo(db)
         .getWeeklyCollectionByDateRange(DateTime(2026, 8, 3), DateTime(2026, 8, 7));
