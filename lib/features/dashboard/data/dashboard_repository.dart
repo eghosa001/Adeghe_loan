@@ -12,11 +12,8 @@ class DashboardRepository {
   DashboardRepository(this._dbService);
   final DatabaseService _dbService;
 
-  Future<Database> get _database async {
-    return _dbService.database;
-  }
+  Future<Database> get _database async => _dbService.database;
 
-  /// Helper: extract a single numeric scalar from a query result row.
   static double _toDouble(Map<String, dynamic> row, String key) =>
       (row[key] as num?)?.toDouble() ?? 0.0;
 
@@ -26,16 +23,28 @@ class DashboardRepository {
   Future<Result<DashboardData>> getDashboardData() async {
     try {
       final db = await _database;
-
-      // Local device dates (never UTC `date('now')`) so day windows match the
-      // locally-stored `payment_date` strings.
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
       final todayStr = AppDateUtils.formatForStorage(today);
-      final weekStartStr =
-          AppDateUtils.formatForStorage(today.subtract(const Duration(days: 6)));
+      final weekStartStr = AppDateUtils.formatForStorage(
+        today.subtract(const Duration(days: 6)),
+      );
 
-      // Run all independent read queries in parallel.
+      // "Collected" is the actual money received from customers. It must use
+      // the payment amount, including any portion subsequently transferred to
+      // savings as overpayment. Loan-applied and savings amounts are separate
+      // accounting concepts. This definition is intentionally shared by the
+      // dashboard and the online reporting layer.
+      const collectedTotalSql =
+          "SELECT COALESCE(SUM(p.amount), 0.0) AS total "
+          "FROM payments p WHERE p.status = 'completed'";
+      const collectedTodaySql =
+          "SELECT COALESCE(SUM(p.amount), 0.0) AS total "
+          "FROM payments p WHERE p.status = 'completed' AND DATE(p.payment_date) = ?";
+      const collectedWeekSql =
+          "SELECT COALESCE(SUM(p.amount), 0.0) AS total "
+          "FROM payments p WHERE p.status = 'completed' AND DATE(p.payment_date) >= ?";
+
       final results = await Future.wait([
         db.rawQuery("SELECT COUNT(*) AS count FROM customers WHERE status != 'archived'"),
         db.rawQuery("SELECT COUNT(*) AS count FROM loans WHERE status = 'active'"),
@@ -43,38 +52,16 @@ class DashboardRepository {
         db.rawQuery("SELECT COUNT(*) AS count FROM loans WHERE status = 'active' AND loan_type = 'weekly'"),
         db.rawQuery("SELECT COALESCE(SUM(amount), 0.0) AS total FROM loans WHERE status IN ('active', 'completed', 'defaulted') AND loan_type = 'daily'"),
         db.rawQuery("SELECT COALESCE(SUM(amount), 0.0) AS total FROM loans WHERE status IN ('active', 'completed', 'defaulted') AND loan_type = 'weekly'"),
-        db.rawQuery(
-          "SELECT COALESCE(SUM(p.amount - COALESCE(st.amount, 0.0)), 0.0) AS total "
-          "FROM payments p "
-          "LEFT JOIN savings_transactions st "
-          "  ON st.reference_loan_payment_id = p.id "
-          " AND st.type = 'overpayment' "
-          "WHERE p.status = 'completed'"),
-        db.rawQuery(
-          "SELECT COALESCE(SUM(p.amount - COALESCE(st.amount, 0.0)), 0.0) AS total "
-          "FROM payments p "
-          "LEFT JOIN savings_transactions st "
-          "  ON st.reference_loan_payment_id = p.id "
-          " AND st.type = 'overpayment' "
-          "WHERE p.status = 'completed' AND DATE(p.payment_date) = ?",
-          [todayStr],
-        ),
-        db.rawQuery(
-          "SELECT COALESCE(SUM(p.amount - COALESCE(st.amount, 0.0)), 0.0) AS total "
-          "FROM payments p "
-          "LEFT JOIN savings_transactions st "
-          "  ON st.reference_loan_payment_id = p.id "
-          " AND st.type = 'overpayment' "
-          "WHERE p.status = 'completed' AND DATE(p.payment_date) >= ?",
-          [weekStartStr],
-        ),
+        db.rawQuery(collectedTotalSql),
+        db.rawQuery(collectedTodaySql, [todayStr]),
+        db.rawQuery(collectedWeekSql, [weekStartStr]),
         db.rawQuery("SELECT COALESCE(SUM(outstanding_balance), 0.0) AS total FROM loans WHERE status = 'active' AND loan_type = 'daily'"),
         db.rawQuery("SELECT COALESCE(SUM(outstanding_balance), 0.0) AS total FROM loans WHERE status = 'active' AND loan_type = 'weekly'"),
-        db.query(AppConstants.tableLoans, orderBy: 'loan_date DESC', limit: AppConstants.recentItemsLimit),
+        db.query(AppConstants.tableLoans,
+            orderBy: 'loan_date DESC', limit: AppConstants.recentItemsLimit),
         db.query(AppConstants.tablePayments,
-          where: "status = 'completed'",
-          orderBy: 'payment_date DESC',
-          limit: AppConstants.recentItemsLimit),
+            where: "status = 'completed'",
+            orderBy: 'payment_date DESC', limit: AppConstants.recentItemsLimit),
         db.rawQuery(
           'SELECT COALESCE(SUM(sa.balance), 0.0) AS total FROM savings_accounts sa '
           'INNER JOIN customers c ON sa.customer_id = c.id '
@@ -106,16 +93,15 @@ class DashboardRepository {
       final weeklyOutstandingBalance = _toDouble(results[10].first, 'total');
       final outstandingBalance = dailyOutstandingBalance + weeklyOutstandingBalance;
       final recentLoans = (results[11] as List<Map<String, dynamic>>)
-          .map(Loan.fromMap)
-          .toList(growable: false);
+          .map(Loan.fromMap).toList(growable: false);
       final recentPayments = (results[12] as List<Map<String, dynamic>>)
-          .map(Payment.fromMap)
-          .toList(growable: false);
+          .map(Payment.fromMap).toList(growable: false);
       final totalSavingsBalance = _toDouble(results[13].first, 'total');
       final totalGroups = _toInt(results[14].first, 'count');
-      final recentSavingsTransactions = (results[15] as List<Map<String, dynamic>>)
-          .map(DashboardSavingsTransaction.fromMap)
-          .toList(growable: false);
+      final recentSavingsTransactions =
+          (results[15] as List<Map<String, dynamic>>)
+              .map(DashboardSavingsTransaction.fromMap)
+              .toList(growable: false);
 
       return Result.success(DashboardData(
         totalCustomers: totalCustomers,
