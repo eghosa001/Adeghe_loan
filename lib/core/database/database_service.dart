@@ -15,8 +15,6 @@ class DatabaseService {
   static const int _databaseVersion = 24;
   final SecureStorageService _secureStorage;
 
-  /// Test-only replacement for [_initDatabase], letting tests exercise the
-  /// memoization and exclusive-access gate without a real SQLCipher open.
   final Future<Database> Function()? _openOverride;
 
   DatabaseService(this._secureStorage) : _openOverride = null;
@@ -27,33 +25,14 @@ class DatabaseService {
     Future<Database> Function() open,
   ) : _openOverride = open;
 
-  /// Memoized open future. Every caller shares ONE in-flight open, so
-  /// concurrent `await database` calls (many providers at unlock) can never
-  /// double-open the same SQLite file — the M14 double-open race. After
-  /// [close] (e.g. a backup swap) the next access reopens a fresh connection.
   Future<Database>? _openFuture;
-
-  /// While a backup/restore holds exclusive access this gate makes any
-  /// concurrent [database] caller wait for the close -> swap -> reopen cycle
-  /// to finish instead of opening a half-swapped file (M14).
   Future<void>? _exclusiveGate;
-
-  /// Serialization chain for [withExclusiveAccess]. A second exclusive block
-  /// (e.g. an auto-backup racing a manual restore) awaits the previous block's
-  /// completion before it starts, so close -> swap -> reopen cycles can never
-  /// interleave and corrupt the live DB file.
   Future<void>? _exclusiveTail;
-
   String? _databasePath;
 
-  /// Returns the single app database connection, opening it on first use.
-  /// Concurrent callers share the same in-flight open. If a backup is
-  /// currently closing/reopening the database, callers wait for it to finish.
   Future<Database> get database {
     final gate = _exclusiveGate;
-    if (gate != null) {
-      return gate.then((_) => _open());
-    }
+    if (gate != null) return gate.then((_) => _open());
     return _open();
   }
 
@@ -65,8 +44,6 @@ class DatabaseService {
     future = open().then<Database>(
       (db) => db,
       onError: (Object error, StackTrace stackTrace) {
-        // A failed open must not poison the memo forever; let the next caller
-        // retry.
         if (identical(_openFuture, future)) _openFuture = null;
         Error.throwWithStackTrace(error, stackTrace);
       },
@@ -89,23 +66,10 @@ class DatabaseService {
       try {
         final db = await current;
         await db.close();
-      } catch (_) {
-        // Best-effort close: a failed open or already-closed connection must
-        // not block the caller.
-      }
+      } catch (_) {}
     }
   }
 
-  /// Runs [action] with exclusive control of the database file: the connection
-  /// is closed first, [action] runs (e.g. copying the DB file for a backup or
-  /// swapping in a restored file), then the database is reopened before any
-  /// concurrent [database] caller proceeds. [action] must not open the
-  /// database itself — call [database] only from outside.
-  ///
-  /// Concurrent calls are serialized through [_exclusiveTail], so two
-  /// overlapping backup/restore operations (e.g. the post-unlock auto-backup
-  /// racing a manual restore) run one after the other instead of interleaving
-  /// their close/swap/reopen cycles.
   Future<T> withExclusiveAccess<T>(Future<T> Function() action) async {
     final previous = _exclusiveTail;
     final done = Completer<void>();
@@ -113,9 +77,7 @@ class DatabaseService {
     if (previous != null) {
       try {
         await previous;
-      } catch (_) {
-        // A previous exclusive block that failed must not poison the chain.
-      }
+      } catch (_) {}
     }
     final gate = Completer<void>();
     _exclusiveGate = gate.future;
@@ -127,14 +89,10 @@ class DatabaseService {
       actionError = error;
       rethrow;
     } finally {
-      // Clear the gate FIRST so new callers use the normal memoized path, then
-      // reopen, then release callers that queued on the gate.
       _exclusiveGate = null;
       try {
         await database;
       } catch (reopenError) {
-        // Never mask the action's own failure with a reopen failure; only
-        // surface the reopen problem when the action itself succeeded.
         if (actionError == null) {
           Error.throwWithStackTrace(reopenError, StackTrace.current);
         }
@@ -145,8 +103,6 @@ class DatabaseService {
     }
   }
 
-  /// Opens [path] read-only with the app's encryption key and verifies it is a
-  /// valid, decryptable SQLite database (e.g. a candidate backup file).
   Future<bool> verifyDatabaseFile(String path) async {
     final encryptionKey = await _secureStorage.getDatabaseKey();
     Database? db;
@@ -157,9 +113,6 @@ class DatabaseService {
         db = await openDatabase(path, password: encryptionKey, readOnly: true);
       }
       final version = await db.getVersion();
-      // A candidate from a NEWER app version (higher schema) must not be
-      // swapped in — this app has no downgrade path and would run against a
-      // schema it doesn't fully know.
       return version >= 1 && version <= _databaseVersion;
     } catch (_) {
       return false;
@@ -173,11 +126,9 @@ class DatabaseService {
     final path = join(documentsDirectory.path, AppConstants.databaseName);
     final encryptionKey = await _secureStorage.getDatabaseKey();
 
-    if (Platform.isWindows) {
-      return _openWindowsDatabase(path, encryptionKey);
-    }
+    if (Platform.isWindows) return _openWindowsDatabase(path, encryptionKey);
 
-    return await openDatabase(
+    return openDatabase(
       path,
       password: encryptionKey,
       version: _databaseVersion,
@@ -188,11 +139,6 @@ class DatabaseService {
     );
   }
 
-  /// Opens the encrypted DB on Windows via `sqflite_common_ffi` + the SQLCipher
-  /// build of `package:sqlite3` (see the `hooks.user_defines` in pubspec.yaml).
-  /// The encryption key is applied with `PRAGMA key` in `onConfigure`, which
-  /// sqflite runs before the `user_version` check — the same SQLCipher 4 file
-  /// format the mobile sqflite_sqlcipher plugin uses, so DBs are portable.
   Future<Database> _openWindowsDatabase(
     String path,
     String encryptionKey,
@@ -213,37 +159,34 @@ class DatabaseService {
         ),
       );
     } on DatabaseException catch (e) {
-      // Sqlite error 26 = "file is not a database". This happens when the
-      // encryption key doesn't match the one used to create the database
-      // (e.g. after a secure storage reset but the DB file remains).
-      // The data is unrecoverable with the wrong key, so we delete the corrupt
-      // file and let the next open create a fresh database.
       final message = e.toString();
       if (message.contains('SqliteException(26)') ||
           message.contains('file is not a database')) {
         final file = File(path);
+        var recoveryPath = path;
         if (await file.exists()) {
-          await file.delete();
+          final stamp = DateTime.now()
+              .toUtc()
+              .toIso8601String()
+              .replaceAll(':', '-');
+          final recovery = File('$path.recovery-$stamp');
+          try {
+            await file.copy(recovery.path);
+            recoveryPath = recovery.path;
+          } catch (_) {
+            // The original file is intentionally left untouched.
+          }
         }
-        return databaseFactoryFfi.openDatabase(
-          path,
-          options: OpenDatabaseOptions(
-            version: _databaseVersion,
-            onCreate: _onCreate,
-            onConfigure: (db) async {
-              await db.execute(_cipherKeySql(encryptionKey));
-              await _onConfigure(db);
-            },
-            onUpgrade: _onUpgrade,
-            onOpen: _onOpen,
-          ),
+        throw DatabaseRecoveryException(
+          'The database could not be opened safely. No data was deleted. '
+          'Recovery copy: $recoveryPath',
+          recoveryPath,
         );
       }
       rethrow;
     }
   }
 
-  /// Raw open used by [verifyDatabaseFile] for candidate backup files.
   Future<Database> _openWindowsDatabaseRaw(
     String path,
     String encryptionKey, {
@@ -266,20 +209,10 @@ class DatabaseService {
     return "PRAGMA key = '$escaped'";
   }
 
-  /// Foreign keys are turned OFF here (outside the migration transaction) and
-  /// back ON in [_onOpen]. sqflite runs `onUpgrade` inside a transaction, where
-  /// `PRAGMA foreign_keys` is a no-op — so toggling it there would not work.
-  ///
-  /// The table-recreate migrations (`_v8`, `_v16`) `DROP TABLE loans`; with
-  /// foreign keys ON, SQLite fires the implicit `DELETE FROM loans` which
-  /// cascades into `payments`, `repayment_schedule`, and `documents`, wiping
-  /// them during an upgrade. FK must be OFF while that DROP executes.
   Future<void> _onConfigure(Database db) async {
     await db.execute('PRAGMA foreign_keys = OFF');
   }
 
-  /// Re-enable foreign key enforcement once the DB is fully open (fresh create
-  /// and migrations both complete before this runs).
   Future<void> _onOpen(Database db) async {
     await db.execute('PRAGMA foreign_keys = ON');
   }
@@ -491,8 +424,6 @@ class DatabaseService {
     ''');
 
     await _createIndexes(db);
-
-    // Cloud-sync bookkeeping tables + updated_at/tombstone triggers.
     await DatabaseMigrations.createSyncSchema(db);
   }
 
@@ -507,10 +438,6 @@ class DatabaseService {
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)',
     );
-    // Partial unique indexes (v21): dedupe applies only to NON-archived
-    // customers, so a customer can be re-registered after archiving (the repo
-    // check already excludes archived rows; these replace the former column
-    // UNIQUE constraints that contradicted it and blocked re-registration).
     await db.execute(
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_phone_unique ON customers(phone) WHERE status != 'archived'",
     );
@@ -547,7 +474,6 @@ class DatabaseService {
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_savings_transactions_account ON savings_transactions(savings_account_id)',
     );
-    // Composite indexes for common query patterns
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_payments_loan_date ON payments(loan_id, payment_date)',
     );
@@ -560,10 +486,6 @@ class DatabaseService {
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_loans_type_date ON loans(loan_type, loan_date)',
     );
-    // Indexes backing the money-rule join and the most common date/range
-    // filters (v20). The money rule's
-    // `LEFT JOIN savings_transactions st ON st.reference_loan_payment_id = p.id`
-    // otherwise full-scans savings_transactions for every payment aggregate.
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_savings_txns_ref_payment ON savings_transactions(reference_loan_payment_id)',
     );
@@ -583,4 +505,16 @@ class DatabaseService {
       'CREATE INDEX IF NOT EXISTS idx_documents_loan ON documents(loan_id)',
     );
   }
+}
+
+/// Signals that opening the financial database failed and automatic recovery
+/// is required. The existing database file is never deleted automatically.
+class DatabaseRecoveryException implements Exception {
+  const DatabaseRecoveryException(this.message, this.recoveryPath);
+
+  final String message;
+  final String recoveryPath;
+
+  @override
+  String toString() => message;
 }
