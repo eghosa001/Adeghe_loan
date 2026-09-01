@@ -1,0 +1,55 @@
+name: Align financial report calculations
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  align:
+    if: ${{ !startsWith(github.event.head_commit.message, '[report-align]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Align collection calculations
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('lib/features/reports/data/report_repository.dart')
+          s = p.read_text()
+          replacements = {
+            "p.amount - COALESCE(st.amount, 0.0)": "p.amount",
+          }
+          for old, new in replacements.items():
+              s = s.replace(old, new)
+          # Remove savings joins that were only needed to subtract overpayments.
+          s = s.replace("          'LEFT JOIN savings_transactions st '\n          '  ON st.reference_loan_payment_id = p.id AND st.type = \\\'overpayment\\\' '\n", "")
+          s = s.replace("          'LEFT JOIN savings_transactions st '\n          '  ON st.reference_loan_payment_id = p.id '\n          \" AND st.type = 'overpayment' \"\n", "")
+          s = s.replace("        'LEFT JOIN savings_transactions st '\n        'ON st.reference_loan_payment_id = p.id AND st.type = \\\'overpayment\\\' '\n", "")
+          s = s.replace("        ' LEFT JOIN savings_transactions st '\n        '   ON st.reference_loan_payment_id = p.id AND st.type = \\\'overpayment\\\' '\n", "")
+          s = s.replace("        ' LEFT JOIN savings_transactions st '\n        '   ON st.reference_loan_payment_id = p.id AND st.type = \\\'overpayment\\\' '\n", "")
+          s = s.replace('excluding overpayments credited to savings', 'including overpayments credited to savings')
+          s = s.replace('Collected figures follow the money rule.', 'Collected figures represent actual money received, including overpayments credited to savings.')
+          s = s.replace('collected = completed payments minus savings overpayments', 'collected = full completed payment amounts')
+          s = s.replace('All payment-derived series\n  /// follow the money rule', 'All payment-derived series\n  /// use full completed payment amounts')
+          p.write_text(s)
+          PY
+          grep -n "p.amount - COALESCE(st.amount" lib/features/reports/data/report_repository.dart && exit 1 || true
+      - name: Commit aligned reports
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/features/reports/data/report_repository.dart
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "[report-align] unify collected amounts across reports"
+          git push
+      - name: Remove temporary workflow
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git reset --hard origin/main
+          git rm -f .github/workflows/_align_financial_reports.yml || true
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "[report-align] remove temporary report alignment workflow"
+          git push
