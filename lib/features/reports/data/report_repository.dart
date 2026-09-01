@@ -141,22 +141,18 @@ class ReportRepository {
         // 1: Today's collected (money rule) + payment count
         db.rawQuery(
           'SELECT COUNT(*) AS count, '
-          'COALESCE(SUM(p.amount - COALESCE(st.amount, 0.0)), 0) AS total '
+          'COALESCE(SUM(p.amount), 0) AS total '
           'FROM payments p '
           'JOIN loans l ON p.loan_id = l.id '
-          'LEFT JOIN savings_transactions st '
-          '  ON st.reference_loan_payment_id = p.id AND st.type = \'overpayment\' '
           "WHERE p.status = 'completed' AND p.payment_date = ?$ltClause",
           withLt([todayStr]),
         ),
         // 2: Top collectors today (money rule)
         db.rawQuery(
           'SELECT p.collector AS collector, COUNT(*) AS count, '
-          'COALESCE(SUM(p.amount - COALESCE(st.amount, 0.0)), 0) AS total '
+          'COALESCE(SUM(p.amount), 0) AS total '
           'FROM payments p '
           'JOIN loans l ON p.loan_id = l.id '
-          'LEFT JOIN savings_transactions st '
-          '  ON st.reference_loan_payment_id = p.id AND st.type = \'overpayment\' '
           "WHERE p.status = 'completed' AND p.payment_date = ?$ltClause "
           'GROUP BY p.collector ORDER BY total DESC LIMIT 5',
           withLt([todayStr]),
@@ -400,9 +396,9 @@ class ReportRepository {
         'WHERE l.status = ?$ltClause',
         ltParam != null ? ['active', ltParam] : ['active'],
       ),
-      // 6: Amount collected in period (excluding overpayments credited to savings)
+      // 6: Amount collected in period (including overpayments credited to savings)
       db.rawQuery(
-        'SELECT COALESCE(SUM(p.amount - COALESCE(st.amount, 0.0)), 0) AS total '
+        'SELECT COALESCE(SUM(p.amount), 0) AS total '
         'FROM payments p '
         'JOIN loans l ON p.loan_id = l.id '
         'LEFT JOIN savings_transactions st '
@@ -498,7 +494,7 @@ class ReportRepository {
         'l.status AS loanStatus, '
         'l.interest_rate AS interestRate, '
         'cg.name AS groupName, '
-        'COALESCE(SUM(p.amount - COALESCE(st.amount, 0.0)), 0.0) AS totalPaid, '
+        'COALESCE(SUM(p.amount), 0.0) AS totalPaid, '
         '(SELECT COALESCE(SUM(st2.amount), 0.0) FROM savings_transactions st2 '
         ' JOIN payments p2 ON st2.reference_loan_payment_id = p2.id '
         " WHERE p2.loan_id = l.id AND p2.status = 'completed' AND st2.type = 'overpayment') AS savingsAmount "
@@ -507,8 +503,6 @@ class ReportRepository {
         'LEFT JOIN customer_groups cg ON c.group_id = cg.id '
         'LEFT JOIN payments p ON p.loan_id = l.id '
         "AND p.status = 'completed' "
-        'LEFT JOIN savings_transactions st '
-        'ON st.reference_loan_payment_id = p.id AND st.type = \'overpayment\' '
         // Include loans within the selected period and include completed loans
         'WHERE l.loan_date BETWEEN ? AND ? AND l.status IN (\'active\', \'defaulted\', \'completed\') $ltClause '
         'GROUP BY l.id '
@@ -669,10 +663,8 @@ class ReportRepository {
         'COUNT(DISTINCT CASE WHEN l.status != \'cancelled\' THEN l.id END) AS loanCount, '
         'COUNT(DISTINCT CASE WHEN l.status = \'active\' THEN l.id END) AS activeLoanCount, '
         'COALESCE(SUM(CASE WHEN l.status IN (\'active\', \'completed\', \'defaulted\') THEN l.amount ELSE 0 END), 0) AS totalDisbursed, '
-        '(SELECT COALESCE(SUM(p.amount - COALESCE(st.amount, 0.0)), 0) '
+        '(SELECT COALESCE(SUM(p.amount), 0) '
         ' FROM payments p '
-        ' LEFT JOIN savings_transactions st '
-        '   ON st.reference_loan_payment_id = p.id AND st.type = \'overpayment\' '
         ' JOIN loans pl ON p.loan_id = pl.id '
         ' WHERE pl.customer_id = c.id AND p.status = \'completed\') AS totalCollected, '
         'COALESCE(SUM(CASE WHEN l.status = \'active\' THEN l.outstanding_balance ELSE 0 END), 0) AS outstandingBalance, '
@@ -759,7 +751,7 @@ class ReportRepository {
   }
 
   /// Profit Report: one line per loan (cancelled loans excluded — they never
-  /// disbursed or earned). Collected figures follow the money rule.
+  /// disbursed or earned). Collected figures represent actual money received, including overpayments credited to savings.
   Future<Result<List<ProfitReportRow>>> getProfitReport({
     DateTime? startDate,
     DateTime? endDate,
@@ -799,10 +791,8 @@ class ReportRepository {
         'l.total_repayment AS expectedRepayment, '
         'l.outstanding_balance AS outstandingBalance, '
         'l.status AS status, '
-        '(SELECT COALESCE(SUM(p.amount - COALESCE(st.amount, 0.0)), 0) '
+        '(SELECT COALESCE(SUM(p.amount), 0) '
         ' FROM payments p '
-        ' LEFT JOIN savings_transactions st '
-        '   ON st.reference_loan_payment_id = p.id AND st.type = \'overpayment\' '
         " WHERE p.loan_id = l.id AND p.status = 'completed') AS totalCollected "
         'FROM loans l '
         'INNER JOIN customers c ON l.customer_id = c.id '
@@ -845,7 +835,7 @@ class ReportRepository {
 
   /// Dashboard trends bucketed by the active report period (daily for short
   /// ranges, weekly for medium, monthly for long). All payment-derived series
-  /// follow the money rule; disbursed/loan counts exclude cancelled loans.
+  /// use full completed payment amounts; disbursed/loan counts exclude cancelled loans.
   Future<Result<DashboardTrends>> getDashboardTrends({
     DateTime? startDate,
     DateTime? endDate,
@@ -903,7 +893,7 @@ class ReportRepository {
         final ltArgs = loanType != null ? [...dateArgs, loanType] : dateArgs;
         queries.addAll([
           db.rawQuery(
-            'SELECT COALESCE(SUM(p.amount - COALESCE(st.amount, 0.0)), 0) AS total '
+            'SELECT COALESCE(SUM(p.amount), 0) AS total '
             'FROM payments p '
             'JOIN loans l ON p.loan_id = l.id '
             'LEFT JOIN savings_transactions st '
