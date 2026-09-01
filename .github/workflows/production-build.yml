@@ -1,0 +1,55 @@
+name: Production build gates
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.44.6'
+          cache: true
+      - run: flutter pub get
+      - name: Build Windows release
+        run: flutter build windows --release
+
+  android-debug-sqlcipher-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.44.6'
+          cache: true
+      - run: flutter pub get
+      - name: Build Android debug APK
+        run: flutter build apk --debug
+
+  android-release-signing-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.44.6'
+          cache: true
+      - run: flutter pub get
+      - name: Verify release signing is intentionally configured
+        shell: bash
+        run: |
+          test -n "${ANDROID_KEYSTORE_PATH:-}" || {
+            echo "Production Android signing is not configured in CI.";
+            echo "Configure the four ANDROID_* secrets before publishing an Android release.";
+            exit 1;
+          }
