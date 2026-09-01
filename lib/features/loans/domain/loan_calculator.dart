@@ -2,25 +2,12 @@ import 'package:loantrack/core/utils/currency_utils.dart';
 
 /// The output of a loan calculation, containing all the key financial metrics.
 class LoanCalculationResult {
-  /// The principal amount of the loan.
   final double principal;
-
-  /// The calculated flat interest amount.
   final double interestAmount;
-
-  /// The calculated insurance fee amount.
   final double insuranceFeeAmount;
-
-  /// The calculated commission amount.
   final double commissionAmount;
-
-  /// The sum of all non-interest charges (insurance, commission, processing, etc.).
   final double totalCharges;
-
-  /// The total amount the borrower must repay (principal + interest + charges).
   final double totalRepayment;
-
-  /// The installment amount (daily or weekly).
   final double installmentAmount;
 
   LoanCalculationResult({
@@ -34,14 +21,10 @@ class LoanCalculationResult {
   });
 }
 
-/// A pure-logic service for calculating loan metrics based on flat-rate microfinance rules.
+/// Pure-logic service for flat-rate microfinance loan calculations.
 class LoanCalculator {
   LoanCalculator._();
 
-  /// Calculates all key financial metrics for a new loan.
-  ///
-  /// This uses a flat-rate calculation method, where interest and percentage-based
-  /// fees are calculated once on the initial principal amount.
   static LoanCalculationResult calculate({
     required double principal,
     required double interestRatePercent,
@@ -50,7 +33,7 @@ class LoanCalculator {
     required double processingFee,
     required double administrativeFee,
     required double otherCharges,
-    required int duration, // In days or weeks
+    required int duration,
   }) {
     if (principal <= 0 || duration <= 0) {
       return LoanCalculationResult(
@@ -64,21 +47,29 @@ class LoanCalculator {
       );
     }
 
-    final interestAmount = principal * (interestRatePercent / 100);
-    final insuranceFeeAmount = principal * (insuranceFeePercent / 100);
-    final commissionAmount = principal * (commissionPercent / 100);
-    final totalCharges = insuranceFeeAmount + commissionAmount + processingFee + administrativeFee + otherCharges;
-    final totalRepayment = principal + interestAmount + totalCharges;
-    final installmentAmount = totalRepayment / duration;
+    final principalCents = CurrencyUtils.toMinorUnits(principal);
+    int percentOfPrincipal(double percent) =>
+        (principalCents * percent / 100).round();
+
+    final interestCents = percentOfPrincipal(interestRatePercent);
+    final insuranceCents = percentOfPrincipal(insuranceFeePercent);
+    final commissionCents = percentOfPrincipal(commissionPercent);
+    final chargesCents = insuranceCents +
+        commissionCents +
+        CurrencyUtils.toMinorUnits(processingFee) +
+        CurrencyUtils.toMinorUnits(administrativeFee) +
+        CurrencyUtils.toMinorUnits(otherCharges);
+    final totalCents = principalCents + interestCents + chargesCents;
+    final installmentCents = totalCents ~/ duration;
 
     return LoanCalculationResult(
-      principal: principal,
-      interestAmount: CurrencyUtils.roundToCents(interestAmount),
-      insuranceFeeAmount: CurrencyUtils.roundToCents(insuranceFeeAmount),
-      commissionAmount: CurrencyUtils.roundToCents(commissionAmount),
-      totalCharges: CurrencyUtils.roundToCents(totalCharges),
-      totalRepayment: CurrencyUtils.roundToCents(totalRepayment),
-      installmentAmount: CurrencyUtils.roundToCents(installmentAmount),
+      principal: CurrencyUtils.fromMinorUnits(principalCents),
+      interestAmount: CurrencyUtils.fromMinorUnits(interestCents),
+      insuranceFeeAmount: CurrencyUtils.fromMinorUnits(insuranceCents),
+      commissionAmount: CurrencyUtils.fromMinorUnits(commissionCents),
+      totalCharges: CurrencyUtils.fromMinorUnits(chargesCents),
+      totalRepayment: CurrencyUtils.fromMinorUnits(totalCents),
+      installmentAmount: CurrencyUtils.fromMinorUnits(installmentCents),
     );
   }
 }
