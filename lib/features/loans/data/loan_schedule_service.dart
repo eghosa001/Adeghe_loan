@@ -29,7 +29,7 @@ class LoanScheduleService {
     _versionNotifier.bump();
   }
 
-  /// Bulk rebuild avoids one holiday query and one payment query per loan.
+  /// Bulk rebuild uses one holiday query and one payment aggregate query.
   Future<void> rebuildAllSchedules() async {
     final db = await _db;
     final loanRows = await db.query('loans');
@@ -39,20 +39,14 @@ class LoanScheduleService {
     }
 
     final holidays = (await db.query('holidays'))
-        .map((row) => Holiday.fromMap(row))
-        .toList(growable: false);
-
+        .map((row) => Holiday.fromMap(row)).toList(growable: false);
     final paymentRows = await db.rawQuery('''
       SELECT p.loan_id,
-             COALESCE(SUM(
-               p.amount - COALESCE((
-                 SELECT st.amount
-                 FROM savings_transactions st
-                 WHERE st.reference_loan_payment_id = p.id
-                   AND st.type = 'overpayment'
-                 LIMIT 1
-               ), 0.0)
-             ), 0.0) AS applied
+             COALESCE(SUM(p.amount - COALESCE((
+               SELECT st.amount FROM savings_transactions st
+               WHERE st.reference_loan_payment_id = p.id
+                 AND st.type = 'overpayment' LIMIT 1
+             ), 0.0)), 0.0) AS applied
       FROM payments p
       WHERE p.status = 'completed'
       GROUP BY p.loan_id
@@ -66,13 +60,11 @@ class LoanScheduleService {
     }
 
     for (final row in loanRows) {
-      await _rebuild(
-        db,
-        Loan.fromMap(row),
-        holidays: holidays,
-        totalAppliedToLoan: appliedByLoan[row['id']] ?? 0.0,
-      );
+      await _rebuild(db, Loan.fromMap(row),
+          holidays: holidays,
+          totalAppliedToLoan: appliedByLoan[row['id']] ?? 0.0);
     }
+    await _rebuildSavingsBalances(db);
     _versionNotifier.bump();
   }
 
@@ -83,9 +75,20 @@ class LoanScheduleService {
     double? totalAppliedToLoan,
   }) async {
     final effectiveHolidays = holidays ?? (await db.query('holidays'))
-        .map((row) => Holiday.fromMap(row))
-        .toList(growable: false);
+        .map((row) => Holiday.fromMap(row)).toList(growable: false);
     final effectiveApplied = totalAppliedToLoan ?? await _loadApplied(db, loan.id);
+    final remaining = (loan.totalRepayment - effectiveApplied)
+        .clamp(0.0, loan.totalRepayment)
+        .toDouble();
+
+    // The balance is a projection of immutable payment events. This prevents
+    // an offline device's stale balance snapshot from winning a cloud merge.
+    if (loan.status != 'cancelled') {
+      await db.update('loans', {
+        'outstanding_balance': remaining,
+        'status': remaining <= 0.005 ? 'completed' : 'active',
+      }, where: 'id = ?', whereArgs: [loan.id]);
+    }
 
     final result = LoanScheduleCalculator.build(
       loan: loan,
@@ -107,19 +110,36 @@ class LoanScheduleService {
 
   Future<double> _loadApplied(Database db, String loanId) async {
     final rows = await db.rawQuery('''
-      SELECT COALESCE(SUM(
-        p.amount - COALESCE((
-          SELECT st.amount
-          FROM savings_transactions st
-          WHERE st.reference_loan_payment_id = p.id
-            AND st.type = 'overpayment'
-          LIMIT 1
-        ), 0.0)
-      ), 0.0) AS applied
+      SELECT COALESCE(SUM(p.amount - COALESCE((
+        SELECT st.amount FROM savings_transactions st
+        WHERE st.reference_loan_payment_id = p.id
+          AND st.type = 'overpayment' LIMIT 1
+      ), 0.0)), 0.0) AS applied
       FROM payments p
       WHERE p.loan_id = ? AND p.status = 'completed'
     ''', [loanId]);
     return (rows.first['applied'] as num?)?.toDouble() ?? 0.0;
+  }
+
+  Future<void> _rebuildSavingsBalances(Database db) async {
+    final rows = await db.rawQuery('''
+      SELECT sa.id,
+        COALESCE(SUM(CASE
+          WHEN st.type IN ('deposit', 'overpayment') THEN st.amount
+          WHEN st.type = 'withdrawal' THEN -st.amount
+          ELSE 0 END), 0.0) AS balance
+      FROM savings_accounts sa
+      LEFT JOIN savings_transactions st
+        ON st.savings_account_id = sa.id
+      GROUP BY sa.id
+    ''');
+    for (final row in rows) {
+      final id = row['id'] as String;
+      final balance = ((row['balance'] as num?)?.toDouble() ?? 0.0)
+          .clamp(0.0, double.infinity).toDouble();
+      await db.update('savings_accounts', {'balance': balance},
+          where: 'id = ?', whereArgs: [id]);
+    }
   }
 }
 
