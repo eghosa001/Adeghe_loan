@@ -1,0 +1,25 @@
+name: Apply production hardening
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  harden:
+    if: ${{ !startsWith(github.event.head_commit.message, '[hardening]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply hardening
+        run: python3 .github/production_hardening.py
+      - name: Commit hardening changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No hardening changes to commit"
+            exit 0
+          fi
+          git commit -m "[hardening] production safety, money precision, sync and CI"
+          git push
