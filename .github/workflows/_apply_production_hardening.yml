@@ -10,8 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Apply hardening
-        run: python3 .github/production_hardening.py
+      - name: Apply validated hardening
+        run: python3 .github/production_hardening_v2.py
       - name: Commit hardening changes
         run: |
           git config user.name "github-actions[bot]"
