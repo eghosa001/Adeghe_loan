@@ -35,21 +35,17 @@ jobs:
       - name: Build Android debug APK
         run: flutter build apk --debug
 
-  android-release-signing-guard:
+  release-configuration-audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: '3.44.6'
-          cache: true
-      - run: flutter pub get
-      - name: Verify release signing is intentionally configured
+      - name: Verify production configuration is not committed
         shell: bash
         run: |
-          test -n "${ANDROID_KEYSTORE_PATH:-}" || {
-            echo "Production Android signing is not configured in CI.";
-            echo "Configure the four ANDROID_* secrets before publishing an Android release.";
-            exit 1;
-          }
+          if grep -R -E "tpqyilakpsjmevqgdqur|eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" lib android windows; then
+            echo "Committed Supabase project credentials detected."
+            exit 1
+          fi
+          grep -q "SUPABASE_URL" lib/core/cloud/supabase_config.dart
+          grep -q "SUPABASE_ANON_KEY" lib/core/cloud/supabase_config.dart
+          grep -q "Production release builds require" android/app/build.gradle.kts
