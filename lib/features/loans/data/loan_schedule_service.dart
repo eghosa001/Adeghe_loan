@@ -62,13 +62,10 @@ class LoanScheduleService {
     final remaining = (loan.totalRepayment - effectiveApplied)
         .clamp(0.0, loan.totalRepayment).toDouble();
 
-    // Loan balance is a projection of completed payment events, not an
-    // authoritative replicated value. Preserve lifecycle states that are not
-    // determined by repayment math.
-    if (loan.status != 'cancelled' && loan.status != 'pending') {
+    if (loan.status != LoanStatus.cancelled && loan.status != LoanStatus.pending) {
       await db.update('loans', {
         'outstanding_balance': remaining,
-        'status': remaining <= 0.005 ? 'completed' : 'active',
+        'status': remaining <= 0.005 ? LoanStatus.completed.name : LoanStatus.active.name,
       }, where: 'id = ?', whereArgs: [loan.id]);
     }
 
