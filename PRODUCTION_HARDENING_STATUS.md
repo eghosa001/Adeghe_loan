@@ -1,1 +1,0 @@
-Production hardening is being applied as targeted, compatibility-preserving changes. The repository's existing financial behavior is intentionally preserved unless a change is required to prevent data loss, monetary inconsistency, synchronization conflicts, or test/deployment regressions.
