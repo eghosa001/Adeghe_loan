@@ -4,7 +4,6 @@ import java.util.zip.ZipFile
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
@@ -19,21 +18,45 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.example.flutter_application_1"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            val keystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+            val storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            val keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+            val keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            if (!keystorePath.isNullOrBlank() && !storePassword.isNullOrBlank() &&
+                !keyAlias.isNullOrBlank() && !keyPassword.isNullOrBlank()) {
+                storeFile = file(keystorePath)
+                this.storePassword = storePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            val hasReleaseSigning = listOf(
+                System.getenv("ANDROID_KEYSTORE_PATH"),
+                System.getenv("ANDROID_KEYSTORE_PASSWORD"),
+                System.getenv("ANDROID_KEY_ALIAS"),
+                System.getenv("ANDROID_KEY_PASSWORD"),
+            ).all { !it.isNullOrBlank() }
+            check(hasReleaseSigning) {
+                "Production release builds require ANDROID_KEYSTORE_PATH, " +
+                    "ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD. " +
+                    "Refusing to sign a release APK with the debug keystore."
+            }
+            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }
@@ -44,15 +67,6 @@ kotlin {
     }
 }
 
-// The sqlite3 package's native-assets hook (configured in pubspec via
-// `hooks.user_defines.sqlite3.source: sqlcipher`, needed only for the Windows
-// desktop build) also downloads a raw libsqlcipher.so for the Android ABIs.
-// sqflite_sqlcipher bundles its own SQLCipher native library through the
-// net.zetetic AAR, whose libsqlcipher.so carries the Zetetic JNI
-// (net.zetetic.database.sqlcipher.*) the plugin calls. Both share the file
-// name libsqlcipher.so and the Flutter-staged sqlite3 build shadows the AAR's,
-// causing UnsatisfiedLinkError at database open. Drop the staged raw copy so
-// the AAR's remains the only libsqlcipher.so in the APK.
 tasks.matching { it.name.startsWith("copyJniLibsflutterBuild") }.configureEach {
     doLast {
         val staged = outputs.files.singleFile
@@ -62,10 +76,6 @@ tasks.matching { it.name.startsWith("copyJniLibsflutterBuild") }.configureEach {
     }
 }
 
-// Safety net: fail the build if a libsqlcipher.so without the Zetetic JNI ever
-// reaches the APK again (e.g. the sqlite3 hook shadows the AAR's lib after a
-// dependency upgrade). A silent wrong-lib only crashes at runtime on the device,
-// so we fail loudly at build time instead.
 fun verifySqlcipherJniInApk(apk: File) {
     val zip = ZipFile(apk)
     try {
@@ -80,9 +90,8 @@ fun verifySqlcipherJniInApk(apk: File) {
             throw GradleException(
                 "APK $apk ships a libsqlcipher.so without the Zetetic JNI " +
                     "(missing 'nativeOpen'): ${offenders.joinToString()}. The sqlite3 " +
-                    "native-assets hook (pubspec hooks.user_defines.sqlite3.source: sqlcipher, " +
-                    "intended for the Windows build) is shadowing the net.zetetic AAR's " +
-                    "JNI-bearing lib on Android, which crashes at DB open (UnsatisfiedLinkError).",
+                    "native-assets hook is shadowing the net.zetetic AAR's JNI-bearing " +
+                    "library, which would crash at database open."
             )
         }
     } finally {
@@ -98,11 +107,7 @@ mapOf("assembleDebug" to "packageDebug", "assembleRelease" to "packageRelease").
             val apks = tasks.named(pkg).get().outputs.files
                 .filter { it.isFile && it.name.endsWith(".apk") }
                 .toList()
-            if (apks.isEmpty()) {
-                logger.info("verifySqlcipherJni: no APK output for $pkg, skipping")
-            } else {
-                apks.forEach { verifySqlcipherJniInApk(it) }
-            }
+            apks.forEach { verifySqlcipherJniInApk(it) }
         }
     }
     tasks.matching { it.name == assemble }.configureEach {
