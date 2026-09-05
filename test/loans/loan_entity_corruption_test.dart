@@ -55,4 +55,14 @@ void main() {
     final loan = Loan.fromMap(row);
     expect(loan.duration, 9999);
   });
+
+  test('rejects total repayment below amount disbursed', () {
+    final row = _validLoan()..['total_repayment'] = 9999.99;
+    expect(() => Loan.fromMap(row), throwsFormatException);
+  });
+
+  test('rejects outstanding balance above total repayment', () {
+    final row = _validLoan()..['outstanding_balance'] = 11500.01;
+    expect(() => Loan.fromMap(row), throwsFormatException);
+  });
 }
