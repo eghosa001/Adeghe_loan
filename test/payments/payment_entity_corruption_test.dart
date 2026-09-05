@@ -29,4 +29,14 @@ void main() {
     final row = _validPayment()..['payment_method'] = 'future_method';
     expect(() => Payment.fromMap(row), throwsFormatException);
   });
+
+  test('rejects malformed created_at instead of silently dropping it', () {
+    final row = _validPayment()..['created_at'] = 'not-a-date';
+    expect(() => Payment.fromMap(row), throwsFormatException);
+  });
+
+  test('accepts a valid created_at timestamp', () {
+    final row = _validPayment()..['created_at'] = '2026-09-05T10:00:00.000Z';
+    expect(Payment.fromMap(row).createdAt, isNotNull);
+  });
 }
