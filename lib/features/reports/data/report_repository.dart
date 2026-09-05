@@ -396,14 +396,13 @@ class ReportRepository {
         'WHERE l.status = ?$ltClause',
         ltParam != null ? ['active', ltParam] : ['active'],
       ),
-      // 6: Amount collected in period (including overpayments credited to savings)
+      // 6: Amount collected in period. Each completed payment is counted
+      //    exactly once; savings overpayment transactions are a separate
+      //    ledger movement and must not multiply the payment row.
       db.rawQuery(
         'SELECT COALESCE(SUM(p.amount), 0) AS total '
         'FROM payments p '
         'JOIN loans l ON p.loan_id = l.id '
-        'LEFT JOIN savings_transactions st '
-        '  ON st.reference_loan_payment_id = p.id '
-        " AND st.type = 'overpayment' "
         "WHERE p.status = 'completed' AND p.payment_date BETWEEN ? AND ?$ltClause",
         ltParam != null
             ? [startStr, endStr, ltParam]
@@ -892,12 +891,12 @@ class ReportRepository {
         final dateArgs = [startStr, endStr];
         final ltArgs = loanType != null ? [...dateArgs, loanType] : dateArgs;
         queries.addAll([
+          // Count each completed payment exactly once. Savings overpayments
+          // are separate ledger rows and must not be joined into this sum.
           db.rawQuery(
             'SELECT COALESCE(SUM(p.amount), 0) AS total '
             'FROM payments p '
             'JOIN loans l ON p.loan_id = l.id '
-            'LEFT JOIN savings_transactions st '
-            '  ON st.reference_loan_payment_id = p.id AND st.type = \'overpayment\' '
             "WHERE p.status = 'completed' AND p.payment_date BETWEEN ? AND ?$ltClause",
             ltArgs,
           ),
@@ -982,5 +981,3 @@ class ReportRepository {
     return '${months[d.month - 1]} ${d.year}';
   }
 }
-
-
