@@ -3,7 +3,6 @@ import 'package:loantrack/core/utils/date_utils.dart';
 enum PaymentMethod { cash, transfer, pos, cheque, mobileMoney, savings }
 
 enum PaymentType { partial, full, overpayment }
-
 enum PaymentStatus { completed, reversed }
 
 class Payment {
@@ -70,6 +69,18 @@ class Payment {
       throw FormatException('Payment date is invalid.');
     }
 
+    DateTime? createdAt;
+    final rawCreatedAt = map['created_at'];
+    if (rawCreatedAt != null) {
+      if (rawCreatedAt is! String) {
+        throw FormatException('Payment created_at is invalid.');
+      }
+      createdAt = DateTime.tryParse(rawCreatedAt);
+      if (createdAt == null) {
+        throw FormatException('Payment created_at is invalid.');
+      }
+    }
+
     return Payment(
       id: _requiredString(map, 'id'),
       loanId: _requiredString(map, 'loan_id'),
@@ -89,9 +100,7 @@ class Payment {
       remarks: map['remarks'] as String?,
       priorLoanStatus: map['prior_loan_status'] as String?,
       clientRequestId: map['client_request_id'] as String?,
-      createdAt: map['created_at'] == null
-          ? null
-          : DateTime.tryParse(map['created_at'] as String),
+      createdAt: createdAt,
     );
   }
 
