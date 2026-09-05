@@ -69,12 +69,12 @@ PaymentAmounts computePaymentSplit({
   final cap = (installmentDue != null && installmentDue > 0)
       ? min(installmentDue, outstandingBalance)
       : outstandingBalance;
-  final rawLoanPaid = min(paymentAmount, cap);
 
   // Perform the split in minor units so the two destinations always reconcile
   // exactly to the entered payment after currency rounding. Doing the surplus
-  // calculation from [rawLoanPaid] while rounding [loanPaid] separately can
-  // otherwise create a one-cent accounting mismatch at half-cent boundaries.
+  // calculation from a raw floating-point split while rounding each side
+  // separately can otherwise create a one-cent accounting mismatch at
+  // half-cent boundaries.
   final paymentCents = CurrencyUtils.toMinorUnits(paymentAmount);
   final capCents = CurrencyUtils.toMinorUnits(cap);
   final loanPaidCents = min(paymentCents, capCents);
