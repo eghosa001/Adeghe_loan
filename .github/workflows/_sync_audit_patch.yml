@@ -6,14 +6,20 @@ permissions:
   contents: write
 jobs:
   patch:
-    if: ${{ !contains(github.event.head_commit.message, '[sync-audit-bot]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Patch service and schema
+      - name: Patch sync service and schema
+        env:
+          EVENT_PATH: ${{ github.event_path }}
         run: |
           python3 <<'PY'
+          import json
           from pathlib import Path
+          event=json.loads(Path(__import__('os').environ['EVENT_PATH']).read_text())
+          if '[sync-audit-bot]' in event.get('head_commit',{}).get('message',''):
+              raise SystemExit(0)
+
           service=Path('lib/core/cloud/cloud_sync_service.dart')
           text=service.read_text()
           text=text.replace("import 'dart:io';\n", "import 'dart:convert';\nimport 'dart:io';\n", 1)
@@ -22,11 +28,10 @@ jobs:
           text=text.replace(old,"final watermark=_isoUtcNow();await _setPullFlag(db,true);",1)
           old="final query=client.from(table).select();final filtered=lastPulled==null?query:query.gte('updated_at',lastPulled);final remoteRows=await _fetchAll(filtered);"
           if old not in text: raise SystemExit('query snippet not found')
-          new="""// Pull the complete current table. Offline devices do not share a clock,
-        // so a timestamp watermark can permanently hide a valid older-looking
-        // remote write. Pagination in _fetchAll keeps memory bounded.
-        final remoteRows=await _fetchAll(client.from(table).select());"""
-          text=text.replace(old,new,1)
+          text=text.replace(old,"""// Do not use a client-clock pull watermark. Devices can have different clocks,
+        // so a valid offline write can have an older timestamp than the last pull.
+        // Full scans plus deterministic LWW comparison guarantee convergence.
+        final remoteRows=await _fetchAll(client.from(table).select());""",1)
           old="final localUpdated=(localRow['updated_at'] as String?)??'';if(remoteUpdated.compareTo(localUpdated)<=0)continue;"
           if old not in text: raise SystemExit('comparison snippet not found')
           text=text.replace(old,"if(compareSyncRows(localRow,remoteRow)<=0)continue;",1)
@@ -41,8 +46,6 @@ jobs:
   return jsonEncode(value);
 }
 
-/// Deterministic LWW comparison. Timestamp is primary; equal timestamps use
-/// canonical row JSON so two devices cannot permanently diverge on a tie.
 @visibleForTesting int compareSyncRows(Map<String,Object?> local,Map<String,Object?> remote){
   final localUpdated=(local['updated_at'] as String?)??'';
   final remoteUpdated=(remote['updated_at'] as String?)??'';
@@ -56,13 +59,13 @@ jobs:
           service.write_text(text)
 
           migration=Path('supabase_migrations/20260905_sync_lww_and_watermark_hardening.sql')
-          migration.write_text('''-- Prevent stale offline pushes from overwriting newer cloud rows.\ncreate or replace function public.enforce_sync_lww()\nreturns trigger language plpgsql set search_path = public\nas $$\ndeclare old_json text; new_json text;\nbegin\n  if new.updated_at is null or old.updated_at is null then return new; end if;\n  if new.updated_at < old.updated_at then return old; end if;\n  if new.updated_at = old.updated_at then\n    old_json := to_jsonb(old)::text; new_json := to_jsonb(new)::text;\n    if new_json <= old_json then return old; end if;\n  end if;\n  return new;\nend;\n$$;\n\ndo $$\ndeclare t text;\nbegin\n  foreach t in array array['business_profile','customer_groups','customers','loans','payments','savings_accounts','savings_transactions','documents','holidays'] loop\n    execute format('drop trigger if exists aaa_sync_lww_guard on public.%I',t);\n    execute format('create trigger aaa_sync_lww_guard before update on public.%I for each row execute function public.enforce_sync_lww()',t);\n  end loop;\nend\n$$;\n''')
+          migration.write_text('''-- Deterministic cloud LWW guard.\ncreate or replace function public.enforce_sync_lww()\nreturns trigger language plpgsql set search_path = public\nas $$\ndeclare old_json text; new_json text;\nbegin\n  if new.updated_at is null or old.updated_at is null then return new; end if;\n  if new.updated_at < old.updated_at then return old; end if;\n  if new.updated_at = old.updated_at then\n    old_json := to_jsonb(old)::text; new_json := to_jsonb(new)::text;\n    if new_json <= old_json then return old; end if;\n  end if;\n  return new;\nend;\n$$;\n\ndo $$\ndeclare t text;\nbegin\n  foreach t in array array['business_profile','customer_groups','customers','loans','payments','savings_accounts','savings_transactions','documents','holidays'] loop\n    execute format('drop trigger if exists aaa_sync_lww_guard on public.%I',t);\n    execute format('create trigger aaa_sync_lww_guard before update on public.%I for each row execute function public.enforce_sync_lww()',t);\n  end loop;\nend\n$$;\n''')
 
           schema=Path('supabase_schema.sql')
           s=schema.read_text()
           marker='-- ── Upgrade existing deployments (mirror of migrations.dart, SAFE TO RE-RUN) ─'
           if marker not in s: raise SystemExit('schema marker not found')
-          block='''-- ── Cloud-sync conflict hardening ────────────────────────────────────────────\n-- Offline timestamps are not globally ordered. The client performs full pulls\n-- and deterministic LWW; this trigger also blocks stale offline pushes.\ncreate or replace function public.enforce_sync_lww()\nreturns trigger language plpgsql set search_path = public\nas $$\ndeclare old_json text; new_json text;\nbegin\n  if new.updated_at is null or old.updated_at is null then return new; end if;\n  if new.updated_at < old.updated_at then return old; end if;\n  if new.updated_at = old.updated_at then\n    old_json := to_jsonb(old)::text; new_json := to_jsonb(new)::text;\n    if new_json <= old_json then return old; end if;\n  end if;\n  return new;\nend;\n$$;\n\ndo $$\ndeclare t text;\nbegin\n  foreach t in array array['business_profile','customer_groups','customers','loans','payments','savings_accounts','savings_transactions','documents','holidays'] loop\n    execute format('drop trigger if exists aaa_sync_lww_guard on public.%I',t);\n    execute format('create trigger aaa_sync_lww_guard before update on public.%I for each row execute function public.enforce_sync_lww()',t);\n  end loop;\nend\n$$;\n\n'''
+          block='''-- ── Cloud-sync conflict hardening ────────────────────────────────────────────\n-- Client clocks are not globally authoritative. The client uses full pulls and\n-- deterministic LWW; this trigger blocks stale offline pushes on the server.\ncreate or replace function public.enforce_sync_lww()\nreturns trigger language plpgsql set search_path = public\nas $$\ndeclare old_json text; new_json text;\nbegin\n  if new.updated_at is null or old.updated_at is null then return new; end if;\n  if new.updated_at < old.updated_at then return old; end if;\n  if new.updated_at = old.updated_at then\n    old_json := to_jsonb(old)::text; new_json := to_jsonb(new)::text;\n    if new_json <= old_json then return old; end if;\n  end if;\n  return new;\nend;\n$$;\n\ndo $$\ndeclare t text;\nbegin\n  foreach t in array array['business_profile','customer_groups','customers','loans','payments','savings_accounts','savings_transactions','documents','holidays'] loop\n    execute format('drop trigger if exists aaa_sync_lww_guard on public.%I',t);\n    execute format('create trigger aaa_sync_lww_guard before update on public.%I for each row execute function public.enforce_sync_lww()',t);\n  end loop;\nend\n$$;\n\n'''
           schema.write_text(s.replace(marker,block+marker,1))
           PY
       - name: Commit patch
