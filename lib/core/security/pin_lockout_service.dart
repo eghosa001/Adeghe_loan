@@ -13,8 +13,12 @@ import 'secure_key_value_store.dart';
 ///  * After `maxLockoutCycles` lockouts the device is PERMANENTLY locked. The
 ///    only way back in is the recovery password via Forgot PIN, which is a
 ///    long, high-entropy secret hashed with PBKDF2.
-///  * Lockout cycles are cumulative and never cleared by a clock change, so
-///    forwarding the device clock cannot restore unlimited guessing.
+///  * The lockout start time is persisted as well as its deadline. If the
+///    device clock is moved backwards while locked, the service fails closed
+///    rather than treating the lockout as expired. A wall-clock jump forward
+///    can still expire a lockout early; a true monotonic clock cannot be
+///    persisted reliably across an app restart, so this is deliberately
+///    conservative about rollback rather than claiming clock-proof security.
 class PinLockoutService {
   PinLockoutService(this._storage);
 
@@ -28,9 +32,15 @@ class PinLockoutService {
     if (await isPermanentlyLocked()) return true;
     final until = await _lockoutUntil();
     if (until == null) return false;
-    if (DateTime.now().isBefore(until)) return true;
-    await _storage.remove(AppConstants.keyLockoutUntil);
-    await _storage.remove(AppConstants.keyFailedAttempts);
+    final now = DateTime.now();
+    final started = await _lockoutStarted();
+
+    // A wall-clock rollback must never make an active lockout appear expired.
+    // Keep the lock until the persisted deadline is reached in wall time.
+    if (started != null && now.isBefore(started)) return true;
+    if (now.isBefore(until)) return true;
+
+    await _clearActiveLockout();
     return false;
   }
 
@@ -50,10 +60,17 @@ class PinLockoutService {
     }
     final until = await _lockoutUntil();
     if (until == null) return null;
-    final remaining = until.difference(DateTime.now());
+    final now = DateTime.now();
+    final started = await _lockoutStarted();
+    if (started != null && now.isBefore(started)) {
+      // Clock rollback: report the original lockout duration rather than a
+      // misleading negative/expired countdown. `isLockedOut()` remains the
+      // authoritative gate.
+      return AppConstants.lockoutMaxDuration;
+    }
+    final remaining = until.difference(now);
     if (remaining.isNegative) {
-      await _storage.remove(AppConstants.keyLockoutUntil);
-      await _storage.remove(AppConstants.keyFailedAttempts);
+      await _clearActiveLockout();
       return null;
     }
     return remaining;
@@ -82,9 +99,12 @@ class PinLockoutService {
     await _storage.write(AppConstants.keyLockoutCycles, '$cycles');
     if (cycles >= AppConstants.maxLockoutCycles) {
       await _storage.write(AppConstants.keyPermanentLock, '1');
-      await _storage.remove(AppConstants.keyLockoutUntil);
+      await _clearActiveLockout();
     } else {
-      final until = DateTime.now().add(_escalatedDuration(cycles));
+      final started = DateTime.now();
+      final until = started.add(_escalatedDuration(cycles));
+      await _storage.write(
+          AppConstants.keyLockoutStarted, started.toIso8601String());
       await _storage.write(
           AppConstants.keyLockoutUntil, until.toIso8601String());
     }
@@ -94,8 +114,7 @@ class PinLockoutService {
   /// Clears the counter, any active lockout, and lockout cycles (after a
   /// successful unlock or recovery).
   Future<void> reset() async {
-    await _storage.remove(AppConstants.keyLockoutUntil);
-    await _storage.remove(AppConstants.keyFailedAttempts);
+    await _clearActiveLockout();
     await _storage.remove(AppConstants.keyLockoutCycles);
     await _storage.remove(AppConstants.keyPermanentLock);
   }
@@ -123,5 +142,17 @@ class PinLockoutService {
     final value = await _storage.read(AppConstants.keyLockoutUntil);
     if (value == null) return null;
     return DateTime.tryParse(value);
+  }
+
+  Future<DateTime?> _lockoutStarted() async {
+    final value = await _storage.read(AppConstants.keyLockoutStarted);
+    if (value == null) return null;
+    return DateTime.tryParse(value);
+  }
+
+  Future<void> _clearActiveLockout() async {
+    await _storage.remove(AppConstants.keyLockoutUntil);
+    await _storage.remove(AppConstants.keyLockoutStarted);
+    await _storage.remove(AppConstants.keyFailedAttempts);
   }
 }
