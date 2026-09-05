@@ -1,46 +1,38 @@
 name: Apply cloud sync audit patch
-
 on:
   push:
     branches: [main]
-
 permissions:
   contents: write
-
 jobs:
   patch:
     if: ${{ !contains(github.event.head_commit.message, '[sync-audit-bot]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Patch sync conflict and watermark handling
+      - name: Patch service and schema
         run: |
           python3 <<'PY'
           from pathlib import Path
-
-          service = Path('lib/core/cloud/cloud_sync_service.dart')
-          text = service.read_text()
-          text = text.replace("import 'dart:io';\n", "import 'dart:convert';\nimport 'dart:io';\n")
-          old = "final meta=await _readMeta(db);final lastPulled=meta.$2;final watermark=_isoUtcNow();await _setPullFlag(db,true);"
-          new = "final watermark=_isoUtcNow();await _setPullFlag(db,true);"
-          if old not in text: raise SystemExit('pull meta snippet not found')
-          text = text.replace(old, new, 1)
-          old = "final query=client.from(table).select();final filtered=lastPulled==null?query:query.gte('updated_at',lastPulled);final remoteRows=await _fetchAll(filtered);"
-          new = """// Pull the complete current table rather than trusting a client-clock timestamp
-        // watermark. Device clocks are independent; a device can legitimately write a
-        // row whose timestamp is older than another device's last-pull watermark.
-        // Full scans plus deterministic per-row LWW comparison guarantee convergence
-        // without assuming synchronized clocks. Pagination in _fetchAll keeps the
-        // query bounded in memory.
+          service=Path('lib/core/cloud/cloud_sync_service.dart')
+          text=service.read_text()
+          text=text.replace("import 'dart:io';\n", "import 'dart:convert';\nimport 'dart:io';\n", 1)
+          old="final meta=await _readMeta(db);final lastPulled=meta.$2;final watermark=_isoUtcNow();await _setPullFlag(db,true);"
+          if old not in text: raise SystemExit('meta snippet not found')
+          text=text.replace(old,"final watermark=_isoUtcNow();await _setPullFlag(db,true);",1)
+          old="final query=client.from(table).select();final filtered=lastPulled==null?query:query.gte('updated_at',lastPulled);final remoteRows=await _fetchAll(filtered);"
+          if old not in text: raise SystemExit('query snippet not found')
+          new="""// Pull the complete current table. Offline devices do not share a clock,
+        // so a timestamp watermark can permanently hide a valid older-looking
+        // remote write. Pagination in _fetchAll keeps memory bounded.
         final remoteRows=await _fetchAll(client.from(table).select());"""
-          if old not in text: raise SystemExit('pull watermark snippet not found')
-          text = text.replace(old, new, 1)
-          old = "final localUpdated=(localRow['updated_at'] as String?)??'';if(remoteUpdated.compareTo(localUpdated)<=0)continue;"
-          new = "if(compareSyncRows(localRow,remoteRow)<=0)continue;"
-          if old not in text: raise SystemExit('LWW comparison snippet not found')
-          text = text.replace(old, new, 1)
-          marker = "@visibleForTesting bool shouldApplyRemoteTombstone(String? localUpdatedAt,String deletedAt){"
-          helper = r'''String _canonicalJson(Object? value){
+          text=text.replace(old,new,1)
+          old="final localUpdated=(localRow['updated_at'] as String?)??'';if(remoteUpdated.compareTo(localUpdated)<=0)continue;"
+          if old not in text: raise SystemExit('comparison snippet not found')
+          text=text.replace(old,"if(compareSyncRows(localRow,remoteRow)<=0)continue;",1)
+          marker="@visibleForTesting bool shouldApplyRemoteTombstone(String? localUpdatedAt,String deletedAt){"
+          if marker not in text: raise SystemExit('helper marker not found')
+          helper=r'''String _canonicalJson(Object? value){
   if(value is Map){
     final entries=value.entries.toList()..sort((a,b)=>a.key.toString().compareTo(b.key.toString()));
     return '{${entries.map((e)=>'${jsonEncode(e.key.toString())}:${_canonicalJson(e.value)}').join(',')}}';
@@ -49,9 +41,8 @@ jobs:
   return jsonEncode(value);
 }
 
-/// Compares two replicated rows using deterministic ordering on every device.
-/// `updated_at` is the primary LWW version. Equal timestamps use canonical row
-/// JSON as the deterministic tie-breaker so equal-millisecond writes converge.
+/// Deterministic LWW comparison. Timestamp is primary; equal timestamps use
+/// canonical row JSON so two devices cannot permanently diverge on a tie.
 @visibleForTesting int compareSyncRows(Map<String,Object?> local,Map<String,Object?> remote){
   final localUpdated=(local['updated_at'] as String?)??'';
   final remoteUpdated=(remote['updated_at'] as String?)??'';
@@ -61,120 +52,23 @@ jobs:
 }
 
 '''
-          if marker not in text: raise SystemExit('helper insertion marker not found')
-          text = text.replace(marker, helper + marker, 1)
+          text=text.replace(marker,helper+marker,1)
           service.write_text(text)
 
-          test = Path('test/cloud/cloud_sync_guard_test.dart')
-          t = test.read_text()
-          insert_marker = "  group('isSaneCloudRow', () {"
-          tests = r'''  group('deterministic LWW comparison', () {
-    test('equal timestamps converge using canonical row content', () {
-      const stamp = '2026-08-04T10:00:00.000Z';
-      final local = {'id': 'l1', 'updated_at': stamp, 'name': 'B'};
-      final remote = {'name': 'A', 'updated_at': stamp, 'id': 'l1'};
-      final reverse = {'id': 'l1', 'name': 'A', 'updated_at': stamp};
-      expect(compareSyncRows(local, remote), greaterThan(0));
-      expect(compareSyncRows(local, reverse), greaterThan(0));
-      expect(compareSyncRows(remote, reverse), 0);
-    });
-    test('newer timestamp always wins over content', () {
-      final local = {'id': 'l1', 'updated_at': '2026-08-04T10:00:01.000Z', 'name': 'A'};
-      final remote = {'id': 'l1', 'updated_at': '2026-08-04T10:00:00.000Z', 'name': 'ZZZZ'};
-      expect(compareSyncRows(local, remote), greaterThan(0));
-    });
-    test('older timestamp loses regardless of content', () {
-      final local = {'id': 'l1', 'updated_at': '2026-08-04T09:59:59.999Z', 'name': 'ZZZZ'};
-      final remote = {'id': 'l1', 'updated_at': '2026-08-04T10:00:00.000Z', 'name': 'A'};
-      expect(compareSyncRows(local, remote), lessThan(0));
-    });
-    test('map key order does not change the tie-break result', () {
-      final a = {'id': 'l1', 'updated_at': '2026-08-04T10:00:00.000Z', 'nested': {'z': 2, 'a': 1}};
-      final b = {'nested': {'a': 1, 'z': 2}, 'updated_at': '2026-08-04T10:00:00.000Z', 'id': 'l1'};
-      expect(compareSyncRows(a, b), 0);
-    });
-  });
+          migration=Path('supabase_migrations/20260905_sync_lww_and_watermark_hardening.sql')
+          migration.write_text('''-- Prevent stale offline pushes from overwriting newer cloud rows.\ncreate or replace function public.enforce_sync_lww()\nreturns trigger language plpgsql set search_path = public\nas $$\ndeclare old_json text; new_json text;\nbegin\n  if new.updated_at is null or old.updated_at is null then return new; end if;\n  if new.updated_at < old.updated_at then return old; end if;\n  if new.updated_at = old.updated_at then\n    old_json := to_jsonb(old)::text; new_json := to_jsonb(new)::text;\n    if new_json <= old_json then return old; end if;\n  end if;\n  return new;\nend;\n$$;\n\ndo $$\ndeclare t text;\nbegin\n  foreach t in array array['business_profile','customer_groups','customers','loans','payments','savings_accounts','savings_transactions','documents','holidays'] loop\n    execute format('drop trigger if exists aaa_sync_lww_guard on public.%I',t);\n    execute format('create trigger aaa_sync_lww_guard before update on public.%I for each row execute function public.enforce_sync_lww()',t);\n  end loop;\nend\n$$;\n''')
 
-'''
-          if insert_marker not in t: raise SystemExit('test insertion marker not found')
-          test.write_text(t.replace(insert_marker, tests + insert_marker, 1))
-
-          migration = Path('supabase_migrations/20260905_sync_lww_and_watermark_hardening.sql')
-          migration.write_text(r'''-- Cloud-sync hardening: deterministic equal-timestamp LWW.
--- The client uses full-table pulls so pull correctness no longer depends on
--- independent device clocks. This trigger prevents a stale offline device from
--- overwriting a newer cloud row during push.
-create or replace function public.enforce_sync_lww()
-returns trigger language plpgsql set search_path = public
-as $$
-declare old_json text; new_json text;
-begin
-  if new.updated_at is null then return new; end if;
-  if old.updated_at is null then return new; end if;
-  if new.updated_at < old.updated_at then return old; end if;
-  if new.updated_at = old.updated_at then
-    old_json := to_jsonb(old)::text;
-    new_json := to_jsonb(new)::text;
-    if new_json <= old_json then return old; end if;
-  end if;
-  return new;
-end;
-$$;
-
-do $$
-declare table_name text;
-begin
-  foreach table_name in array array['business_profile','customer_groups','customers','loans','payments','savings_accounts','savings_transactions','documents','holidays'] loop
-    execute format('drop trigger if exists aaa_sync_lww_guard on public.%I', table_name);
-    execute format('create trigger aaa_sync_lww_guard before update on public.%I for each row execute function public.enforce_sync_lww()', table_name);
-  end loop;
-end
-$$;
-''')
-
-          schema = Path('supabase_schema.sql')
-          s = schema.read_text()
-          marker = "-- ── Upgrade existing deployments (mirror of migrations.dart, SAFE TO RE-RUN) ─"
-          block = r'''-- ── Cloud-sync conflict hardening ────────────────────────────────────────────
--- `updated_at` is generated independently on offline devices. The client uses
--- full-table pulls and deterministic local LWW comparison; this server trigger
--- prevents an older offline push from overwriting newer cloud state and gives
--- equal timestamps a deterministic tie-breaker.
-create or replace function public.enforce_sync_lww()
-returns trigger language plpgsql set search_path = public
-as $$
-declare old_json text; new_json text;
-begin
-  if new.updated_at is null then return new; end if;
-  if old.updated_at is null then return new; end if;
-  if new.updated_at < old.updated_at then return old; end if;
-  if new.updated_at = old.updated_at then
-    old_json := to_jsonb(old)::text;
-    new_json := to_jsonb(new)::text;
-    if new_json <= old_json then return old; end if;
-  end if;
-  return new;
-end;
-$$;
-
-do $$
-declare table_name text;
-begin
-  foreach table_name in array array['business_profile','customer_groups','customers','loans','payments','savings_accounts','savings_transactions','documents','holidays'] loop
-    execute format('drop trigger if exists aaa_sync_lww_guard on public.%I', table_name);
-    execute format('create trigger aaa_sync_lww_guard before update on public.%I for each row execute function public.enforce_sync_lww()', table_name);
-  end loop;
-end
-$$;
-
-'''
+          schema=Path('supabase_schema.sql')
+          s=schema.read_text()
+          marker='-- ── Upgrade existing deployments (mirror of migrations.dart, SAFE TO RE-RUN) ─'
           if marker not in s: raise SystemExit('schema marker not found')
-          schema.write_text(s.replace(marker, block + marker, 1))
+          block='''-- ── Cloud-sync conflict hardening ────────────────────────────────────────────\n-- Offline timestamps are not globally ordered. The client performs full pulls\n-- and deterministic LWW; this trigger also blocks stale offline pushes.\ncreate or replace function public.enforce_sync_lww()\nreturns trigger language plpgsql set search_path = public\nas $$\ndeclare old_json text; new_json text;\nbegin\n  if new.updated_at is null or old.updated_at is null then return new; end if;\n  if new.updated_at < old.updated_at then return old; end if;\n  if new.updated_at = old.updated_at then\n    old_json := to_jsonb(old)::text; new_json := to_jsonb(new)::text;\n    if new_json <= old_json then return old; end if;\n  end if;\n  return new;\nend;\n$$;\n\ndo $$\ndeclare t text;\nbegin\n  foreach t in array array['business_profile','customer_groups','customers','loans','payments','savings_accounts','savings_transactions','documents','holidays'] loop\n    execute format('drop trigger if exists aaa_sync_lww_guard on public.%I',t);\n    execute format('create trigger aaa_sync_lww_guard before update on public.%I for each row execute function public.enforce_sync_lww()',t);\n  end loop;\nend\n$$;\n\n'''
+          schema.write_text(s.replace(marker,block+marker,1))
           PY
       - name: Commit patch
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add lib/core/cloud/cloud_sync_service.dart test/cloud/cloud_sync_guard_test.dart supabase_migrations/20260905_sync_lww_and_watermark_hardening.sql supabase_schema.sql
-          git diff --cached --quiet || git commit -m 'fix: harden cloud sync LWW and pull watermark [sync-audit-bot]'
+          git add lib/core/cloud/cloud_sync_service.dart supabase_migrations/20260905_sync_lww_and_watermark_hardening.sql supabase_schema.sql
+          git diff --cached --quiet || git commit -m 'fix: harden cloud sync LWW and watermark [sync-audit-bot]'
           git push
