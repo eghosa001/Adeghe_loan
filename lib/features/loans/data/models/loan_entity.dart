@@ -10,26 +10,20 @@ class Loan {
   final String? customerName;
   final LoanType loanType;
   final LoanStatus status;
-
-  // Inputs from form
   final double amount;
-  final double interestRate; // This is a percentage
-  final double insuranceFee; // This is a percentage
-  final double commission; // This is a percentage
-  final double processingFee; // This is a flat amount
-  final double administrativeFee; // This is a flat amount
-  final double otherCharges; // This is a flat amount
-  final int duration; // Days for daily, weeks for weekly
+  final double interestRate;
+  final double insuranceFee;
+  final double commission;
+  final double processingFee;
+  final double administrativeFee;
+  final double otherCharges;
+  final int duration;
   final DateTime loanDate;
   final DateTime repaymentStartDate;
-
-  // Calculated values to be stored
   final double totalRepayment;
   final double outstandingBalance;
   final double installmentAmount;
   final DateTime expectedCompletionDate;
-
-  // Optional fields
   final String? notes;
   final double? customCollectionAmount;
 
@@ -129,9 +123,11 @@ class Loan {
       totalRepayment: totalRepayment ?? this.totalRepayment,
       outstandingBalance: outstandingBalance ?? this.outstandingBalance,
       installmentAmount: installmentAmount ?? this.installmentAmount,
-      expectedCompletionDate: expectedCompletionDate ?? this.expectedCompletionDate,
+      expectedCompletionDate:
+          expectedCompletionDate ?? this.expectedCompletionDate,
       notes: clearNotes ? null : (notes ?? this.notes),
-      customCollectionAmount: customCollectionAmount ?? this.customCollectionAmount,
+      customCollectionAmount:
+          customCollectionAmount ?? this.customCollectionAmount,
     );
   }
 
@@ -150,8 +146,9 @@ class Loan {
     final otherCharges = _optionalFiniteNumber(map, 'other_charges') ?? 0.0;
     final totalRepayment = _finiteNumber(map, 'total_repayment');
     final outstandingBalance = _finiteNumber(map, 'outstanding_balance');
-    final installmentAmount =
-        _optionalFiniteNumber(map, loanType == LoanType.daily ? 'daily_payment' : 'weekly_payment') ?? 0.0;
+    final installmentAmount = _optionalFiniteNumber(
+          map, loanType == LoanType.daily ? 'daily_payment' : 'weekly_payment') ??
+        0.0;
 
     final rawDuration =
         loanType == LoanType.daily ? map['duration_days'] : map['duration_weeks'];
@@ -188,6 +185,14 @@ class Loan {
     }
     if (totalRepayment <= 0) {
       throw FormatException('Loan total_repayment must be positive.');
+    }
+    if (totalRepayment < amount) {
+      throw FormatException(
+          'Loan total_repayment cannot be less than the amount disbursed.');
+    }
+    if (outstandingBalance > totalRepayment) {
+      throw FormatException(
+          'Loan outstanding_balance cannot exceed total_repayment.');
     }
 
     return Loan(
@@ -252,7 +257,8 @@ class Loan {
     return parsed;
   }
 
-  static T _enumValue<T extends Enum>(List<T> values, Object? raw, String field) {
+  static T _enumValue<T extends Enum>(
+      List<T> values, Object? raw, String field) {
     if (raw is String) {
       for (final value in values) {
         if (value.name == raw) return value;
