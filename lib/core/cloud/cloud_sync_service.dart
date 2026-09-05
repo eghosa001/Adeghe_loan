@@ -58,7 +58,6 @@ class CloudSyncService {
       if(!columns.any((c)=>c['name']=='sync_dirty'))await db.execute('ALTER TABLE $table ADD COLUMN sync_dirty INTEGER NOT NULL DEFAULT 1');
       await db.execute('CREATE INDEX IF NOT EXISTS idx_${table}_sync_dirty ON $table(sync_dirty)');
       await db.execute('CREATE INDEX IF NOT EXISTS idx_${table}_sync_version ON $table(sync_version)');
-      // Dirty flag is edge-triggered, avoiding recursive updates after the first mark.
       final pk=_tablePrimaryKeys[table]!;
       await db.execute("DROP TRIGGER IF EXISTS trg_v25_${table}_dirty_insert");
       await db.execute("DROP TRIGGER IF EXISTS trg_v25_${table}_dirty_update");
@@ -83,12 +82,34 @@ class CloudSyncService {
     final tombstones=await db.query('sync_tombstones',where:'sync_dirty = 1 OR sync_version = 0');
     var pushed=0,deleted=0,attempted=tombstones.length,failures=0;final failedTables=<String>{};
     Future<void> reconcile(String table,Map<String,Object?> serverRow)async{final pk=_tablePrimaryKeys[table]!;final id=serverRow[pk];if(id==null)throw StateError('Missing $pk from cloud response for $table.');final local=await db.query(table,where:'$pk = ?',whereArgs:[id],limit:1);if(local.isEmpty)return;final row=Map<String,Object?>.from(serverRow);final sensitive=cloudSensitiveColumns[table];if(sensitive!=null)for(final c in sensitive)row[c]=local.first[c];row['sync_dirty']=0;await _setPullFlag(db,true);try{await db.insert(table,row,conflictAlgorithm:ConflictAlgorithm.replace);}finally{await _setPullFlag(db,false);}}
-    for(final table in _tables){final rows=snapshots[table]??const [];if(rows.isEmpty)continue;attempted+=rows.length;try{final cleaned=[for(final r in rows)stripSensitiveColumns(table,r)];for(final batch in _chunk(cleaned,200)){final result=await client.from(table).upsert(batch,onConflict:_tablePrimaryKeys[table]!).select();if(result.length!=batch.length)throw StateError('Cloud returned ${result.length}/${batch.length} rows for $table.');for(final r in result)await reconcile(table,Map<String,Object?>.from(r));pushed+=batch.length;}}catch(_){failures++;failedTables.add(table);}}
+    for(final table in _tables){
+      final rows=snapshots[table]??const [];if(rows.isEmpty)continue;attempted+=rows.length;
+      if(table=='documents'){
+        for(final row in rows){
+          try{final serverRow=await _pushDocument(client,row);await reconcile('documents',serverRow);pushed++;}
+          catch(_){failures++;failedTables.add(table);}
+        }
+        continue;
+      }
+      try{final cleaned=[for(final r in rows)stripSensitiveColumns(table,r)];for(final batch in _chunk(cleaned,200)){final result=await client.from(table).upsert(batch,onConflict:_tablePrimaryKeys[table]!).select();if(result.length!=batch.length)throw StateError('Cloud returned ${result.length}/${batch.length} rows for $table.');for(final r in result)await reconcile(table,Map<String,Object?>.from(r));pushed+=batch.length;}}catch(_){failures++;failedTables.add(table);}
+    }
     for(final t in tombstones){final table=t['deleted_table'] as String?;final id=t['deleted_row_id'] as String?;final base=(t['sync_version'] as num?)?.toInt()??0;if(table==null||id==null||_tablePrimaryKeys[table]==null){failures++;continue;}try{final result=await client.rpc('apply_sync_tombstone',params:{'p_table':table,'p_row_id':id,'p_base_version':base});if(result is! List||result.isEmpty)throw StateError('Invalid tombstone RPC response.');final applied=result.first is Map&&result.first['applied']==true;await db.delete('sync_tombstones',where:'deleted_table = ? AND deleted_row_id = ?',whereArgs:[table,id]);pushed++;if(applied)deleted++;}catch(_){failures++;failedTables.add(table);}}
     if(failures==0)await _writeMeta(db,pushedAt:_isoUtcNow());return(pushed:pushed,deleted:deleted,attempted:attempted,failures:failures,merged:merged,failedTables:failedTables);
   }
 
-  Future<({int pushed,int failures})> _pushDocuments(SupabaseClient client,List<Map<String,Object?>> rows)async{var pushed=0,failures=0;for(final row in rows){final id=row['id'] as String?;final customerId=row['customer_id'] as String?;final path=row['file_path'] as String?;if(id==null||customerId==null||customerId.isEmpty||path==null||path.isEmpty||!await File(path).exists()){failures++;continue;}try{final remote=await client.from('documents').select('id,sync_version').eq('id',id).maybeSingle();final rv=(remote?['sync_version'] as num?)?.toInt()??0;final lv=(row['sync_version'] as num?)?.toInt()??0;if(rv>lv){failures++;continue;}final bytes=await File(path).readAsBytes();await client.storage.from(SupabaseConfig.documentsBucket).uploadBinary(_documentStoragePath(customerId,id),bytes,fileOptions:const FileOptions(upsert:true));final cleaned=Map<String,Object?>.from(row)..['file_path']='';final result=await client.from('documents').upsert(stripSensitiveColumns('documents',cleaned),onConflict:'id').select();if(result.isEmpty)throw StateError('Document row was not returned.');pushed++;}catch(_){failures++;}}return(pushed:pushed,failures:failures);}
+  Future<Map<String,Object?>> _pushDocument(SupabaseClient client,Map<String,Object?> row)async{
+    final id=row['id'] as String?;final customerId=row['customer_id'] as String?;final path=row['file_path'] as String?;
+    if(id==null||customerId==null||customerId.isEmpty||path==null||path.isEmpty||!await File(path).exists())throw StateError('Document file is missing.');
+    final remote=await client.from('documents').select('id,sync_version').eq('id',id).maybeSingle();
+    final remoteVersion=(remote?['sync_version'] as num?)?.toInt()??0;final localVersion=(row['sync_version'] as num?)?.toInt()??0;
+    if(remoteVersion>localVersion)throw StateError('Remote document is newer.');
+    final bytes=await File(path).readAsBytes();
+    await client.storage.from(SupabaseConfig.documentsBucket).uploadBinary(_documentStoragePath(customerId,id),bytes,fileOptions:const FileOptions(upsert:true));
+    final cleaned=Map<String,Object?>.from(row)..['file_path']='';
+    final result=await client.from('documents').upsert(stripSensitiveColumns('documents',cleaned),onConflict:'id').select();
+    if(result.length!=1)throw StateError('Cloud did not accept document row.');
+    return Map<String,Object?>.from(result.first);
+  }
 
   Future<({int pulled,int failures})> _pull(Database db)async{
     final client=Supabase.instance.client;var cursor=await _readPullVersion(db);var pulled=0,failures=0,batchMax=cursor;await _setPullFlag(db,true);
@@ -126,7 +147,7 @@ class CloudSyncService {
 class CloudSyncException implements Exception{const CloudSyncException(this.message);final String message;@override String toString()=>message;}
 const Map<String,Set<String>> cloudSensitiveColumns={'customers':{'bvn','nin'}};
 Map<String,Object?> stripSensitiveColumns(String table,Map<String,Object?> row){final sensitive=cloudSensitiveColumns[table];if(sensitive==null)return row;return{for(final e in row.entries)if(!sensitive.contains(e.key))e.key:e.value};}
-bool isValidSyncTimestamp(String? value){if(value==null)return false;if(!RegExp(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$').hasMatch(value))return false;final parsed=DateTime.tryParse(value);if(parsed==null)return false;if(parsed.isAfter(DateTime.now().toUtc().add(const Duration(minutes:5))))return false;return true;}
+bool isValidSyncTimestamp(String? value){if(value==null)return false;if(!RegExp(r'^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$').hasMatch(value))return false;final parsed=DateTime.tryParse(value);if(parsed==null)return false;if(parsed.isAfter(DateTime.now().toUtc().add(const Duration(minutes:5))))return false;return true;}
 const Set<String> cloudNumericColumns={'credit_score','amount','interest_rate','insurance_fee','commission','processing_fee','admin_fee','other_charges','duration_days','duration_weeks','daily_payment','weekly_payment','total_repayment','outstanding_balance','custom_collection_amount','paid_amount','balance','is_recurring','is_enabled'};
 const Set<String> cloudIntColumns={'installment_number'};
 const Map<String,Map<String,Set<String>>> cloudEnumValues={'customers':{'status':{'active','closed','blacklisted','archived'}},'loans':{'loan_type':{'daily','weekly'},'status':{'active','completed','defaulted','pending','cancelled'}},'repayment_schedule':{'status':{'pending','paid','partial','missed'}},'payments':{'status':{'completed','reversed'},'type':{'partial','full','overpayment'}},'savings_transactions':{'type':{'deposit','withdrawal','overpayment'}}};
