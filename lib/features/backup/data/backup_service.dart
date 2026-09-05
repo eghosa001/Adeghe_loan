@@ -22,67 +22,90 @@ class BackupService {
   bool _transferInProgress = false;
 
   static const _dbArchiveEntry = 'loantrack.db';
+  static const _manifestArchiveEntry = 'backup_manifest.json';
   static const _documentsArchivePrefix = 'secure_documents/';
-  static const List<int> _containerHeader = [0x4c, 0x54, 0x42, 0x4b, 0x31];
+  static const List<int> _legacyContainerHeader = [0x4c, 0x54, 0x42, 0x4b, 0x31];
+  static const List<int> _portableContainerHeader = [0x4c, 0x54, 0x42, 0x4b, 0x32];
   static const _ivLength = 12;
+  static const _portableSaltLength = 16;
+  static const _backupVersion = 2;
 
   static String _randomHexSuffix() {
     final r = Random.secure();
     final buffer = StringBuffer();
-    for (var i = 0; i < 8; i++) {
-      buffer.write(r.nextInt(16).toRadixString(16));
-    }
+    for (var i = 0; i < 8; i++) buffer.write(r.nextInt(16).toRadixString(16));
     return buffer.toString();
   }
 
-  static bool isSqliteFile(List<int> bytes) {
-    if (bytes.length < 16) return false;
-    return String.fromCharCodes(bytes.take(16).toList()) ==
-        'SQLite format 3\u0000';
-  }
+  static bool isSqliteFile(List<int> bytes) => bytes.length >= 16 &&
+      String.fromCharCodes(bytes.take(16).toList()) == 'SQLite format 3\u0000';
 
-  static bool isZipArchive(List<int> bytes) {
-    return bytes.length >= 4 && bytes[0] == 0x50 && bytes[1] == 0x4B &&
-        bytes[2] == 0x03 && bytes[3] == 0x04;
-  }
+  static bool isZipArchive(List<int> bytes) => bytes.length >= 4 &&
+      bytes[0] == 0x50 && bytes[1] == 0x4B && bytes[2] == 0x03 && bytes[3] == 0x04;
 
-  static bool isEncryptedContainer(List<int> bytes) {
-    if (bytes.length < _containerHeader.length) return false;
-    for (var i = 0; i < _containerHeader.length; i++) {
-      if (bytes[i] != _containerHeader[i]) return false;
-    }
+  static bool _hasHeader(List<int> bytes, List<int> header) {
+    if (bytes.length < header.length) return false;
+    for (var i = 0; i < header.length; i++) if (bytes[i] != header[i]) return false;
     return true;
   }
 
-  Future<encrypt.Key> _containerKey() async => encrypt.Key(
-    Uint8List.fromList(
-      sha256.convert(utf8.encode(await _secureStorage.getDatabaseKey())).bytes,
-    ),
-  );
+  static bool isEncryptedContainer(List<int> bytes) =>
+      _hasHeader(bytes, _legacyContainerHeader) || _hasHeader(bytes, _portableContainerHeader);
 
-  Future<Uint8List> _encryptContainer(Uint8List plaintext) async {
-    final iv = encrypt.IV.fromSecureRandom(_ivLength);
-    final encrypter = encrypt.Encrypter(
-      encrypt.AES(await _containerKey(), mode: encrypt.AESMode.gcm),
-    );
-    final cipher = encrypter.encryptBytes(plaintext, iv: iv);
-    return Uint8List.fromList([..._containerHeader, ...iv.bytes, ...cipher.bytes]);
+  static bool isPortableContainer(List<int> bytes) => _hasHeader(bytes, _portableContainerHeader);
+
+  Future<encrypt.Key> _legacyContainerKey() async => encrypt.Key(Uint8List.fromList(
+      sha256.convert(utf8.encode(await _secureStorage.getDatabaseKey())).bytes));
+
+  Future<encrypt.Key> _portableContainerKey({String? recoveryPassword, List<int>? derivedKey, required List<int> salt}) async {
+    final encoded = recoveryPassword != null
+        ? SecureStorageService.deriveBackupKey(recoveryPassword, salt: salt)
+        : SecureStorageService.deriveBackupKeyFromDerivedKey(
+            base64UrlEncode(Uint8List.fromList(derivedKey!)), salt: salt);
+    return encrypt.Key(Uint8List.fromList(base64Url.decode(encoded)));
   }
 
-  Future<Uint8List?> _decryptContainer(List<int> bytes) async {
-    if (!isEncryptedContainer(bytes) ||
-        bytes.length <= _containerHeader.length + _ivLength) return null;
-    final ivStart = _containerHeader.length;
-    final iv = encrypt.IV(Uint8List.fromList(
-        bytes.sublist(ivStart, ivStart + _ivLength)));
-    final ciphertext = Uint8List.fromList(bytes.sublist(ivStart + _ivLength));
+  Future<Uint8List> _encryptContainer(Uint8List plaintext, {String? recoveryPassword}) async {
+    final salt = Uint8List.fromList(List.generate(_portableSaltLength, (_) => Random.secure().nextInt(256)));
+    final iv = encrypt.IV.fromSecureRandom(_ivLength);
+    final derived = recoveryPassword == null
+        ? await _secureStorage.getRecoveryDerivedKey()
+        : null;
+    if (recoveryPassword == null && derived == null) {
+      throw Exception('A recovery password must be configured before creating a portable backup.');
+    }
+    final key = await _portableContainerKey(
+      recoveryPassword: recoveryPassword,
+      derivedKey: derived == null ? null : base64Url.decode(derived),
+      salt: salt,
+    );
+    final cipher = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.gcm))
+        .encryptBytes(plaintext, iv: iv);
+    return Uint8List.fromList([..._portableContainerHeader, ...salt, ...iv.bytes, ...cipher.bytes]);
+  }
+
+  Future<Uint8List?> _decryptContainer(List<int> bytes, {String? recoveryPassword}) async {
+    if (!isEncryptedContainer(bytes)) return null;
+    final portable = isPortableContainer(bytes);
+    final headerLength = portable ? _portableContainerHeader.length : _legacyContainerHeader.length;
+    final minimum = headerLength + (portable ? _portableSaltLength : 0) + _ivLength + 16;
+    if (bytes.length < minimum) return null;
+    var offset = headerLength;
+    List<int>? salt;
+    if (portable) {
+      if (recoveryPassword == null || recoveryPassword.isEmpty) return null;
+      salt = bytes.sublist(offset, offset + _portableSaltLength);
+      offset += _portableSaltLength;
+    }
+    final iv = encrypt.IV(Uint8List.fromList(bytes.sublist(offset, offset + _ivLength)));
+    offset += _ivLength;
     try {
-      final encrypter = encrypt.Encrypter(
-        encrypt.AES(await _containerKey(), mode: encrypt.AESMode.gcm),
-      );
-      return Uint8List.fromList(
-        encrypter.decryptBytes(encrypt.Encrypted(ciphertext), iv: iv),
-      );
+      final key = portable
+          ? await _portableContainerKey(recoveryPassword: recoveryPassword, salt: salt!)
+          : await _legacyContainerKey();
+      final plain = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.gcm))
+          .decryptBytes(encrypt.Encrypted(Uint8List.fromList(bytes.sublist(offset))), iv: iv);
+      return Uint8List.fromList(plain);
     } catch (_) {
       return null;
     }
@@ -97,49 +120,51 @@ class BackupService {
 
   Future<Directory> _secureDocumentsDirectory() async {
     final root = await getApplicationDocumentsDirectory();
-    final directory = Directory(
-      '${root.path}${Platform.pathSeparator}secure_documents',
-    );
+    final directory = Directory('${root.path}${Platform.pathSeparator}secure_documents');
     if (!await directory.exists()) await directory.create(recursive: true);
     return directory;
   }
 
-  Future<File> createBackup() async {
-    if (_transferInProgress) {
-      throw Exception('A backup is already in progress. Please wait.');
-    }
+  Future<File> createBackup({String? recoveryPassword}) async {
+    if (_transferInProgress) throw Exception('A backup is already in progress. Please wait.');
     _transferInProgress = true;
     try {
       return await _databaseService.withExclusiveAccess(() async {
         final source = File(await _databaseService.databasePath);
-        if (!await source.exists()) {
-          throw Exception('Database file not found for backup.');
-        }
+        if (!await source.exists()) throw Exception('Database file not found for backup.');
+        final dbKey = await _secureStorage.getDatabaseKey();
         final archive = Archive();
         final dbBytes = await source.readAsBytes();
         archive.addFile(ArchiveFile(_dbArchiveEntry, dbBytes.length, dbBytes));
+        final manifest = jsonEncode({
+          'format': 'LTBK2',
+          'version': _backupVersion,
+          'database_key': dbKey,
+          'created_at': DateTime.now().toUtc().toIso8601String(),
+        });
+        final manifestBytes = utf8.encode(manifest);
+        archive.addFile(ArchiveFile(_manifestArchiveEntry, manifestBytes.length, manifestBytes));
         final docsDirectory = await _secureDocumentsDirectory();
-        final docFiles = await docsDirectory.list().where((e) => e is File)
-            .cast<File>().toList();
+        final docFiles = await docsDirectory.list().where((e) => e is File).cast<File>().toList();
+        final seenNames = <String>{};
         for (final doc in docFiles) {
+          final name = basename(doc.path);
+          if (name.isEmpty || name == '.' || name == '..' || !seenNames.add(name)) {
+            throw Exception('Backup contains an invalid or duplicate document filename.');
+          }
           final bytes = await doc.readAsBytes();
-          archive.addFile(ArchiveFile(
-            '$_documentsArchivePrefix${basename(doc.path)}', bytes.length, bytes));
+          archive.addFile(ArchiveFile('$_documentsArchivePrefix$name', bytes.length, bytes));
         }
         final zipBytes = ZipEncoder().encode(archive);
         if (zipBytes == null) throw Exception('Backup archive could not be written.');
-        final payload = await _encryptContainer(Uint8List.fromList(zipBytes));
-        final backupFileName =
-            'adeghe_backup_${DateTime.now().toIso8601String().replaceAll(':', '-')}_'
-            '${_randomHexSuffix()}.${AppConstants.backupFileExtension}';
+        final payload = await _encryptContainer(Uint8List.fromList(zipBytes), recoveryPassword: recoveryPassword);
+        final backupFileName = 'adeghe_backup_${DateTime.now().toIso8601String().replaceAll(':', '-')}_${_randomHexSuffix()}.${AppConstants.backupFileExtension}';
         final target = File(join((await backupDirectory).path, backupFileName));
         await target.writeAsBytes(payload, flush: true);
         if (Platform.isWindows) {
           try {
             final user = Platform.environment['USERNAME'] ?? '';
-            if (user.isNotEmpty) {
-              await Process.run('icacls', [target.path, '/inheritance:r', '/grant:r', '$user:R']);
-            }
+            if (user.isNotEmpty) await Process.run('icacls', [target.path, '/inheritance:r', '/grant:r', '$user:R']);
           } catch (_) {}
         }
         return target;
@@ -152,29 +177,20 @@ class BackupService {
   Future<void> maybeAutoBackup() async {
     try {
       final db = await _databaseService.database;
-      final enabledRows = await db.query('settings',
-          where: "key = 'auto_backup_enabled'", limit: 1);
-      final enabledValue = enabledRows.isEmpty ? '1' : enabledRows.first['value'];
-      if (enabledValue != '1') return;
-      final lastRows = await db.query('settings',
-          where: "key = 'last_backup_date'", limit: 1);
-      final last = lastRows.isEmpty
-          ? null
-          : DateTime.tryParse(lastRows.first['value'] as String? ?? '');
+      final enabledRows = await db.query('settings', where: "key = 'auto_backup_enabled'", limit: 1);
+      if ((enabledRows.isEmpty ? '1' : enabledRows.first['value']) != '1') return;
+      final lastRows = await db.query('settings', where: "key = 'last_backup_date'", limit: 1);
+      final last = lastRows.isEmpty ? null : DateTime.tryParse(lastRows.first['value'] as String? ?? '');
       if (last != null && DateTime.now().difference(last).inHours < 24) return;
       await createBackup();
       final reopened = await _databaseService.database;
-      await reopened.insert('settings', {
-        'key': 'last_backup_date', 'value': DateTime.now().toIso8601String()
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      await reopened.insert('settings', {'key': 'last_backup_date', 'value': DateTime.now().toIso8601String()}, conflictAlgorithm: ConflictAlgorithm.replace);
     } catch (_) {}
   }
 
   Future<List<File>> listBackups() async {
     final directory = await backupDirectory;
-    final backups = await directory.list().where((entry) =>
-        entry is File && entry.path.endsWith(AppConstants.backupFileExtension))
-        .cast<File>().toList();
+    final backups = await directory.list().where((entry) => entry is File && entry.path.endsWith(AppConstants.backupFileExtension)).cast<File>().toList();
     backups.sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
     return backups;
   }
@@ -185,125 +201,132 @@ class BackupService {
     if (await file.exists()) await file.delete();
   }
 
-  Future<void> restoreBackup(File backupFile) async {
-    if (_transferInProgress) {
-      throw Exception('A backup or restore is already in progress. Please wait.');
-    }
+  Future<void> restoreBackup(File backupFile, {String? recoveryPassword}) async {
+    if (_transferInProgress) throw Exception('A backup or restore is already in progress. Please wait.');
     _transferInProgress = true;
     try {
       if (!await backupFile.exists()) throw Exception('Selected backup file does not exist.');
-      var bytes = await backupFile.readAsBytes();
-      if (bytes.isEmpty) throw Exception('Selected backup file is empty.');
-
-      final isEncrypted = BackupService.isEncryptedContainer(bytes);
-      final isLegacyRaw = !isEncrypted && BackupService.isSqliteFile(bytes.take(16).toList());
-      final isLegacyZip = !isEncrypted && BackupService.isZipArchive(bytes);
-      if (isEncrypted) {
-        final decrypted = await _decryptContainer(bytes);
-        if (decrypted == null) {
-          throw Exception('This backup was encrypted with a different app key and cannot be restored on this device.');
+      final originalBytes = await backupFile.readAsBytes();
+      if (originalBytes.isEmpty) throw Exception('Selected backup file is empty.');
+      final encrypted = isEncryptedContainer(originalBytes);
+      final portable = isPortableContainer(originalBytes);
+      final legacyRaw = !encrypted && isSqliteFile(originalBytes);
+      final legacyZip = !encrypted && isZipArchive(originalBytes);
+      if (encrypted) {
+        if (portable && (recoveryPassword == null || recoveryPassword.isEmpty)) {
+          throw Exception('This portable backup requires its recovery password.');
         }
-        bytes = decrypted;
-        if (!isZipArchive(bytes)) throw Exception('Decrypted backup is not a valid archive.');
-      } else if (!isLegacyRaw && !isLegacyZip) {
+        final decrypted = await _decryptContainer(originalBytes, recoveryPassword: recoveryPassword);
+        if (decrypted == null) throw Exception(portable
+            ? 'The recovery password is incorrect or the backup is damaged.'
+            : 'This backup was encrypted with a different app key and cannot be restored on this device.');
+        if (!isZipArchive(decrypted)) throw Exception('Decrypted backup is not a valid archive.');
+      } else if (!legacyRaw && !legacyZip) {
         throw Exception('Selected file is not a valid database backup.');
       }
 
+      var archiveBytes = originalBytes;
+      if (encrypted) archiveBytes = (await _decryptContainer(originalBytes, recoveryPassword: recoveryPassword))!;
       final targetPath = await _databaseService.databasePath;
-      final tempPath = '$targetPath.restore.tmp';
-      final tempFile = File(tempPath);
+      final tempFile = File('$targetPath.restore.tmp');
       if (await tempFile.exists()) await tempFile.delete();
-
-      Map<String, Uint8List> documentFiles = {};
-      if (isLegacyRaw) {
-        await backupFile.copy(tempPath);
+      var recoveredDbKey = await _secureStorage.getDatabaseKey();
+      final originalDbKey = recoveredDbKey;
+      final documentFiles = <String, Uint8List>{};
+      if (legacyRaw) {
+        await backupFile.copy(tempFile.path);
       } else {
-        final archive = ZipDecoder().decodeBytes(bytes);
+        final archive = ZipDecoder().decodeBytes(archiveBytes);
         Uint8List? dbContent;
+        Map<String, dynamic>? manifest;
+        final seen = <String>{};
         for (final entry in archive.files) {
-          if (entry.isFile && entry.name == _dbArchiveEntry) {
-            dbContent = entry.content;
-          } else if (entry.isFile && entry.name.startsWith(_documentsArchivePrefix)) {
-            final content = entry.content;
-            if (content == null) {
-              if (await tempFile.exists()) await tempFile.delete();
-              throw Exception('A document inside the backup could not be read.');
+          if (!entry.isFile) continue;
+          if (entry.name == _dbArchiveEntry) {
+            if (dbContent != null) throw Exception('Backup contains duplicate database entries.');
+            dbContent = Uint8List.fromList(entry.content);
+          } else if (entry.name == _manifestArchiveEntry) {
+            if (manifest != null) throw Exception('Backup contains duplicate manifest entries.');
+            try {
+              final decoded = jsonDecode(utf8.decode(entry.content));
+              if (decoded is! Map) throw const FormatException();
+              manifest = Map<String, dynamic>.from(decoded);
+            } catch (_) {
+              throw Exception('Backup manifest is invalid.');
             }
+          } else if (entry.name.startsWith(_documentsArchivePrefix)) {
             final name = basename(entry.name);
-            if (name.isNotEmpty && name != '.' && name != '..') {
-              documentFiles[name] = content;
+            if (name.isEmpty || name == '.' || name == '..' || !seen.add(name)) {
+              throw Exception('Backup contains an invalid or duplicate document entry.');
             }
+            documentFiles[name] = Uint8List.fromList(entry.content);
           }
         }
-        if (dbContent == null || dbContent.isEmpty) {
-          if (await tempFile.exists()) await tempFile.delete();
-          throw Exception('Backup archive does not contain a database.');
+        if (dbContent == null || dbContent.isEmpty) throw Exception('Backup archive does not contain a database.');
+        if (portable) {
+          if (manifest == null || manifest['format'] != 'LTBK2' || manifest['version'] != _backupVersion) {
+            throw Exception('Portable backup manifest is missing or unsupported.');
+          }
+          final key = manifest['database_key'];
+          if (key is! String || key.length < 32 || key.length > 64 || !RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(key)) {
+            throw Exception('Portable backup contains an invalid database key.');
+          }
+          try {
+            if (base64Url.decode(key).length != 32) throw const FormatException();
+          } catch (_) {
+            throw Exception('Portable backup contains an invalid database key.');
+          }
+          recoveredDbKey = key;
         }
         await tempFile.writeAsBytes(dbContent, flush: true);
       }
 
-      final verified = await _databaseService.verifyDatabaseFile(tempPath);
-      if (!verified) {
+      if (!await _databaseService.verifyDatabaseFile(tempFile.path, encryptionKey: recoveredDbKey)) {
         if (await tempFile.exists()) await tempFile.delete();
-        throw Exception('Backup could not be opened with the app key. Restore aborted — your current data is unchanged.');
+        throw Exception('Backup database could not be opened with its encryption key. Restore aborted — current data is unchanged.');
       }
 
-      final rollbackPath = '$targetPath.old';
-      final rollbackFile = File(rollbackPath);
       final targetFile = File(targetPath);
+      final rollbackFile = File('$targetPath.old');
       final docsDirectory = await _secureDocumentsDirectory();
-      final docsRollbackPath = '${docsDirectory.path}.restore-old';
-      final docsRollbackDirectory = Directory(docsRollbackPath);
+      final docsRollbackDirectory = Directory('${docsDirectory.path}.restore-old');
       var databaseSwapped = false;
       var documentsSwapped = false;
+      var keyChanged = false;
 
       await _databaseService.withExclusiveAccess(() async {
         try {
-          // Keep both old datasets until the entire restore has succeeded.
           if (await rollbackFile.exists()) await rollbackFile.delete();
-          if (await docsRollbackDirectory.exists()) {
-            await docsRollbackDirectory.delete(recursive: true);
-          }
-          if (await targetFile.exists()) await targetFile.rename(rollbackPath);
+          if (await docsRollbackDirectory.exists()) await docsRollbackDirectory.delete(recursive: true);
+          if (await targetFile.exists()) await targetFile.rename(rollbackFile.path);
           databaseSwapped = true;
           await tempFile.rename(targetPath);
-
-          // Swap the whole document directory so a document write failure can
-          // restore the exact previous document set instead of a partial set.
-          if (await docsDirectory.exists()) await docsDirectory.rename(docsRollbackPath);
+          if (await docsDirectory.exists()) await docsDirectory.rename(docsRollbackDirectory.path);
           documentsSwapped = true;
           await docsDirectory.create(recursive: true);
           for (final entry in documentFiles.entries) {
-            await File(join(docsDirectory.path, entry.key))
-                .writeAsBytes(entry.value, flush: true);
+            await File(join(docsDirectory.path, entry.key)).writeAsBytes(entry.value, flush: true);
           }
-
-          // Only discard rollback copies after DB and documents both succeed.
+          if (portable) {
+            await _secureStorage.setDatabaseKey(recoveredDbKey);
+            keyChanged = true;
+          }
           if (await rollbackFile.exists()) await rollbackFile.delete();
-          if (await docsRollbackDirectory.exists()) {
-            await docsRollbackDirectory.delete(recursive: true);
-          }
+          if (await docsRollbackDirectory.exists()) await docsRollbackDirectory.delete(recursive: true);
         } catch (_) {
-          // Roll back documents first. If this fails, retain the old directory.
           try {
             if (documentsSwapped) {
               if (await docsDirectory.exists()) await docsDirectory.delete(recursive: true);
-              if (await docsRollbackDirectory.exists()) {
-                await docsRollbackDirectory.rename(docsDirectory.path);
-              }
+              if (await docsRollbackDirectory.exists()) await docsRollbackDirectory.rename(docsDirectory.path);
             }
           } catch (_) {}
-
-          // Crucially, delete the newly installed DB before restoring the old DB.
-          // The previous code only restored when the target did NOT exist, which
-          // could leave the new DB active and then delete the only rollback copy.
           try {
             if (databaseSwapped && await targetFile.exists()) await targetFile.delete();
-            if (await rollbackFile.exists() && !await targetFile.exists()) {
-              await rollbackFile.rename(targetPath);
-            }
+            if (await rollbackFile.exists() && !await targetFile.exists()) await rollbackFile.rename(targetPath);
           } catch (_) {}
-
+          if (keyChanged || portable) {
+            try { await _secureStorage.setDatabaseKey(originalDbKey); } catch (_) {}
+          }
           if (await tempFile.exists()) await tempFile.delete();
           rethrow;
         }
