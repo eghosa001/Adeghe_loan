@@ -28,35 +28,14 @@ class SecureStorageService implements SecureKeyValueStore {
   static const _docKeysKey = 'doc_derived_keys';
   static const _pinVersionKey = 'pin_digit_version';
   static const _currentPinVersion = '4';
-
-  // PBKDF2-HMAC-SHA256 iterations. The PIN is a 4-digit secret guarded by the
-  // escalating lockout (PinLockoutService), so 120k keeps unlock instant even
-  // on low-end phones. The recovery password is the high-value escape hatch
-  // (verified rarely), so it uses the OWASP-recommended 600k.
   static const _pinIterations = 120000;
   static const _recoveryIterations = 600000;
   static const _pinHashLength = 32;
-
-  /// Fixed, well-known salt for deriving the document-encryption key from the
-  /// recovery password. Deliberately NOT per-device: the same recovery password
-  /// entered on a second device must derive the same key so cloud-synced
-  /// encrypted documents can be decrypted cross-device (API-6). The recovery
-  /// password is a high-entropy secret unique to this app, so the fixed salt
-  /// leaks nothing without the password.
   static const String docDerivationSalt = 'loantrack-doc-key-v1';
-
-  /// Iterations for the document-key derivation. Runs only when the recovery
-  /// password is set or changed (never on the encrypt/decrypt hot path — the
-  /// derived key is cached in secure storage), so it can share the recovery
-  /// password's 600k.
   static const int _docDerivedIterations = 600000;
-
-  /// How many derived document keys are retained after a recovery-password
-  /// change, so files encrypted under a previous password stay decryptable.
   static const int _maxDocKeys = 5;
+  static const String backupDerivationDomain = 'adeghe-backup-v2';
 
-  /// Returns the per-device random salt for the given purpose, creating and
-  /// storing it on first use so hashes stay stable across writes.
   Future<String> _getSalt(String key) async {
     String? salt = await _storage.read(key: key);
     if (salt == null) {
@@ -95,40 +74,25 @@ class SecureStorageService implements SecureKeyValueStore {
     return base64Encode(bytes.sublist(0, _pinHashLength));
   }
 
-  /// Runs the CPU-bound PBKDF2 derivation off the main isolate. The recovery
-  /// password path hashes at 600k iterations (twice per save: the stored hash
-  /// plus the derived document key), which on low-end phones can block the UI
-  /// for multiple seconds if computed inline. Isolating keeps the PIN/recovery
-  /// screens responsive and the navigation to the next screen (e.g. the cloud
-  /// gate right after PIN setup) snappy.
-  static Future<String> _pbkdf2HexAsync(
-      String data, String salt, int iterations) {
-    return Isolate.run(() => _pbkdf2Hex(data, salt, iterations));
-  }
+  static Future<String> _pbkdf2HexAsync(String data, String salt, int iterations) =>
+      Isolate.run(() => _pbkdf2Hex(data, salt, iterations));
 
   static bool _constantTimeEquals(String a, String b) {
     final aBytes = utf8.encode(a);
     final bBytes = utf8.encode(b);
     if (aBytes.length != bBytes.length) return false;
     var diff = 0;
-    for (var i = 0; i < aBytes.length; i++) {
-      diff |= aBytes[i] ^ bBytes[i];
-    }
+    for (var i = 0; i < aBytes.length; i++) diff |= aBytes[i] ^ bBytes[i];
     return diff == 0;
   }
 
-  /// PBKDF2-HMAC-SHA256 with the stored random salt. Format:
-  /// `pbkdf2-sha256:<iterations>:<digest hex>`.
   Future<String> _hash(String data, String saltKey, int iterations) async {
     final salt = await _getSalt(saltKey);
     final digest = await _pbkdf2HexAsync(data, salt, iterations);
     return 'pbkdf2-sha256:$iterations:$digest';
   }
 
-  /// Verifies [data] against [stored]. [saltCandidates] are tried in order so
-  /// hashes created before a salt split (recovery vs PIN) still verify.
-  Future<bool> _verify(
-      String data, String stored, List<String> saltCandidates) async {
+  Future<bool> _verify(String data, String stored, List<String> saltCandidates) async {
     final parts = stored.split(':');
     if (parts.length != 3 || parts[0] != 'pbkdf2-sha256') return false;
     final iterations = int.tryParse(parts[1]);
@@ -141,24 +105,16 @@ class SecureStorageService implements SecureKeyValueStore {
     return false;
   }
 
-  /// Enforces a strong recovery password: at least 16 characters (OWASP,
-  /// raised from 12 on 2026-08-04) containing both letters and digits. Returns
-  /// null when [password] is acceptable.
   static String? recoveryPasswordError(String password) {
-    if (password.length < 16) {
-      return 'Recovery password must be at least 16 characters';
-    }
-    if (!RegExp(r'[A-Za-z]').hasMatch(password) ||
-        !RegExp(r'[0-9]').hasMatch(password)) {
+    if (password.length < 16) return 'Recovery password must be at least 16 characters';
+    if (!RegExp(r'[A-Za-z]').hasMatch(password) || !RegExp(r'[0-9]').hasMatch(password)) {
       return 'Recovery password must contain both letters and numbers';
     }
     return null;
   }
 
   Future<void> savePin(String pin) async {
-    await _storage.write(
-        key: _pinKey,
-        value: await _hash(pin, AppConstants.keyPinSalt, _pinIterations));
+    await _storage.write(key: _pinKey, value: await _hash(pin, AppConstants.keyPinSalt, _pinIterations));
     await _storage.write(key: _pinVersionKey, value: _currentPinVersion);
   }
 
@@ -166,8 +122,7 @@ class SecureStorageService implements SecureKeyValueStore {
   Future<String?> read(String key) => _storage.read(key: key);
 
   @override
-  Future<void> write(String key, String value) =>
-      _storage.write(key: key, value: value);
+  Future<void> write(String key, String value) => _storage.write(key: key, value: value);
 
   @override
   Future<void> remove(String key) => _storage.delete(key: key);
@@ -177,116 +132,93 @@ class SecureStorageService implements SecureKeyValueStore {
     await _storage.delete(key: _pinVersionKey);
   }
 
-  /// Returns true if the stored PIN was set with the current 4-digit scheme.
-  /// Returns false for old PINs or when no version marker exists.
-  Future<bool> isPinVersionCurrent() async {
-    final version = await _storage.read(key: _pinVersionKey);
-    return version == _currentPinVersion;
-  }
+  Future<bool> isPinVersionCurrent() async => await _storage.read(key: _pinVersionKey) == _currentPinVersion;
 
-  /// Call at app start: if an old-format PIN exists (no version marker),
-  /// clears it so the user is directed to re-set a 4-digit PIN.
   Future<void> migrateToFourDigitPin() async {
-    final hasExistingPin = await hasPin();
-    if (hasExistingPin) {
-      final isCurrent = await isPinVersionCurrent();
-      if (!isCurrent) {
-        await clearPin();
-      }
-    }
+    if (await hasPin() && !await isPinVersionCurrent()) await clearPin();
   }
 
   Future<bool> verifyPin(String pin) async {
     final storedHash = await _storage.read(key: _pinKey);
     if (storedHash == null) return false;
-    final pinSalt = await _readSalt(AppConstants.keyPinSalt);
-    return _verify(pin, storedHash, [pinSalt ?? '']);
+    return _verify(pin, storedHash, [(await _readSalt(AppConstants.keyPinSalt)) ?? '']);
   }
 
-  Future<bool> hasPin() async {
-    final storedHash = await _storage.read(key: _pinKey);
-    return storedHash != null;
-  }
+  Future<bool> hasPin() async => await _storage.read(key: _pinKey) != null;
 
   Future<void> saveRecoveryPassword(String password) async {
     await _storage.write(
-        key: _recoveryPassKey,
-        value:
-            await _hash(password, AppConstants.keyRecoverySalt, _recoveryIterations));
+      key: _recoveryPassKey,
+      value: await _hash(password, AppConstants.keyRecoverySalt, _recoveryIterations),
+    );
     await _storeDerivedDocKey(password);
   }
 
-  /// Derives the document-encryption key from the recovery password and caches
-  /// it (newest first, capped at [_maxDocKeys]) so files encrypted under an
-  /// older recovery password remain decryptable after a change. Any device that
-  /// knows the same recovery password derives the same key, which is what lets
-  /// cloud-synced encrypted documents open on a second device.
   Future<void> _storeDerivedDocKey(String password) async {
-    final derived =
-        await _pbkdf2HexAsync(password, docDerivationSalt, _docDerivedIterations);
+    final derived = await _pbkdf2HexAsync(password, docDerivationSalt, _docDerivedIterations);
     final existing = await _storage.read(key: _docKeysKey);
-    final List<String> keys;
-    if (existing == null || existing.isEmpty) {
+    List<String> keys;
+    try {
+      keys = [derived, ...(jsonDecode(existing ?? '[]') as List).whereType<String>().where((k) => k != derived)];
+    } catch (_) {
       keys = [derived];
-    } else {
-      List<String> parsed;
-      try {
-        parsed = [
-          derived,
-          ...(jsonDecode(existing) as List)
-              .whereType<String>()
-              .where((k) => k != derived),
-        ];
-      } catch (_) {
-        parsed = [derived];
-      }
-      keys = parsed;
     }
-    await _storage.write(
-        key: _docKeysKey,
-        value: jsonEncode(keys.take(_maxDocKeys).toList()));
+    await _storage.write(key: _docKeysKey, value: jsonEncode(keys.take(_maxDocKeys).toList()));
   }
 
-  /// The deterministic document-encryption key derived from [password]. Exposed
-  /// as a pure function (with an overridable iteration count) so the derivation
-  /// contract — same password, same key, cross-device — is unit-testable.
-  static String deriveDocumentKey(String password, {int iterations = 600000}) {
-    return _pbkdf2Hex(password, docDerivationSalt, iterations);
+  static String deriveDocumentKey(String password, {int iterations = 600000}) =>
+      _pbkdf2Hex(password, docDerivationSalt, iterations);
+
+  /// Derives the LTBK2 backup key from the recovery secret and a random
+  /// per-backup salt. The recovery password itself is never stored in a backup.
+  static String deriveBackupKey(String password, {required List<int> salt, int iterations = 600000}) {
+    final master = base64Decode(_pbkdf2Hex(password, docDerivationSalt, iterations));
+    final material = <int>[...utf8.encode(backupDerivationDomain), ...salt];
+    return base64UrlEncode(Uint8List.fromList(Hmac(sha256, master).convert(material).bytes));
+  }
+
+  /// Same derivation as [deriveBackupKey], but starts from the cached recovery
+  /// derived key so automatic backups never need the plaintext password.
+  static String deriveBackupKeyFromDerivedKey(String derivedKey, {required List<int> salt}) {
+    final master = base64Decode(derivedKey);
+    final material = <int>[...utf8.encode(backupDerivationDomain), ...salt];
+    return base64UrlEncode(Uint8List.fromList(Hmac(sha256, master).convert(material).bytes));
+  }
+
+  /// Returns the current recovery-derived secret, if a recovery password has
+  /// been configured. It is already encrypted at rest by secure storage.
+  Future<String?> getRecoveryDerivedKey() async {
+    final value = await _storage.read(key: _docKeysKey);
+    if (value == null || value.isEmpty) return null;
+    try {
+      final keys = (jsonDecode(value) as List).whereType<String>().where((k) => k.isNotEmpty).toList();
+      return keys.isEmpty ? null : keys.first;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<bool> verifyRecoveryPassword(String password) async {
     final storedHash = await _storage.read(key: _recoveryPassKey);
     if (storedHash == null) return false;
-    // Try the dedicated recovery salt first, then fall back to the PIN salt
-    // so hashes created before the salt split still verify.
     final recoverySalt = await _readSalt(AppConstants.keyRecoverySalt);
     final pinSalt = await _readSalt(AppConstants.keyPinSalt);
-    return _verify(
-        password, storedHash, [recoverySalt ?? '', pinSalt ?? '']);
+    return _verify(password, storedHash, [recoverySalt ?? '', pinSalt ?? '']);
   }
 
-  Future<void> setBiometricEnabled(bool enabled) async {
-    await _storage.write(key: _biometricKey, value: enabled.toString());
-  }
+  Future<void> setBiometricEnabled(bool enabled) async =>
+      _storage.write(key: _biometricKey, value: enabled.toString());
 
-  Future<bool> isBiometricEnabled() async {
-    final value = await _storage.read(key: _biometricKey);
-    return value == 'true';
-  }
+  Future<bool> isBiometricEnabled() async => await _storage.read(key: _biometricKey) == 'true';
 
-  /// Generates a base64url-encoded 32-byte key using [rnd] or a secure RNG.
-  /// Exposed as a static helper for unit testing.
   static String generateDatabaseKey({Random? rnd}) {
     final random = rnd ?? Random.secure();
-    final bytes = List<int>.generate(32, (_) => random.nextInt(256));
-    return base64UrlEncode(Uint8List.fromList(bytes));
+    return base64UrlEncode(Uint8List.fromList(List<int>.generate(32, (_) => random.nextInt(256))));
   }
 
   static const _themeModeKey = 'pref_theme_mode';
 
-  Future<void> setThemeMode(ThemeMode mode) async {
-    await _storage.write(key: _themeModeKey, value: mode.name);
-  }
+  Future<void> setThemeMode(ThemeMode mode) async => _storage.write(key: _themeModeKey, value: mode.name);
 
   Future<ThemeMode> getThemeMode() async {
     final value = await _storage.read(key: _themeModeKey);
@@ -300,48 +232,39 @@ class SecureStorageService implements SecureKeyValueStore {
   Future<String> getDatabaseKey() async {
     String? key = await _storage.read(key: _dbKey);
     if (key == null) {
-      // Generate and persist the key.
       key = generateDatabaseKey();
       await _storage.write(key: _dbKey, value: key);
     }
     return key;
   }
 
-  /// Returns the primary document-encryption key used for NEW encryption: the
-  /// key derived from the recovery password when one has been set (so a second
-  /// device with the same recovery password decrypts the same files), otherwise
-  /// the legacy per-device random key.
+  /// Replaces the local SQLCipher key only during a validated portable restore.
+  Future<void> setDatabaseKey(String key) async {
+    if (key.isEmpty) throw ArgumentError('Database key cannot be empty.');
+    await _storage.write(key: _dbKey, value: key);
+  }
+
   Future<String> getFileEncryptionKey() async {
     final derived = await _storage.read(key: _docKeysKey);
     if (derived != null && derived.isNotEmpty) {
       try {
-        final keys =
-            (jsonDecode(derived) as List).whereType<String>().toList();
+        final keys = (jsonDecode(derived) as List).whereType<String>().toList();
         if (keys.isNotEmpty && keys.first.isNotEmpty) return keys.first;
-      } catch (_) {
-        // Fall through to the legacy key on corrupt state.
-      }
+      } catch (_) {}
     }
     return _getLegacyFileKey();
   }
 
-  /// Every key that may open an existing encrypted document, newest derived key
-  /// first, the legacy per-device random key last. Files encrypted before a
-  /// recovery password existed (or before a password change) stay readable.
   Future<List<String>> getDocumentDecryptionKeys() async {
     final keys = <String>[];
     final derived = await _storage.read(key: _docKeysKey);
     if (derived != null && derived.isNotEmpty) {
       try {
         keys.addAll((jsonDecode(derived) as List).whereType<String>());
-      } catch (_) {
-        // Ignore corrupt derived-key state; the legacy key may still work.
-      }
+      } catch (_) {}
     }
     final legacy = await _storage.read(key: _fileEncryptionKey);
-    if (legacy != null && legacy.isNotEmpty && !keys.contains(legacy)) {
-      keys.add(legacy);
-    }
+    if (legacy != null && legacy.isNotEmpty && !keys.contains(legacy)) keys.add(legacy);
     return keys;
   }
 
