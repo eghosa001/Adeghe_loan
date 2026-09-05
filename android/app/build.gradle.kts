@@ -8,7 +8,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.flutter_application_1"
+    namespace = "com.adeghe.professionalservices.loantrack"
     compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
@@ -18,7 +18,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.flutter_application_1"
+        applicationId = "com.adeghe.professionalservices.loantrack"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -89,9 +89,9 @@ fun verifySqlcipherJniInApk(apk: File) {
         if (offenders.isNotEmpty()) {
             throw GradleException(
                 "APK $apk ships a libsqlcipher.so without the Zetetic JNI " +
-                    "(missing 'nativeOpen'): ${offenders.joinToString()}. The sqlite3 " +
-                    "native-assets hook is shadowing the net.zetetic AAR's JNI-bearing " +
-                    "library, which would crash at database open."
+                "(missing 'nativeOpen'): ${offenders.joinToString()}. The sqlite3 " +
+                "native-assets hook is shadowing the net.zetetic AAR's JNI-bearing " +
+                "library, which would crash at database open."
             )
         }
     } finally {
