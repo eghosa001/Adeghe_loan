@@ -33,20 +33,11 @@ class PaymentAmounts {
 /// When [installmentDue] is omitted/zero the payment caps at the full
 /// [outstandingBalance] so "pay in full" and loan-settlement payments apply
 /// entirely to the loan.
-///
-/// - [loanPaid] = min(paymentAmount, cap) where cap = installmentDue > 0
-///   ? installmentDue : outstandingBalance
-/// - [savingsDeposit] = paymentAmount - loanPaid
-/// - [newBalance] = outstandingBalance - loanPaid (always >= 0)
 PaymentAmounts computePaymentSplit({
   required double paymentAmount,
   required double outstandingBalance,
   double? installmentDue,
 }) {
-  // Runtime checks (the debug-only asserts never ran in release builds, so a
-  // NaN/±Infinity amount could flow straight into the DB). Non-finite inputs
-  // come from typed text like "1e309"; reject them loudly instead of letting
-  // SQLite store NULL.
   if (!paymentAmount.isFinite || paymentAmount <= 0) {
     throw ArgumentError.value(
         paymentAmount, 'paymentAmount', 'must be a finite number > 0');
@@ -61,20 +52,12 @@ PaymentAmounts computePaymentSplit({
         'must be null or a finite number >= 0');
   }
 
-  // The cap is the unpaid installment — but never more than what is actually
-  // owed. Without the clamp a payment on a nearly-settled loan whose
-  // installment exceeds the remaining balance would apply (and count as
-  // "collected on the loan") money the loan no longer owes, instead of
-  // crediting the excess to savings.
   final cap = (installmentDue != null && installmentDue > 0)
       ? min(installmentDue, outstandingBalance)
       : outstandingBalance;
 
-  // Perform the split in minor units so the two destinations always reconcile
-  // exactly to the entered payment after currency rounding. Doing the surplus
-  // calculation from a raw floating-point split while rounding each side
-  // separately can otherwise create a one-cent accounting mismatch at
-  // half-cent boundaries.
+  // Work in integer minor units so loan + savings always reconciles to the
+  // entered currency amount after rounding.
   final paymentCents = CurrencyUtils.toMinorUnits(paymentAmount);
   final capCents = CurrencyUtils.toMinorUnits(cap);
   final loanPaidCents = min(paymentCents, capCents);
@@ -91,29 +74,58 @@ PaymentAmounts computePaymentSplit({
 
 /// Compute loan balance restoration amounts when reversing a payment.
 ///
-/// Returns the amount that should be **added back** to `outstanding_balance`.
-/// This is [paymentAmount] minus any [overpaymentSurplus] that went to savings,
-/// because the surplus was never deducted from the loan balance.
+/// Returns the amount that should be added back to `outstanding_balance`.
 double computeReversalLoanDelta({
   required double paymentAmount,
   required double overpaymentSurplus,
 }) {
-  assert(overpaymentSurplus >= 0, 'overpaymentSurplus must be non-negative');
-  assert(overpaymentSurplus <= paymentAmount,
-      'overpaymentSurplus cannot exceed paymentAmount');
-  return paymentAmount - overpaymentSurplus;
+  if (!paymentAmount.isFinite || paymentAmount <= 0) {
+    throw ArgumentError.value(
+        paymentAmount, 'paymentAmount', 'must be a finite number > 0');
+  }
+  if (!overpaymentSurplus.isFinite ||
+      overpaymentSurplus < 0 ||
+      overpaymentSurplus > paymentAmount) {
+    throw ArgumentError.value(
+      overpaymentSurplus,
+      'overpaymentSurplus',
+      'must be finite, non-negative, and no greater than paymentAmount',
+    );
+  }
+  return CurrencyUtils.fromMinorUnits(
+    CurrencyUtils.toMinorUnits(paymentAmount) -
+        CurrencyUtils.toMinorUnits(overpaymentSurplus),
+  );
 }
 
 /// Compute the savings balance after unwinding an overpayment credit.
 ///
-/// Returns the (newBalance, amountDeducted) pair.
+/// Reversal is deliberately all-or-nothing. Silently deducting only the
+/// available balance would allow a payment to be marked reversed while part
+/// of its overpayment remained in savings, creating an accounting imbalance.
 (double newBalance, double amountDeducted) computeSavingsReversal({
   required double balance,
   required double overpaymentSurplus,
 }) {
-  assert(balance >= 0, 'balance must be non-negative');
-  assert(overpaymentSurplus > 0, 'overpaymentSurplus must be positive');
+  if (!balance.isFinite || balance < 0) {
+    throw ArgumentError.value(
+        balance, 'balance', 'must be a finite number >= 0');
+  }
+  if (!overpaymentSurplus.isFinite || overpaymentSurplus <= 0) {
+    throw ArgumentError.value(overpaymentSurplus, 'overpaymentSurplus',
+        'must be a finite number > 0');
+  }
+  if (overpaymentSurplus > balance) {
+    throw StateError(
+      'Insufficient savings balance to reverse the full overpayment credit.',
+    );
+  }
 
-  final toDeduct = min(overpaymentSurplus, balance);
-  return (balance - toDeduct, toDeduct);
+  final balanceCents = CurrencyUtils.toMinorUnits(balance);
+  final surplusCents = CurrencyUtils.toMinorUnits(overpaymentSurplus);
+  final newBalanceCents = balanceCents - surplusCents;
+  return (
+    CurrencyUtils.fromMinorUnits(newBalanceCents),
+    CurrencyUtils.fromMinorUnits(surplusCents),
+  );
 }
