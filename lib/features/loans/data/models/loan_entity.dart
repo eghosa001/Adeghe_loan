@@ -136,33 +136,128 @@ class Loan {
   }
 
   factory Loan.fromMap(Map<String, dynamic> map) {
+    final id = _requiredString(map, 'id');
+    final customerId = _requiredString(map, 'customer_id');
+    final loanType = _enumValue(LoanType.values, map['loan_type'], 'loan_type');
+    final status = _enumValue(LoanStatus.values, map['status'], 'status');
+
+    final amount = _finiteNumber(map, 'amount');
+    final interestRate = _finiteNumber(map, 'interest_rate');
+    final insuranceFee = _optionalFiniteNumber(map, 'insurance_fee') ?? 0.0;
+    final commission = _optionalFiniteNumber(map, 'commission') ?? 0.0;
+    final processingFee = _optionalFiniteNumber(map, 'processing_fee') ?? 0.0;
+    final administrativeFee = _optionalFiniteNumber(map, 'admin_fee') ?? 0.0;
+    final otherCharges = _optionalFiniteNumber(map, 'other_charges') ?? 0.0;
+    final totalRepayment = _finiteNumber(map, 'total_repayment');
+    final outstandingBalance = _finiteNumber(map, 'outstanding_balance');
+    final installmentAmount =
+        _optionalFiniteNumber(map, loanType == LoanType.daily ? 'daily_payment' : 'weekly_payment') ?? 0.0;
+
+    final rawDuration =
+        loanType == LoanType.daily ? map['duration_days'] : map['duration_weeks'];
+    if (rawDuration is! int || rawDuration <= 0) {
+      throw FormatException('Loan duration is missing or invalid.');
+    }
+
+    final loanDate = _requiredDate(map, 'loan_date');
+    final repaymentStartDate = _requiredDate(map, 'start_date');
+    final expectedCompletionDate =
+        _requiredDate(map, 'expected_completion_date');
+
+    final customCollectionAmount =
+        _optionalFiniteNumber(map, 'custom_collection_amount');
+    if (customCollectionAmount != null && customCollectionAmount <= 0) {
+      throw FormatException('Loan custom_collection_amount is invalid.');
+    }
+
+    for (final entry in {
+      'amount': amount,
+      'interest_rate': interestRate,
+      'insurance_fee': insuranceFee,
+      'commission': commission,
+      'processing_fee': processingFee,
+      'admin_fee': administrativeFee,
+      'other_charges': otherCharges,
+      'total_repayment': totalRepayment,
+      'outstanding_balance': outstandingBalance,
+      'installment_amount': installmentAmount,
+    }.entries) {
+      if (entry.value < 0) {
+        throw FormatException('Loan ${entry.key} cannot be negative.');
+      }
+    }
+    if (totalRepayment <= 0) {
+      throw FormatException('Loan total_repayment must be positive.');
+    }
+
     return Loan(
-      id: map['id'] as String,
-      customerId: map['customer_id'] as String,
+      id: id,
+      customerId: customerId,
       customerName: map['customer_name'] as String?,
-      loanType: LoanType.values
-          .firstWhere((e) => e.name == map['loan_type'], orElse: () => LoanType.daily),
-      status: LoanStatus.values
-          .firstWhere((e) => e.name == map['status'], orElse: () => LoanStatus.active),
-      amount: (map['amount'] as num).toDouble(),
-      interestRate: (map['interest_rate'] as num).toDouble(),
-      insuranceFee: (map['insurance_fee'] as num?)?.toDouble() ?? 0.0,
-      commission: (map['commission'] as num?)?.toDouble() ?? 0.0,
-      processingFee: (map['processing_fee'] as num?)?.toDouble() ?? 0.0,
-      administrativeFee: (map['admin_fee'] as num?)?.toDouble() ?? 0.0,
-      otherCharges: (map['other_charges'] as num?)?.toDouble() ?? 0.0,
-      duration: (((map['duration_days'] ?? map['duration_weeks']) as num?)?.toInt() ?? 1).clamp(1, 9999),
-      loanDate: AppDateUtils.tryParseStorage(map['loan_date'] as String?) ?? DateTime.now(),
-      repaymentStartDate:
-          AppDateUtils.tryParseStorage(map['start_date'] as String?) ?? DateTime.now(),
-      totalRepayment: (map['total_repayment'] as num).toDouble(),
-      outstandingBalance: (map['outstanding_balance'] as num).toDouble(),
-      installmentAmount:
-          ((map['daily_payment'] ?? map['weekly_payment']) as num?)?.toDouble() ?? 0.0,
-      expectedCompletionDate: AppDateUtils.tryParseStorage(
-          map['expected_completion_date'] as String?) ?? DateTime.now(),
+      loanType: loanType,
+      status: status,
+      amount: amount,
+      interestRate: interestRate,
+      insuranceFee: insuranceFee,
+      commission: commission,
+      processingFee: processingFee,
+      administrativeFee: administrativeFee,
+      otherCharges: otherCharges,
+      duration: rawDuration,
+      loanDate: loanDate,
+      repaymentStartDate: repaymentStartDate,
+      totalRepayment: totalRepayment,
+      outstandingBalance: outstandingBalance,
+      installmentAmount: installmentAmount,
+      expectedCompletionDate: expectedCompletionDate,
       notes: map['notes'] as String?,
-      customCollectionAmount: (map['custom_collection_amount'] as num?)?.toDouble(),
+      customCollectionAmount: customCollectionAmount,
     );
+  }
+
+  static String _requiredString(Map<String, dynamic> map, String key) {
+    final value = map[key];
+    if (value is! String || value.trim().isEmpty) {
+      throw FormatException('Loan $key is missing or invalid.');
+    }
+    return value;
+  }
+
+  static double _finiteNumber(Map<String, dynamic> map, String key) {
+    final value = map[key];
+    if (value is! num || !value.isFinite) {
+      throw FormatException('Loan $key is missing or invalid.');
+    }
+    return value.toDouble();
+  }
+
+  static double? _optionalFiniteNumber(Map<String, dynamic> map, String key) {
+    final value = map[key];
+    if (value == null) return null;
+    if (value is! num || !value.isFinite) {
+      throw FormatException('Loan $key is invalid.');
+    }
+    return value.toDouble();
+  }
+
+  static DateTime _requiredDate(Map<String, dynamic> map, String key) {
+    final raw = map[key];
+    if (raw is! String) {
+      throw FormatException('Loan $key is missing or invalid.');
+    }
+    final parsed = AppDateUtils.tryParseStorage(raw);
+    if (parsed == null) {
+      throw FormatException('Loan $key is invalid.');
+    }
+    return parsed;
+  }
+
+  static T _enumValue<T extends Enum>(List<T> values, Object? raw, String field) {
+    if (raw is String) {
+      for (final value in values) {
+        if (value.name == raw) return value;
+      }
+    }
+    throw FormatException('Loan $field contains an unknown value.');
   }
 }
