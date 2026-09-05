@@ -1,0 +1,47 @@
+import 'package:flutter_test/flutter_test.dart';
+
+import 'package:loantrack/core/constants/app_constants.dart';
+import 'package:loantrack/core/security/pin_lockout_service.dart';
+import 'package:loantrack/core/security/secure_key_value_store.dart';
+
+class _MemoryStore implements SecureKeyValueStore {
+  final Map<String, String> values = {};
+
+  @override
+  Future<String?> read(String key) async => values[key];
+
+  @override
+  Future<void> write(String key, String value) async => values[key] = value;
+
+  @override
+  Future<void> remove(String key) async => values.remove(key);
+}
+
+void main() {
+  test('five failures start an escalating lockout', () async {
+    final store = _MemoryStore();
+    final service = PinLockoutService(store);
+
+    for (var i = 0; i < AppConstants.maxPinAttempts - 1; i++) {
+      expect(await service.registerFailedAttempt(), isFalse);
+    }
+    expect(await service.registerFailedAttempt(), isTrue);
+    expect(await service.isLockedOut(), isTrue);
+    expect(store.values[AppConstants.keyLockoutStarted], isNotNull);
+    expect(store.values[AppConstants.keyLockoutUntil], isNotNull);
+  });
+
+  test('lockout state is cleared by reset', () async {
+    final store = _MemoryStore();
+    final service = PinLockoutService(store);
+
+    for (var i = 0; i < AppConstants.maxPinAttempts; i++) {
+      await service.registerFailedAttempt();
+    }
+    await service.reset();
+
+    expect(await service.isLockedOut(), isFalse);
+    expect(store.values[AppConstants.keyLockoutStarted], isNull);
+    expect(store.values[AppConstants.keyLockoutUntil], isNull);
+  });
+}
