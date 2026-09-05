@@ -77,16 +77,17 @@ class DocumentRepository {
     );
     try {
       final db = await _database;
-      await db.update('documents', updated.toMap(),
+      final changed = await db.update('documents', updated.toMap(),
           where: 'id = ?', whereArgs: [current.id]);
+      if (changed != 1) {
+        throw StateError('The document no longer exists and cannot be replaced.');
+      }
       // The row now references [replacement]; a failure to remove the old file
-      // must not fall into the catch below, which would delete the new file the
-      // row already points at and orphan an undecryptable document. The old
-      // file is disposable — ignore any delete error.
+      // must not delete the new file the row already points at.
       try {
         await _encryption.delete(current.encryptedPath);
       } catch (_) {
-        // Old file already gone or unreadable; the DB is the source of truth.
+        // The old file is disposable; the DB remains the source of truth.
       }
       return updated;
     } catch (_) {
@@ -101,11 +102,6 @@ class DocumentRepository {
     await _encryption.delete(document.encryptedPath);
   }
 
-  /// Decrypts [document] and verifies the recovered bytes are actually one of
-  /// the supported formats (PDF/PNG/JPEG) before they reach any parser.
-  /// Returns the plaintext together with the MIME type detected from the file
-  /// *content* (never the stored metadata), so callers render with the real
-  /// format. Throws [FileEncryptionException] for a format mismatch.
   Future<({Uint8List bytes, String mimeType})> decrypt(
       CustomerDocument document) async {
     final bytes = await _encryption.decryptFile(document.encryptedPath);
@@ -118,7 +114,6 @@ class DocumentRepository {
     return (bytes: bytes, mimeType: mimeType);
   }
 
-  /// Validates [source] and returns the MIME type detected from its content.
   Future<String> _validateSource(File source) async {
     final length = await source.length();
     if (length == 0) {
@@ -127,7 +122,6 @@ class DocumentRepository {
     if (length > AppConstants.maxDocumentSizeBytes) {
       throw const DocumentFileException('Documents must be 20 MB or smaller.');
     }
-    // Read only the header bytes needed for signature detection.
     final buffer = <int>[];
     await for (final chunk in source.openRead(0, 32)) {
       buffer.addAll(chunk);
@@ -142,27 +136,20 @@ class DocumentRepository {
   }
 }
 
-/// Detects the MIME type of a document from its magic bytes.
-///
-/// The cloud cannot scan content (documents are end-to-end encrypted before
-/// upload), so this client-side content gate is the security boundary: a file
-/// that merely has an approved extension but renamed content (e.g. `malware.exe`
-/// renamed to `loan.pdf`) is rejected. Returns the content-derived MIME type or
-/// `null` for an unrecognized/unsupported signature.
 String? detectDocumentMimeType(Uint8List bytes) {
   if (bytes.length >= 5 &&
-      bytes[0] == 0x25 && // %
-      bytes[1] == 0x50 && // P
-      bytes[2] == 0x44 && // D
-      bytes[3] == 0x46 && // F
+      bytes[0] == 0x25 &&
+      bytes[1] == 0x50 &&
+      bytes[2] == 0x44 &&
+      bytes[3] == 0x46 &&
       bytes[4] == 0x2D) {
     return 'application/pdf';
   }
   if (bytes.length >= 8 &&
       bytes[0] == 0x89 &&
-      bytes[1] == 0x50 && // P
-      bytes[2] == 0x4E && // N
-      bytes[3] == 0x47 && // G
+      bytes[1] == 0x50 &&
+      bytes[2] == 0x4E &&
+      bytes[3] == 0x47 &&
       bytes[4] == 0x0D &&
       bytes[5] == 0x0A &&
       bytes[6] == 0x1A &&
