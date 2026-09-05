@@ -72,31 +72,57 @@ class Payment {
         'created_at': createdAt?.toIso8601String(),
       };
 
-  factory Payment.fromMap(Map<String, Object?> map) => Payment(
-        id: map['id'] as String,
-        loanId: map['loan_id'] as String,
-        customerId: map['customer_id'] as String,
-        amount: (map['amount'] as num).toDouble(),
-        paymentDate:
-            AppDateUtils.tryParseStorage(map['payment_date'] as String?) ??
-                DateTime.now(),
-        method: PaymentMethod.values.firstWhere(
-            (method) => method.name == map['payment_method'],
-            orElse: () => PaymentMethod.cash),
-        referenceNumber: map['reference_no'] as String?,
-        receiptNumber: map['receipt_no'] as String,
-        collector: map['collector'] as String,
-        type: PaymentType.values.firstWhere(
-            (t) => t.name == map['type'],
-            orElse: () => PaymentType.partial),
-        status: PaymentStatus.values.firstWhere(
-            (status) => status.name == map['status'],
-            orElse: () => PaymentStatus.completed),
-        remarks: map['remarks'] as String?,
-        priorLoanStatus: map['prior_loan_status'] as String?,
-        clientRequestId: map['client_request_id'] as String?,
-        createdAt: map['created_at'] == null
-            ? null
-            : DateTime.tryParse(map['created_at'] as String),
-      );
+  factory Payment.fromMap(Map<String, Object?> map) {
+    final amountValue = map['amount'];
+    if (amountValue is! num || !amountValue.isFinite || amountValue <= 0) {
+      throw FormatException('Payment amount is invalid.');
+    }
+
+    final paymentDate = AppDateUtils.tryParseStorage(map['payment_date'] as String?);
+    if (paymentDate == null) {
+      throw FormatException('Payment date is invalid.');
+    }
+
+    return Payment(
+      id: _requiredString(map, 'id'),
+      loanId: _requiredString(map, 'loan_id'),
+      customerId: _requiredString(map, 'customer_id'),
+      amount: amountValue.toDouble(),
+      paymentDate: paymentDate,
+      method: _enumValue(PaymentMethod.values, map['payment_method'], 'payment_method'),
+      referenceNumber: map['reference_no'] as String?,
+      receiptNumber: _requiredString(map, 'receipt_no'),
+      collector: _requiredString(map, 'collector'),
+      type: _enumValue(PaymentType.values, map['type'] ?? PaymentType.partial.name, 'type'),
+      status: _enumValue(
+        PaymentStatus.values,
+        map['status'] ?? PaymentStatus.completed.name,
+        'status',
+      ),
+      remarks: map['remarks'] as String?,
+      priorLoanStatus: map['prior_loan_status'] as String?,
+      clientRequestId: map['client_request_id'] as String?,
+      createdAt: map['created_at'] == null
+          ? null
+          : DateTime.tryParse(map['created_at'] as String),
+    );
+  }
+
+  static String _requiredString(Map<String, Object?> map, String key) {
+    final value = map[key];
+    if (value is! String || value.trim().isEmpty) {
+      throw FormatException('Payment $key is missing or invalid.');
+    }
+    return value;
+  }
+
+  static T _enumValue<T extends Enum>(List<T> values, Object? raw, String field) {
+    final value = raw is String
+        ? values.where((candidate) => candidate.name == raw).firstOrNull
+        : null;
+    if (value == null) {
+      throw FormatException('Payment $field contains an unknown value.');
+    }
+    return value;
+  }
 }
