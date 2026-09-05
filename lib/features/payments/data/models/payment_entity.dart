@@ -19,21 +19,8 @@ class Payment {
   final PaymentType type;
   final PaymentStatus status;
   final String? remarks;
-
-  /// The loan status before this payment was applied. Used by reversal to
-  /// restore the loan's exact prior state (e.g. a 'defaulted' loan must not
-  /// come back as 'active').
   final String? priorLoanStatus;
-
-  /// Client-supplied idempotency key. A retry of the same logical payment
-  /// (e.g. a double-tap that calls `createPayment` twice) reuses the same key,
-  /// so the second call returns the already-recorded payment instead of
-  /// creating a duplicate. Null for legacy/records written without one.
   final String? clientRequestId;
-
-  /// When the payment was recorded. Backs `getPaymentsForLoan`'s same-day
-  /// tie-break ordering (`created_at DESC`); null only for rows written before
-  /// the v24 migration added the column.
   final DateTime? createdAt;
 
   Payment({
@@ -117,12 +104,11 @@ class Payment {
   }
 
   static T _enumValue<T extends Enum>(List<T> values, Object? raw, String field) {
-    final value = raw is String
-        ? values.where((candidate) => candidate.name == raw).firstOrNull
-        : null;
-    if (value == null) {
-      throw FormatException('Payment $field contains an unknown value.');
+    if (raw is String) {
+      for (final value in values) {
+        if (value.name == raw) return value;
+      }
     }
-    return value;
+    throw FormatException('Payment $field contains an unknown value.');
   }
 }
