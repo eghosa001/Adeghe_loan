@@ -4,6 +4,7 @@ import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/database/database_service.dart';
+import '../../../core/utils/currency_utils.dart';
 import '../../loans/data/loan_schedule_service.dart';
 import 'models/payment_entity.dart';
 import 'payment_logic.dart';
@@ -21,10 +22,7 @@ class PaymentRepository {
   }
 
   Future<void> _applyPaymentToSchedule(Transaction txn, String loanId, double amount) async {
-    final pendingSchedules = await txn.rawQuery(
-      "SELECT id, amount, paid_amount FROM repayment_schedule WHERE loan_id = ? AND status != 'paid' ORDER BY due_date ASC",
-      [loanId],
-    );
+    final pendingSchedules = await txn.rawQuery("SELECT id, amount, paid_amount FROM repayment_schedule WHERE loan_id = ? AND status != 'paid' ORDER BY due_date ASC", [loanId]);
     double remaining = amount;
     final batch = txn.batch();
     for (final schedule in pendingSchedules) {
@@ -54,10 +52,7 @@ class PaymentRepository {
       WHERE p.loan_id = ? AND p.status = 'completed'
     ''', [loanId]);
     double totalPaid = (paidResult.first['total'] as num?)?.toDouble() ?? 0.0;
-    final schedules = await txn.rawQuery(
-      "SELECT id, amount FROM repayment_schedule WHERE loan_id = ? ORDER BY due_date ASC",
-      [loanId],
-    );
+    final schedules = await txn.rawQuery("SELECT id, amount FROM repayment_schedule WHERE loan_id = ? ORDER BY due_date ASC", [loanId]);
     final batch = txn.batch();
     for (final schedule in schedules) {
       final scheduleId = schedule['id'] as String;
@@ -95,17 +90,7 @@ class PaymentRepository {
     await txn.insert('savings_transactions', {'id': const Uuid().v4(), 'savings_account_id': accountId, 'type': 'overpayment', 'amount': normalizedSurplus, 'reference_loan_payment_id': paymentId, 'note': 'Automatic Savings Deposit — Loan: $loanId', 'created_at': DateTime.now().toIso8601String()});
   }
 
-  Future<Payment> createPayment({
-    required String loanId,
-    required String customerId,
-    required double amount,
-    required PaymentMethod method,
-    String? referenceNumber,
-    required String collector,
-    String? remarks,
-    double? installmentDue,
-    String? clientRequestId,
-  }) async {
+  Future<Payment> createPayment({required String loanId, required String customerId, required double amount, required PaymentMethod method, String? referenceNumber, required String collector, String? remarks, double? installmentDue, String? clientRequestId}) async {
     if (!amount.isFinite || amount <= 0) throw Exception('Invalid payment amount. Please enter a valid amount.');
     final db = await _db;
     final payment = await db.transaction((txn) async {
@@ -128,12 +113,7 @@ class PaymentRepository {
       if (updated != 1) throw Exception('Loan balance changed since this payment was prepared; please retry.');
       await _applyPaymentToSchedule(txn, loanId, split.appliedToLoan);
       final receiptNumber = await _generateReceiptNumber(txn);
-      final payment = Payment(
-        id: const Uuid().v4(), loanId: loanId, customerId: customerId, amount: amount, method: method,
-        referenceNumber: referenceNumber, receiptNumber: receiptNumber, paymentDate: DateTime.now(), collector: collector,
-        type: split.overpaymentSurplus > 0 ? PaymentType.overpayment : (split.newLoanBalance <= 0.005 ? PaymentType.full : PaymentType.partial),
-        status: PaymentStatus.completed, remarks: remarks, priorLoanStatus: priorLoanStatus, clientRequestId: clientRequestId, createdAt: DateTime.now(),
-      );
+      final payment = Payment(id: const Uuid().v4(), loanId: loanId, customerId: customerId, amount: amount, method: method, referenceNumber: referenceNumber, receiptNumber: receiptNumber, paymentDate: DateTime.now(), collector: collector, type: split.overpaymentSurplus > 0 ? PaymentType.overpayment : (split.newLoanBalance <= 0.005 ? PaymentType.full : PaymentType.partial), status: PaymentStatus.completed, remarks: remarks, priorLoanStatus: priorLoanStatus, clientRequestId: clientRequestId, createdAt: DateTime.now());
       await txn.insert('payments', payment.toMap());
       if (split.overpaymentSurplus > 0) await _creditOverpaymentToSavings(txn, customerId, payment.id, split.overpaymentSurplus, loanId);
       return payment;
@@ -163,18 +143,14 @@ class PaymentRepository {
         if (status == PaymentStatus.reversed.name) throw Exception('Payment already reversed.');
         throw Exception('Only completed payments can be reversed.');
       }
-
       final loanRows = await txn.query('loans', columns: ['customer_id'], where: 'id = ?', whereArgs: [capturedLoanId], limit: 1);
       if (loanRows.isEmpty || loanRows.first['customer_id'] != customerId) throw StateError('Payment is linked to an invalid loan/customer relationship.');
-
       final savingsCreditRows = await txn.query('savings_transactions', where: 'reference_loan_payment_id = ? AND type = ?', whereArgs: [paymentId, 'overpayment'], limit: 1);
       final overpaymentSurplus = savingsCreditRows.isEmpty ? 0.0 : (savingsCreditRows.first['amount'] as num?)?.toDouble() ?? 0.0;
       if (!overpaymentSurplus.isFinite || overpaymentSurplus < 0 || overpaymentSurplus > amount) throw StateError('Payment has an invalid savings overpayment record.');
-
       final savingsWithdrawalRows = await txn.query('savings_transactions', where: 'reference_loan_payment_id = ? AND type = ?', whereArgs: [paymentId, 'withdrawal'], limit: 1);
       final savingsToRefund = savingsWithdrawalRows.isEmpty ? 0.0 : (savingsWithdrawalRows.first['amount'] as num?)?.toDouble() ?? 0.0;
       if (!savingsToRefund.isFinite || savingsToRefund < 0) throw StateError('Payment has an invalid savings-clearing record.');
-
       String? savingsAccountId;
       double? savingsNewBalance;
       if (overpaymentSurplus > 0) {
@@ -186,21 +162,17 @@ class PaymentRepository {
         savingsAccountId = accountId;
         savingsNewBalance = reversal.$1;
       }
-
       final appliedToLoan = computeReversalLoanDelta(paymentAmount: amount, overpaymentSurplus: overpaymentSurplus);
       final paymentUpdated = await txn.update('payments', {'status': PaymentStatus.reversed.name}, where: 'id = ? AND status = ?', whereArgs: [paymentId, PaymentStatus.completed.name]);
       if (paymentUpdated != 1) throw Exception('Payment status changed before reversal could be completed; please retry.');
-
       final storedPriorStatus = payment['prior_loan_status'] as String?;
       final previousStatus = storedPriorStatus ?? 'active';
       final loanUpdated = await txn.rawUpdate('UPDATE loans SET outstanding_balance = outstanding_balance + ?, status = ? WHERE id = ?', [appliedToLoan, previousStatus, capturedLoanId]);
       if (loanUpdated != 1) throw Exception('Loan disappeared before payment reversal could be completed.');
-
       if (savingsAccountId != null && savingsNewBalance != null) {
         await txn.update('savings_accounts', {'balance': savingsNewBalance}, where: 'id = ?', whereArgs: [savingsAccountId]);
         await txn.insert('savings_transactions', {'id': const Uuid().v4(), 'savings_account_id': savingsAccountId, 'type': 'withdrawal', 'amount': overpaymentSurplus, 'reference_loan_payment_id': paymentId, 'note': 'Overpayment reversal — Loan: $capturedLoanId', 'created_at': DateTime.now().toIso8601String()});
       }
-
       if (savingsToRefund > 0) {
         final accountRows = await txn.query('savings_accounts', columns: ['id', 'balance'], where: 'customer_id = ?', whereArgs: [customerId], limit: 1);
         if (accountRows.isEmpty) throw StateError('Cannot refund savings-cleared payment: savings account is missing.');
