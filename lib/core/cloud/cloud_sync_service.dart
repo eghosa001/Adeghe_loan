@@ -1,145 +1,54 @@
 import 'dart:io';
 import 'dart:math' show min;
-
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
-
 import '../constants/app_constants.dart';
 import '../database/database_service.dart';
 import 'cloud_auth_service.dart';
 import 'supabase_config.dart';
 import 'sync_timestamps.dart';
 
-/// Result of one full (push + pull) sync cycle.
 class CloudSyncResult {
-  const CloudSyncResult({this.pushedRows = 0, this.pulledRows = 0, this.deletedRows = 0, this.mergedCustomers = 0, this.error});
-  final int pushedRows;
-  final int pulledRows;
-  final int deletedRows;
-  final int mergedCustomers;
-  final String? error;
-  bool get success => error == null;
+  const CloudSyncResult({this.pushedRows=0,this.pulledRows=0,this.deletedRows=0,this.mergedCustomers=0,this.error});
+  final int pushedRows,pulledRows,deletedRows,mergedCustomers; final String? error;
+  bool get success=>error==null;
 }
 
-/// Offline-first replication engine.
 class CloudSyncService {
-  CloudSyncService(this._databaseService);
-  final DatabaseService _databaseService;
+  CloudSyncService(this._databaseService); final DatabaseService _databaseService;
   Future<void> Function()? onPullComplete;
-  static const String _pullFlagKey = 'pull_in_progress';
-  static const int _maxRemoteTombstonesPerCycle = 500;
-  static const Duration _minAutoSyncInterval = Duration(minutes: 2);
+  static const String _pullFlagKey='pull_in_progress'; static const int _maxRemoteTombstonesPerCycle=500; static const Duration _minAutoSyncInterval=Duration(minutes:2);
   DateTime? _lastAutoSyncAt;
-
-  static const List<String> _tables = ['business_profile','customer_groups','customers','loans','payments','savings_accounts','savings_transactions','documents','holidays'];
-  static const Map<String, String> _tablePrimaryKeys = {'business_profile':'id','customer_groups':'id','customers':'id','loans':'id','payments':'id','savings_accounts':'id','savings_transactions':'id','documents':'id','holidays':'id'};
-  bool _syncing = false;
-  bool get isSyncing => _syncing;
-  bool get isConfigured => SupabaseConfig.isConfigured;
-  bool get isSignedIn { try { return Supabase.instance.client.auth.currentUser != null; } catch (_) { return false; } }
-  Future<bool> _isOwner() async { try { return await Supabase.instance.client.rpc('is_owner') == true; } catch (_) { return false; } }
-
-  Future<void> syncIfSignedIn() async {
-    try { if (!isConfigured || !isSignedIn) return; final now = DateTime.now(); final last = _lastAutoSyncAt; if (last != null && now.difference(last) < _minAutoSyncInterval) return; _lastAutoSyncAt = now; await fullSync(); } catch (_) {}
-  }
-
-  Future<DateTime?> lastSyncTime() async {
-    final db = await _databaseService.database;
-    final rows = await db.query('sync_meta', where:'id = ?', whereArgs:[1], limit:1);
-    if (rows.isEmpty) return null;
-    final value = rows.first['last_pulled_at'] as String?;
-    return value == null ? null : DateTime.tryParse(value);
-  }
-
-  Future<CloudSyncResult> fullSync() async {
-    if (_syncing) return const CloudSyncResult(error:'A sync is already in progress.');
-    if (!isConfigured) return const CloudSyncResult(error:'Supabase is not configured. Add your project URL and key.');
-    if (!isSignedIn) return const CloudSyncResult(error:'You are not signed in to the cloud.');
-    if (!await _isOwner()) return const CloudSyncResult(error:CloudAuthService.notOwnerMessage);
-    _syncing = true;
-    try {
-      final db = await _databaseService.database;
-      var pushed = 0, pulled = 0, deleted = 0, attempted = 0, pushFailures = 0, pullFailures = 0, mergedCustomers = 0;
-      String? firstError;
-      void noteError(Object error) { firstError ??= error.toString(); }
-      var failedTables = <String>{};
-      try { final result = await _push(db); pushed=result.pushed; deleted=result.deleted; attempted=result.attempted; pushFailures=result.failures; mergedCustomers=result.merged; failedTables=result.failedTables; } catch (error) { noteError(error); }
-      try { final result = await _pull(db); pulled=result.pulled; pullFailures=result.failures; } catch (error) { noteError(error); }
-      try { await onPullComplete?.call(); } catch (_) {}
-      String? error = firstError;
-      if (error == null && (pushFailures > 0 || pullFailures > 0)) { final failedList=failedTables.toList()..sort(); final failedDetails=failedList.isEmpty?'':' Tables: ${failedList.join(', ')}.'; error='Sync finished but $pushFailures push and $pullFailures pull item(s) failed and were not replicated. They retry on the next sync.$failedDetails'; }
-      else if (error == null && attempted > 0 && pushed == 0 && pulled == 0 && deleted == 0) error='Nothing was replicated (0 of $attempted local changes reached the cloud). Check the owner access and network, then try again.';
-      return CloudSyncResult(pushedRows:pushed,pulledRows:pulled,deletedRows:deleted,mergedCustomers:mergedCustomers,error:error);
-    } finally { _syncing=false; }
-  }
-
-  Future<CloudSyncResult> forceFullReupload() async { final db=await _databaseService.database; await db.update('sync_meta',{'last_pushed_at':null},where:'id = ?',whereArgs:[1]); return fullSync(); }
-
-  Future<({int pushed,int deleted,int attempted,int failures,int merged,Set<String> failedTables})> _push(Database db) async {
-    final client=Supabase.instance.client; final meta=await _readMeta(db); final lastPushed=meta.$1; final merged=await _resolveDuplicateCustomers(db);
-    final snapshots=<String,List<Map<String,Object?>>>{};
-    for(final table in _tables){ snapshots[table]=lastPushed==null?await db.query(table):await db.query(table,where:'updated_at > ? OR updated_at IS NULL',whereArgs:[lastPushed]); }
-    final tombstones=lastPushed==null?await db.query('sync_tombstones'):await db.query('sync_tombstones',where:'deleted_at > ?',whereArgs:[lastPushed]);
-    final watermark=_isoUtcNow(); var pushed=0,attempted=tombstones.length,failures=0; final failedTables=<String>{};
-    for(final table in _tables){ final rows=snapshots[table]??const []; if(rows.isEmpty) continue; attempted+=rows.length; try { if(table=='documents'){final documents=await _pushDocuments(client,rows); pushed+=documents.pushed; failures+=documents.failures;} else {final cleanedRows=[for(final row in rows) stripSensitiveColumns(table,row)]; for(final batch in _chunk(cleanedRows,500)){await client.from(table).upsert(batch,onConflict:_tablePrimaryKeys[table]!);} pushed+=rows.length;}} catch(_){failures++;failedTables.add(table);} }
-    var deleted=0;
-    for(final table in _tables.reversed){ final tableTombstones=tombstones.where((t)=>t['deleted_table']==table).toList(); if(tableTombstones.isEmpty) continue; final pk=_tablePrimaryKeys[table]!; for(final tombstone in tableTombstones){final id=tombstone['deleted_row_id'] as String; try {await client.from(table).delete().eq(pk,id); await client.from('sync_tombstones').insert({'deleted_table':table,'deleted_row_id':id,'deleted_at':tombstone['deleted_at']}); await db.delete('sync_tombstones',where:'deleted_table = ? AND deleted_row_id = ?',whereArgs:[table,id]); deleted++;} catch(_){failures++;failedTables.add(table);}}}
-    if(failedTables.isEmpty) await _writeMeta(db,pushedAt:watermark);
-    return (pushed:pushed,deleted:deleted,attempted:attempted,failures:failures,merged:merged,failedTables:failedTables);
-  }
-
-  Future<int> _resolveDuplicateCustomers(Database db) async { final rows=await db.query('customers',where:"status != 'archived'"); final byPhone=<String,List<Map<String,Object?>>>{}; for(final row in rows){final phone=(row['phone'] as String?)?.trim(); if(phone==null||phone.isEmpty) continue; byPhone.putIfAbsent(phone,()=>[]).add(row);} var merged=0; for(final group in byPhone.values){if(group.length<2) continue; sortDuplicateCustomersByCanonicalOrder(group); final survivor=group.first; for(final duplicate in group.skip(1)){await mergeDuplicateCustomerInto(db,duplicate,survivor); merged++;}} return merged; }
-
-  Future<({int pushed,int failures})> _pushDocuments(SupabaseClient client,List<Map<String,Object?>> rows) async { var pushed=0,failures=0; for(final row in rows){final id=row['id'] as String?; if(id==null){failures++;continue;} final customerId=row['customer_id'] as String???''; final localPath=row['file_path'] as String???''; final storagePath=_documentStoragePath(customerId,id); final localFile=File(localPath); if(localPath.isNotEmpty&&await localFile.exists()){try{final bytes=await localFile.readAsBytes(); await client.storage.from(SupabaseConfig.documentsBucket).uploadBinary(storagePath,bytes,fileOptions:const FileOptions(upsert:true));}catch(_){failures++;continue;}} final cleaned=Map<String,Object?>.from(row)..['file_path']=''; try{await client.from('documents').upsert(stripSensitiveColumns('documents',cleaned),onConflict:'id'); pushed++;}catch(_){failures++;}} return(pushed:pushed,failures:failures); }
-
-  Future<({int pulled,int failures})> _pull(Database db) async {
-    final client=Supabase.instance.client; final meta=await _readMeta(db); final lastPulled=meta.$2; final watermark=_isoUtcNow(); await _setPullFlag(db,true); var pulled=0,failures=0;
-    try {
-      final remoteTombstones=await _fetchAll(client.from('sync_tombstones').select()); var appliedTombstones=0;
-      for(final tombstone in remoteTombstones){if(appliedTombstones>=_maxRemoteTombstonesPerCycle) break; final table=tombstone['deleted_table'] as String?; final id=tombstone['deleted_row_id'] as String?; if(table==null||id==null||!_isValidTombstone(table,id,tombstone['deleted_at'])) continue; final pk=_tablePrimaryKeys[table]!; try{await db.delete(table,where:'$pk = ?',whereArgs:[id]); await client.from('sync_tombstones').delete().eq('deleted_table',table).eq('deleted_row_id',id); appliedTombstones++;}catch(_){failures++;}}
-      final localTombstones=<String,Map<String,Object?>>{}; for(final table in _tables){final rows=await db.query('sync_tombstones',where:'deleted_table = ?',whereArgs:[table]); for(final row in rows){localTombstones['$table|${row['deleted_row_id']}']=row;}}
-      for(final table in _tables){final pk=_tablePrimaryKeys[table]!; final query=client.from(table).select(); final filtered=lastPulled==null?query:query.gte('updated_at',lastPulled); final remoteRows=await _fetchAll(filtered); if(remoteRows.isEmpty) continue; final sensitive=cloudSensitiveColumns[table]; final localRows=<String,Map<String,Object?>>{}; final ids=remoteRows.map((r)=>r[pk]).whereType<String>().toSet().toList(); for(final idChunk in _chunk(ids,400)){final placeholders=List.filled(idChunk.length,'?').join(','); final chunkRows=await db.query(table,where:'$pk IN ($placeholders)',whereArgs:idChunk); for(final row in chunkRows){localRows[row[pk] as String]=row;}}
-        for(final remoteRow in remoteRows){final id=remoteRow[pk]; if(id==null||!isSaneCloudRow(table,remoteRow,pk)){failures++;continue;} final remoteUpdated=(remoteRow['updated_at'] as String?)??''; try{final localRow=localRows[id]; if(localRow!=null){final localUpdated=(localRow['updated_at'] as String?)??''; if(remoteUpdated.compareTo(localUpdated)<=0) continue;} else {final tombstone=localTombstones['$table|$id']?['deleted_at'] as String?; if(tombstone!=null&&remoteUpdated.compareTo(tombstone)<=0) continue;} var row=Map<String,Object?>.from(remoteRow); if(sensitive!=null&&localRow!=null){for(final column in sensitive){row[column]=localRow[column];}} if(table=='customers'){for(final column in const ['full_name','next_of_kin','guarantor_1_name','guarantor_2_name']){final value=row[column]; if(value is String) row[column]=value.trim().toUpperCase();}}
-          if(table=='documents') await _materializeDocument(row);
-          await db.insert(table,row,conflictAlgorithm:ConflictAlgorithm.replace);
-          if(localTombstones.containsKey('$table|$id')) await db.delete('sync_tombstones',where:'deleted_table = ? AND deleted_row_id = ?',whereArgs:[table,id]); pulled++;
-        }catch(_){failures++;}
-        }
-      }
-    } finally { await _setPullFlag(db,false); }
-    if(failures==0) await _writeMeta(db,pulledAt:watermark);
-    return(pulled:pulled,failures:failures);
-  }
-
+  static const List<String> _tables=['business_profile','customer_groups','customers','loans','payments','savings_accounts','savings_transactions','documents','holidays'];
+  static const Map<String,String> _tablePrimaryKeys={'business_profile':'id','customer_groups':'id','customers':'id','loans':'id','payments':'id','savings_accounts':'id','savings_transactions':'id','documents':'id','holidays':'id'};
+  bool _syncing=false; bool get isSyncing=>_syncing; bool get isConfigured=>SupabaseConfig.isConfigured;
+  bool get isSignedIn{try{return Supabase.instance.client.auth.currentUser!=null;}catch(_){return false;}}
+  Future<bool> _isOwner()async{try{return await Supabase.instance.client.rpc('is_owner')==true;}catch(_){return false;}}
+  Future<void> syncIfSignedIn()async{try{if(!isConfigured||!isSignedIn)return;final now=DateTime.now();final last=_lastAutoSyncAt;if(last!=null&&now.difference(last)<_minAutoSyncInterval)return;_lastAutoSyncAt=now;await fullSync();}catch(_) {}}
+  Future<DateTime?> lastSyncTime()async{final db=await _databaseService.database;final rows=await db.query('sync_meta',where:'id = ?',whereArgs:[1],limit:1);if(rows.isEmpty)return null;final value=rows.first['last_pulled_at'] as String?;return value==null?null:DateTime.tryParse(value);}
+  Future<CloudSyncResult> fullSync()async{if(_syncing)return const CloudSyncResult(error:'A sync is already in progress.');if(!isConfigured)return const CloudSyncResult(error:'Supabase is not configured. Add your project URL and key.');if(!isSignedIn)return const CloudSyncResult(error:'You are not signed in to the cloud.');if(!await _isOwner())return const CloudSyncResult(error:CloudAuthService.notOwnerMessage);_syncing=true;try{final db=await _databaseService.database;var pushed=0,pulled=0,deleted=0,attempted=0,pushFailures=0,pullFailures=0,mergedCustomers=0;String? firstError;void noteError(Object e){firstError??=e.toString();}var failedTables=<String>{};try{final r=await _push(db);pushed=r.pushed;deleted=r.deleted;attempted=r.attempted;pushFailures=r.failures;mergedCustomers=r.merged;failedTables=r.failedTables;}catch(e){noteError(e);}try{final r=await _pull(db);pulled=r.pulled;pullFailures=r.failures;}catch(e){noteError(e);}try{await onPullComplete?.call();}catch(_){}String? error=firstError;if(error==null&&(pushFailures>0||pullFailures>0)){final f=failedTables.toList()..sort();final d=f.isEmpty?'':' Tables: ${f.join(', ')}.';error='Sync finished but $pushFailures push and $pullFailures pull item(s) failed and were not replicated. They retry on the next sync.$d';}else if(error==null&&attempted>0&&pushed==0&&pulled==0&&deleted==0)error='Nothing was replicated (0 of $attempted local changes reached the cloud). Check the owner access and network, then try again.';return CloudSyncResult(pushedRows:pushed,pulledRows:pulled,deletedRows:deleted,mergedCustomers:mergedCustomers,error:error);}finally{_syncing=false;}}
+  Future<CloudSyncResult> forceFullReupload()async{final db=await _databaseService.database;await db.update('sync_meta',{'last_pushed_at':null},where:'id = ?',whereArgs:[1]);return fullSync();}
+  Future<({int pushed,int deleted,int attempted,int failures,int merged,Set<String> failedTables})> _push(Database db)async{final client=Supabase.instance.client;final meta=await _readMeta(db);final lastPushed=meta.$1;final merged=await _resolveDuplicateCustomers(db);final snapshots=<String,List<Map<String,Object?>>>{};for(final table in _tables){snapshots[table]=lastPushed==null?await db.query(table):await db.query(table,where:'updated_at > ? OR updated_at IS NULL',whereArgs:[lastPushed]);}final tombstones=lastPushed==null?await db.query('sync_tombstones'):await db.query('sync_tombstones',where:'deleted_at > ?',whereArgs:[lastPushed]);final watermark=_isoUtcNow();var pushed=0,attempted=tombstones.length,failures=0;final failedTables=<String>{};for(final table in _tables){final rows=snapshots[table]??const [];if(rows.isEmpty)continue;attempted+=rows.length;try{if(table=='documents'){final d=await _pushDocuments(client,rows);pushed+=d.pushed;failures+=d.failures;}else{final cleaned=[for(final row in rows)stripSensitiveColumns(table,row)];for(final batch in _chunk(cleaned,500)){await client.from(table).upsert(batch,onConflict:_tablePrimaryKeys[table]!);}pushed+=rows.length;}}catch(_){failures++;failedTables.add(table);}}var deleted=0;for(final table in _tables.reversed){final ts=tombstones.where((t)=>t['deleted_table']==table).toList();if(ts.isEmpty)continue;final pk=_tablePrimaryKeys[table]!;for(final tombstone in ts){final id=tombstone['deleted_row_id'] as String;try{await client.from(table).delete().eq(pk,id);await client.from('sync_tombstones').insert({'deleted_table':table,'deleted_row_id':id,'deleted_at':tombstone['deleted_at']});await db.delete('sync_tombstones',where:'deleted_table = ? AND deleted_row_id = ?',whereArgs:[table,id]);deleted++;}catch(_){failures++;failedTables.add(table);}}}if(failedTables.isEmpty)await _writeMeta(db,pushedAt:watermark);return(pushed:pushed,deleted:deleted,attempted:attempted,failures:failures,merged:merged,failedTables:failedTables);}
+  Future<int> _resolveDuplicateCustomers(Database db)async{final rows=await db.query('customers',where:"status != 'archived'");final byPhone=<String,List<Map<String,Object?>>>{};for(final row in rows){final phone=(row['phone'] as String?)?.trim();if(phone==null||phone.isEmpty)continue;byPhone.putIfAbsent(phone,()=>[]).add(row);}var merged=0;for(final group in byPhone.values){if(group.length<2)continue;sortDuplicateCustomersByCanonicalOrder(group);final survivor=group.first;for(final duplicate in group.skip(1)){await mergeDuplicateCustomerInto(db,duplicate,survivor);merged++;}}return merged;}
+  Future<({int pushed,int failures})> _pushDocuments(SupabaseClient client,List<Map<String,Object?>> rows)async{var pushed=0,failures=0;for(final row in rows){final id=row['id'] as String?;if(id==null){failures++;continue;}final customerId=row['customer_id'] as String? ?? '';final localPath=row['file_path'] as String? ?? '';final storagePath=_documentStoragePath(customerId,id);final localFile=File(localPath);if(localPath.isNotEmpty&&await localFile.exists()){try{final bytes=await localFile.readAsBytes();await client.storage.from(SupabaseConfig.documentsBucket).uploadBinary(storagePath,bytes,fileOptions:const FileOptions(upsert:true));}catch(_){failures++;continue;}}final cleaned=Map<String,Object?>.from(row)..['file_path']='';try{await client.from('documents').upsert(stripSensitiveColumns('documents',cleaned),onConflict:'id');pushed++;}catch(_){failures++;}}return(pushed:pushed,failures:failures);}
+  Future<({int pulled,int failures})> _pull(Database db)async{final client=Supabase.instance.client;final meta=await _readMeta(db);final lastPulled=meta.$2;final watermark=_isoUtcNow();await _setPullFlag(db,true);var pulled=0,failures=0;try{final remoteTombstones=await _fetchAll(client.from('sync_tombstones').select());var applied=0;for(final tombstone in remoteTombstones){if(applied>=_maxRemoteTombstonesPerCycle)break;final table=tombstone['deleted_table'] as String?;final id=tombstone['deleted_row_id'] as String?;if(table==null||id==null||!_isValidTombstone(table,id,tombstone['deleted_at']))continue;final pk=_tablePrimaryKeys[table]!;try{await db.delete(table,where:'$pk = ?',whereArgs:[id]);await client.from('sync_tombstones').delete().eq('deleted_table',table).eq('deleted_row_id',id);applied++;}catch(_){failures++;}}final localTombstones=<String,Map<String,Object?>>{};for(final table in _tables){final rows=await db.query('sync_tombstones',where:'deleted_table = ?',whereArgs:[table]);for(final row in rows){localTombstones['$table|${row['deleted_row_id']}']=row;}}for(final table in _tables){final pk=_tablePrimaryKeys[table]!;final query=client.from(table).select();final filtered=lastPulled==null?query:query.gte('updated_at',lastPulled);final remoteRows=await _fetchAll(filtered);if(remoteRows.isEmpty)continue;final sensitive=cloudSensitiveColumns[table];final localRows=<String,Map<String,Object?>>{};final ids=remoteRows.map((r)=>r[pk]).whereType<String>().toSet().toList();for(final chunk in _chunk(ids,400)){final placeholders=List.filled(chunk.length,'?').join(',');final chunkRows=await db.query(table,where:'$pk IN ($placeholders)',whereArgs:chunk);for(final row in chunkRows){localRows[row[pk] as String]=row;}}for(final remoteRow in remoteRows){final id=remoteRow[pk];if(id==null||!isSaneCloudRow(table,remoteRow,pk)){failures++;continue;}final remoteUpdated=(remoteRow['updated_at'] as String?)??'';try{final localRow=localRows[id];if(localRow!=null){final localUpdated=(localRow['updated_at'] as String?)??'';if(remoteUpdated.compareTo(localUpdated)<=0)continue;}else{final tombstone=localTombstones['$table|$id']?['deleted_at'] as String?;if(tombstone!=null&&remoteUpdated.compareTo(tombstone)<=0)continue;}var row=Map<String,Object?>.from(remoteRow);if(sensitive!=null&&localRow!=null){for(final column in sensitive){row[column]=localRow[column];}}if(table=='customers'){for(final column in const ['full_name','next_of_kin','guarantor_1_name','guarantor_2_name']){final value=row[column];if(value is String)row[column]=value.trim().toUpperCase();}}if(table=='documents')await _materializeDocument(row);await db.insert(table,row,conflictAlgorithm:ConflictAlgorithm.replace);if(localTombstones.containsKey('$table|$id'))await db.delete('sync_tombstones',where:'deleted_table = ? AND deleted_row_id = ?',whereArgs:[table,id]);pulled++;}catch(_){failures++;}}}}finally{await _setPullFlag(db,false);}if(failures==0)await _writeMeta(db,pulledAt:watermark);return(pulled:pulled,failures:failures);}
   bool _isValidTombstone(String? table,String? id,Object? deletedAt){if(table==null||id==null)return false;if(_tablePrimaryKeys[table]==null)return false;if(id.isEmpty||id.length>64)return false;return isValidSyncTimestamp(deletedAt as String?);}
-
-  /// Downloads a remote encrypted document. A failed download MUST fail the
-  /// row rather than writing an empty `file_path`: otherwise the metadata could
-  /// be inserted and the pull watermark advanced, causing the document to be
-  /// treated as synchronized even though its file is missing. Throwing keeps
-  /// the row out of SQLite and forces a retry on the next pull cycle.
-  Future<void> _materializeDocument(Map<String,Object?> row) async {
-    final id=row['id'] as String?; final customerId=row['customer_id'] as String?; if(id==null||customerId==null) throw StateError('Invalid remote document identity.');
-    final bytes=await Supabase.instance.client.storage.from(SupabaseConfig.documentsBucket).download(_documentStoragePath(customerId,id));
-    row['file_path']=await _writeSecureDocument(bytes);
-  }
-
-  Future<String> _writeSecureDocument(List<int> bytes) async { final root=await getApplicationDocumentsDirectory(); final directory=Directory('${root.path}${Platform.pathSeparator}secure_documents'); if(!await directory.exists()) await directory.create(recursive:true); final path='${directory.path}${Platform.pathSeparator}${const Uuid().v4()}.enc'; await File(path).writeAsBytes(bytes,flush:true); if(Platform.isWindows){try{final user=Platform.environment['USERNAME']??''; if(user.isNotEmpty) await Process.run('icacls',[path,'/inheritance:r','/grant:r','$user:R']);}catch(_){}} return path; }
+  Future<void> _materializeDocument(Map<String,Object?> row)async{final id=row['id'] as String?;final customerId=row['customer_id'] as String?;if(id==null||customerId==null)throw StateError('Invalid remote document identity.');final bytes=await Supabase.instance.client.storage.from(SupabaseConfig.documentsBucket).download(_documentStoragePath(customerId,id));row['file_path']=await _writeSecureDocument(bytes);}
+  Future<String> _writeSecureDocument(List<int> bytes)async{final root=await getApplicationDocumentsDirectory();final directory=Directory('${root.path}${Platform.pathSeparator}secure_documents');if(!await directory.exists())await directory.create(recursive:true);final path='${directory.path}${Platform.pathSeparator}${const Uuid().v4()}.enc';await File(path).writeAsBytes(bytes,flush:true);if(Platform.isWindows){try{final user=Platform.environment['USERNAME']??'';if(user.isNotEmpty)await Process.run('icacls',[path,'/inheritance:r','/grant:r','$user:R']);}catch(_){}}return path;}
   String _documentStoragePath(String customerId,String documentId)=>'${sanitizeCloudPathPart(customerId)}/${sanitizeCloudPathPart(documentId)}.enc';
-  Future<(String?,String?)> _readMeta(Database db) async {final rows=await db.query('sync_meta',where:'id = ?',whereArgs:[1],limit:1); if(rows.isEmpty)return(null,null); return(rows.first['last_pushed_at'] as String?,rows.first['last_pulled_at'] as String?);}
-  Future<void> _writeMeta(Database db,{String? pushedAt,String? pulledAt}) async {final values=<String,Object?>{}; if(pushedAt!=null)values['last_pushed_at']=pushedAt; if(pulledAt!=null)values['last_pulled_at']=pulledAt; if(values.isEmpty)return; await db.update('sync_meta',values,where:'id = ?',whereArgs:[1]);}
-  Future<void> _setPullFlag(Database db,bool value) async {await db.insert('sync_flags',{'key':_pullFlagKey,'value':value?'1':'0'},conflictAlgorithm:ConflictAlgorithm.replace);}
+  Future<(String?,String?)> _readMeta(Database db)async{final rows=await db.query('sync_meta',where:'id = ?',whereArgs:[1],limit:1);if(rows.isEmpty)return(null,null);return(rows.first['last_pushed_at'] as String?,rows.first['last_pulled_at'] as String?);}
+  Future<void> _writeMeta(Database db,{String? pushedAt,String? pulledAt})async{final values=<String,Object?>{};if(pushedAt!=null)values['last_pushed_at']=pushedAt;if(pulledAt!=null)values['last_pulled_at']=pulledAt;if(values.isEmpty)return;await db.update('sync_meta',values,where:'id = ?',whereArgs:[1]);}
+  Future<void> _setPullFlag(Database db,bool value)async{await db.insert('sync_flags',{'key':_pullFlagKey,'value':value?'1':'0'},conflictAlgorithm:ConflictAlgorithm.replace);}
   String _isoUtcNow()=>syncTimestamp();
-  Future<PostgrestList> _fetchAll(PostgrestFilterBuilder<PostgrestList> builder) async {const pageSize=1000; final rows=<Map<String,dynamic>>[]; var offset=0; while(true){final page=await builder.range(offset,offset+pageSize-1); rows.addAll(page); if(page.length<pageSize)break; offset+=pageSize;} return rows;}
-  Iterable<List<T>> _chunk<T>(List<T> items,int size) sync* {for(var i=0;i<items.length;i+=size)yield items.sublist(i,min(i+size,items.length));}
+  Future<PostgrestList> _fetchAll(PostgrestFilterBuilder<PostgrestList> builder)async{const pageSize=1000;final rows=<Map<String,dynamic>>[];var offset=0;while(true){final page=await builder.range(offset,offset+pageSize-1);rows.addAll(page);if(page.length<pageSize)break;offset+=pageSize;}return rows;}
+  Iterable<List<T>> _chunk<T>(List<T> items,int size)sync*{for(var i=0;i<items.length;i+=size)yield items.sublist(i,min(i+size,items.length));}
 }
-
-class CloudSyncException implements Exception {const CloudSyncException(this.message); final String message; @override String toString()=>message;}
+class CloudSyncException implements Exception{const CloudSyncException(this.message);final String message;@override String toString()=>message;}
 const Map<String,Set<String>> cloudSensitiveColumns={'customers':{'bvn','nin'}};
-Map<String,Object?> stripSensitiveColumns(String table,Map<String,Object?> row){final sensitive=cloudSensitiveColumns[table]; if(sensitive==null)return row; return{for(final entry in row.entries)if(!sensitive.contains(entry.key))entry.key:entry.value};}
+Map<String,Object?> stripSensitiveColumns(String table,Map<String,Object?> row){final sensitive=cloudSensitiveColumns[table];if(sensitive==null)return row;return{for(final entry in row.entries)if(!sensitive.contains(entry.key))entry.key:entry.value};}
 bool isValidSyncTimestamp(String? value){if(value==null)return false;if(!RegExp(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$').hasMatch(value))return false;final parsed=DateTime.tryParse(value);if(parsed==null)return false;if(parsed.isAfter(DateTime.now().toUtc().add(const Duration(minutes:5))))return false;return true;}
 const Set<String> cloudNumericColumns={'credit_score','amount','interest_rate','insurance_fee','commission','processing_fee','admin_fee','other_charges','duration_days','duration_weeks','daily_payment','weekly_payment','total_repayment','outstanding_balance','custom_collection_amount','paid_amount','balance','is_recurring','is_enabled'};
 const Set<String> cloudIntColumns={'installment_number'};
@@ -149,4 +58,4 @@ bool isSaneCloudRow(String table,Map<String,Object?> row,String pk){final id=row
 String sanitizeCloudPathPart(String value){final sanitized=value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'),'_');return sanitized.isEmpty?'_':sanitized;}
 @visibleForTesting void sortDuplicateCustomersByCanonicalOrder(List<Map<String,Object?>> group){group.sort((a,b){final byDate=((a['date_registered'] as String?)??'').compareTo((b['date_registered'] as String?)??'');if(byDate!=0)return byDate;return((a['id'] as String?)??'').compareTo((b['id'] as String?)??'');});}
 const List<String> _mergeableCustomerFields=['gender','dob','alt_phone','email','residential_address','business_address','occupation','employer','marital_status','nationality','state','lga','next_of_kin','next_of_kin_relation','next_of_kin_phone','guarantor_1_name','guarantor_1_phone','guarantor_1_address','guarantor_2_name','guarantor_2_phone','guarantor_2_address','id_type','id_number','notes','passport_path','guarantor_passport_path','signature_path'];
-@visibleForTesting Future<void> mergeDuplicateCustomerInto(Database db,Map<String,Object?> duplicate,Map<String,Object?> survivor) async {final dupId=duplicate['id'] as String?;final survivorId=survivor['id'] as String?;if(dupId==null||survivorId==null||dupId==survivorId)return;await db.transaction((txn)async{await txn.update('loans',{'customer_id':survivorId},where:'customer_id = ?',whereArgs:[dupId]);await txn.update('payments',{'customer_id':survivorId},where:'customer_id = ?',whereArgs:[dupId]);await txn.update('documents',{'customer_id':survivorId},where:'customer_id = ?',whereArgs:[dupId]);final dupAccountRows=await txn.query('savings_accounts',where:'customer_id = ?',whereArgs:[dupId],limit:1);final survivorAccountRows=await txn.query('savings_accounts',where:'customer_id = ?',whereArgs:[survivorId],limit:1);if(dupAccountRows.isNotEmpty){if(survivorAccountRows.isEmpty){await txn.update('savings_accounts',{'customer_id':survivorId},where:'id = ?',whereArgs:[dupAccountRows.first['id']]);}else{final dupAccountId=dupAccountRows.first['id'];final survivorAccountId=survivorAccountRows.first['id'];await txn.update('savings_transactions',{'savings_account_id':survivorAccountId},where:'savings_account_id = ?',whereArgs:[dupAccountId]);final dupBalance=(dupAccountRows.first['balance'] as num?)?.toDouble()??0.0;if(dupBalance!=0.0)await txn.rawUpdate('UPDATE savings_accounts SET balance = balance + ? WHERE id = ?',[dupBalance,survivorAccountId]);await txn.delete('savings_accounts',where:'id = ?',whereArgs:[dupAccountId]);}}final dupGroup=duplicate['group_id'] as String?;if(dupGroup!=null&&dupGroup.isNotEmpty&&(survivor['group_id'] as String?)==null)await txn.update('customers',{'group_id':dupGroup},where:'id = ?',whereArgs:[survivorId]);final fills=<String,Object?>{};for(final column in _mergeableCustomerFields){final dupValue=duplicate[column];if(dupValue!=null&&survivor[column]==null)fills[column]=dupValue;}final dupScore=(duplicate['credit_score'] as num?)?.toDouble()??0.0;final survivorScore=(survivor['credit_score'] as num?)?.toDouble()??0.0;if(dupScore>0&&survivorScore<=0)fills['credit_score']=dupScore;for(final column in const ['nin','bvn']){final dupValue=duplicate[column];if(dupValue==null||survivor[column]!=null)continue;final clash=await txn.query('customers',columns:const ['id'],where:"$column = ? AND id NOT IN (?, ?) AND status != 'archived'",whereArgs:[dupValue,survivorId,dupId],limit:1);if(clash.isEmpty)fills[column]=dupValue;}if(fills.isNotEmpty)await txn.update('customers',fills,where:'id = ?',whereArgs:[survivorId]);await txn.delete('customers',where:'id = ?',whereArgs:[dupId]);});}
+@visibleForTesting Future<void> mergeDuplicateCustomerInto(Database db,Map<String,Object?> duplicate,Map<String,Object?> survivor)async{final dupId=duplicate['id'] as String?;final survivorId=survivor['id'] as String?;if(dupId==null||survivorId==null||dupId==survivorId)return;await db.transaction((txn)async{await txn.update('loans',{'customer_id':survivorId},where:'customer_id = ?',whereArgs:[dupId]);await txn.update('payments',{'customer_id':survivorId},where:'customer_id = ?',whereArgs:[dupId]);await txn.update('documents',{'customer_id':survivorId},where:'customer_id = ?',whereArgs:[dupId]);final dupAccountRows=await txn.query('savings_accounts',where:'customer_id = ?',whereArgs:[dupId],limit:1);final survivorAccountRows=await txn.query('savings_accounts',where:'customer_id = ?',whereArgs:[survivorId],limit:1);if(dupAccountRows.isNotEmpty){if(survivorAccountRows.isEmpty){await txn.update('savings_accounts',{'customer_id':survivorId},where:'id = ?',whereArgs:[dupAccountRows.first['id']]);}else{final dupAccountId=dupAccountRows.first['id'];final survivorAccountId=survivorAccountRows.first['id'];await txn.update('savings_transactions',{'savings_account_id':survivorAccountId},where:'savings_account_id = ?',whereArgs:[dupAccountId]);final dupBalance=(dupAccountRows.first['balance'] as num?)?.toDouble()??0.0;if(dupBalance!=0.0)await txn.rawUpdate('UPDATE savings_accounts SET balance = balance + ? WHERE id = ?',[dupBalance,survivorAccountId]);await txn.delete('savings_accounts',where:'id = ?',whereArgs:[dupAccountId]);}}final dupGroup=duplicate['group_id'] as String?;if(dupGroup!=null&&dupGroup.isNotEmpty&&(survivor['group_id'] as String?)==null)await txn.update('customers',{'group_id':dupGroup},where:'id = ?',whereArgs:[survivorId]);final fills=<String,Object?>{};for(final column in _mergeableCustomerFields){final dupValue=duplicate[column];if(dupValue!=null&&survivor[column]==null)fills[column]=dupValue;}final dupScore=(duplicate['credit_score'] as num?)?.toDouble()??0.0;final survivorScore=(survivor['credit_score'] as num?)?.toDouble()??0.0;if(dupScore>0&&survivorScore<=0)fills['credit_score']=dupScore;for(final column in const ['nin','bvn']){final dupValue=duplicate[column];if(dupValue==null||survivor[column]!=null)continue;final clash=await txn.query('customers',columns:const ['id'],where:"$column = ? AND id NOT IN (?, ?) AND status != 'archived'",whereArgs:[dupValue,survivorId,dupId],limit:1);if(clash.isEmpty)fills[column]=dupValue;}if(fills.isNotEmpty)await txn.update('customers',fills,where:'id = ?',whereArgs:[survivorId]);await txn.delete('customers',where:'id = ?',whereArgs:[dupId]);});}
