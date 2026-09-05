@@ -12,7 +12,6 @@ class SavingsRepository {
 
   Future<Database> get _database async => _dbService.database;
 
-  /// Returns the savings balance for a customer (0.0 if no account yet).
   Future<double> getSavingsBalance(String customerId) async {
     final db = await _database;
     final rows = await db.query(
@@ -23,10 +22,13 @@ class SavingsRepository {
       limit: 1,
     );
     if (rows.isEmpty) return 0.0;
-    return (rows.first['balance'] as num?)?.toDouble() ?? 0.0;
+    final balance = (rows.first['balance'] as num?)?.toDouble();
+    if (balance == null || !balance.isFinite || balance < 0) {
+      throw StateError('Customer savings balance is invalid.');
+    }
+    return CurrencyUtils.roundToCents(balance);
   }
 
-  /// Returns all transactions for a customer's savings account, newest first.
   Future<List<SavingsTransaction>> getTransactions(String customerId) async {
     final db = await _database;
     final accountRows = await db.query(
@@ -47,8 +49,6 @@ class SavingsRepository {
     return rows.map(SavingsTransaction.fromMap).toList(growable: false);
   }
 
-  /// Records a deposit or withdrawal for a customer. Throws if insufficient
-  /// balance for a withdrawal.
   Future<SavingsTransaction> recordTransaction({
     required String customerId,
     required SavingsTransactionType type,
@@ -58,10 +58,14 @@ class SavingsRepository {
     if (!amount.isFinite || amount <= 0) {
       throw Exception('Amount must be a valid number greater than zero.');
     }
+    final amountCents = CurrencyUtils.toMinorUnits(amount);
+    if (amountCents <= 0) {
+      throw Exception('Amount must be at least 0.01.');
+    }
+    final normalizedAmount = CurrencyUtils.fromMinorUnits(amountCents);
     final db = await _database;
     return await db.transaction((txn) async {
       final now = DateTime.now().toIso8601String();
-      // Find or create account
       var accountRows = await txn.query(
         'savings_accounts',
         where: 'customer_id = ?',
@@ -76,26 +80,32 @@ class SavingsRepository {
         await txn.insert('savings_accounts', {
           'id': accountId,
           'customer_id': customerId,
-          'balance': 0,
+          'balance': 0.0,
           'created_at': now,
         });
       } else {
         accountId = accountRows.first['id'] as String;
-        currentBalance =
-            (accountRows.first['balance'] as num?)?.toDouble() ?? 0.0;
+        final rawBalance = (accountRows.first['balance'] as num?)?.toDouble();
+        if (rawBalance == null || !rawBalance.isFinite || rawBalance < 0) {
+          throw StateError('Customer savings balance is invalid.');
+        }
+        currentBalance = CurrencyUtils.roundToCents(rawBalance);
       }
 
       if (type == SavingsTransactionType.withdrawal &&
-          amount > currentBalance) {
+          amountCents > CurrencyUtils.toMinorUnits(currentBalance)) {
         throw Exception(
             'Insufficient savings balance. Available: ${currentBalance.toStringAsFixed(2)}');
       }
 
-      final newBalance = CurrencyUtils.roundToCents(
-        type == SavingsTransactionType.withdrawal
-            ? currentBalance - amount
-            : currentBalance + amount,
-      );
+      final currentCents = CurrencyUtils.toMinorUnits(currentBalance);
+      final newBalanceCents = type == SavingsTransactionType.withdrawal
+          ? currentCents - amountCents
+          : currentCents + amountCents;
+      if (newBalanceCents < 0) {
+        throw StateError('Savings balance cannot become negative.');
+      }
+      final newBalance = CurrencyUtils.fromMinorUnits(newBalanceCents);
 
       await txn.update(
         'savings_accounts',
@@ -108,7 +118,7 @@ class SavingsRepository {
         id: const Uuid().v4(),
         savingsAccountId: accountId,
         type: type,
-        amount: amount,
+        amount: normalizedAmount,
         note: note,
         createdAt: now,
       );
@@ -117,24 +127,19 @@ class SavingsRepository {
     });
   }
 
-  /// Returns all savings accounts, newest first.
   Future<List<SavingsAccount>> getAllAccounts() async {
     final db = await _database;
     final rows = await db.query('savings_accounts', orderBy: 'created_at DESC');
     return rows.map(SavingsAccount.fromMap).toList(growable: false);
   }
 
-  /// Returns all savings accounts joined with customer names, newest first.
-  /// If [query] is provided, filters by customer name or phone.
   Future<List<Map<String, dynamic>>> getAllAccountsWithCustomerNames(
       {String query = ''}) async {
     final db = await _database;
     final where = query.isEmpty
         ? ''
         : ' AND (c.full_name LIKE ? OR c.phone LIKE ?)';
-    final args = query.isEmpty
-        ? []
-        : ['%$query%', '%$query%'];
+    final args = query.isEmpty ? [] : ['%$query%', '%$query%'];
     return await db.rawQuery('''
       SELECT
         sa.id AS id,
