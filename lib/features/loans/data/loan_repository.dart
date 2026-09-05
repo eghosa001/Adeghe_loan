@@ -55,9 +55,6 @@ class LoanRepository {
         await batch.commit(noResult: true);
         return const Result.success(null);
       });
-      // Best-effort derived rebuild: recomputes paid amounts/statuses from the
-      // completed payments + overpayment surplus so the stored schedule is
-      // exactly what another device would derive from the same source data.
       try {
         await _scheduleService?.rebuildSchedule(loan.id);
       } catch (_) {
@@ -70,10 +67,9 @@ class LoanRepository {
     }
   }
 
-  /// Rejects NaN/±Infinity/negative financial values at the repository
-  /// boundary. A non-finite value written through `toMap()` would be stored
-  /// as NULL (finding N9), and `Loan.fromMap`'s strict `(x as num)` casts
-  /// would then crash every screen that reads the loan.
+  /// Validates the complete financial shape before it is persisted. In
+  /// particular, a caller must not be able to save a schedule whose total or
+  /// installment count disagrees with the loan terms.
   Failure? _validateLoanFinances(
       Loan loan, List<RepaymentInstallment> schedule) {
     final nonNegative = <double>[
@@ -99,24 +95,35 @@ class LoanRepository {
     if (!loan.installmentAmount.isFinite || loan.installmentAmount < 0) {
       return const ValidationFailure('Loan installment amount is invalid.');
     }
-    // Duration cap at the repository boundary (defence-in-depth behind the
-    // form): a huge duration would allocate an unbounded schedule via
-    // List.generate (finding N2).
     if (loan.duration <= 0 || loan.duration > AppConstants.maxLoanDuration) {
       return ValidationFailure(
           'Loan duration must be between 1 and ${AppConstants.maxLoanDuration}.');
     }
+    if (schedule.length != loan.duration) {
+      return const ValidationFailure(
+          'Repayment schedule does not match the loan duration.');
+    }
+
     final custom = loan.customCollectionAmount;
     if (custom != null && (!custom.isFinite || custom <= 0)) {
       return const ValidationFailure(
           'Custom collection amount must be a valid amount.');
     }
+
+    var scheduleTotal = 0.0;
     for (final installment in schedule) {
       if (!installment.amount.isFinite || installment.amount <= 0 ||
-          !installment.paidAmount.isFinite || installment.paidAmount < 0) {
+          !installment.paidAmount.isFinite || installment.paidAmount < 0 ||
+          installment.paidAmount > installment.amount + 0.005) {
         return const ValidationFailure(
             'Repayment schedule contains an invalid amount.');
       }
+      scheduleTotal += installment.amount;
+    }
+    if (!scheduleTotal.isFinite ||
+        (scheduleTotal - loan.totalRepayment).abs() > 0.005) {
+      return const ValidationFailure(
+          'Repayment schedule total does not match the loan total repayment.');
     }
     return null;
   }
@@ -151,8 +158,6 @@ class LoanRepository {
     }
   }
 
-  /// All loans for a customer regardless of status (statements should include
-  /// completed/cancelled history, not just active loans).
   Future<Result<List<Loan>>> getLoansForCustomer(String customerId) async {
     try {
       final db = await _database;
@@ -170,10 +175,6 @@ class LoanRepository {
     }
   }
 
-  /// Updates a loan and fully replaces its repayment schedule in one
-  /// transaction. [paidSoFar] (the total the customer has already paid toward
-  /// the previous total) is applied to the fresh schedule so already-settled
-  /// installments stay marked paid/partial.
   Future<Result<void>> updateLoanAndSchedule(
     Loan loan,
     List<RepaymentInstallment> schedule, {
@@ -185,6 +186,20 @@ class LoanRepository {
       return Result.failure(const ValidationFailure(
           'Paid-so-far amount must be a valid non-negative number.'));
     }
+    if (paidSoFar > loan.totalRepayment + 0.005) {
+      return Result.failure(const ValidationFailure(
+          'Paid-so-far amount cannot exceed the new loan total repayment.'));
+    }
+
+    // The outstanding balance is derived from the immutable payment history
+    // supplied by the caller, not trusted from a separately editable field.
+    final expectedOutstanding =
+        (loan.totalRepayment - paidSoFar).clamp(0.0, loan.totalRepayment).toDouble();
+    if ((loan.outstandingBalance - expectedOutstanding).abs() > 0.005) {
+      return Result.failure(const ValidationFailure(
+          'Loan outstanding balance does not match the paid-so-far amount.'));
+    }
+
     try {
       final db = await _database;
       await db.transaction((txn) async {
@@ -214,8 +229,6 @@ class LoanRepository {
         }
         await batch.commit(noResult: true);
       });
-      // Best-effort derived rebuild so the stored schedule matches the derived
-      // one on a fresh device (see saveLoanAndSchedule).
       try {
         await _scheduleService?.rebuildSchedule(loan.id);
       } catch (_) {
@@ -240,11 +253,6 @@ class LoanRepository {
         return Result.failure(
             ValidationFailure('Loan is already closed.'));
       }
-      // Cancelling a loan with collected money would zero the outstanding
-      // balance while the completed payments still count toward "Total
-      // Collected" (and the loan drops out of "Disbursed") — the dashboard
-      // totals would stop reconciling. Refuse and ask for the payments to be
-      // reversed first.
       final paid = await db.rawQuery(
         'SELECT COUNT(*) AS count FROM payments '
         "WHERE loan_id = ? AND status = 'completed'",
