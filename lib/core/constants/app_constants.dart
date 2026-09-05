@@ -26,6 +26,7 @@ class AppConstants {
   static const String keyEncryptionKey = 'secure_file_encryption_key';
   static const String keyFailedAttempts = 'secure_failed_pin_attempts';
   static const String keyLockoutUntil = 'secure_lockout_until';
+  static const String keyLockoutStarted = 'secure_lockout_started';
   static const String keyLockoutCycles = 'secure_lockout_cycles';
   static const String keyPermanentLock = 'secure_permanent_lock';
   static const String keyRecoveryPasswordHash = 'secure_recovery_password_hash';
