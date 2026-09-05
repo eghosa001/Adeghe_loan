@@ -59,6 +59,16 @@ PaymentAmounts computePaymentSplit({
   // Work in integer minor units so loan + savings always reconciles to the
   // entered currency amount after rounding.
   final paymentCents = CurrencyUtils.toMinorUnits(paymentAmount);
+  if (paymentCents <= 0) {
+    // The database and reports operate at two-decimal currency precision.
+    // Without this guard a positive sub-cent input such as 0.004 would be
+    // accepted but silently become a zero-value payment after rounding.
+    throw ArgumentError.value(
+      paymentAmount,
+      'paymentAmount',
+      'must be at least 0.01 in the configured currency precision',
+    );
+  }
   final capCents = CurrencyUtils.toMinorUnits(cap);
   final loanPaidCents = min(paymentCents, capCents);
   final surplusCents = paymentCents - loanPaidCents;
