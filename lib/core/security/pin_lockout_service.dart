@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import '../constants/app_constants.dart';
@@ -13,49 +14,45 @@ import 'secure_key_value_store.dart';
 ///  * After `maxLockoutCycles` lockouts the device is PERMANENTLY locked. The
 ///    only way back in is the recovery password via Forgot PIN, which is a
 ///    long, high-entropy secret hashed with PBKDF2.
-///  * The lockout start time is persisted as well as its deadline. If the
-///    device clock is moved backwards while locked, the service fails closed
-///    rather than treating the lockout as expired. A wall-clock jump forward
-///    can still expire a lockout early; a true monotonic clock cannot be
-///    persisted reliably across an app restart, so this is deliberately
-///    conservative about rollback rather than claiming clock-proof security.
+///  * Lockout state is serialized so concurrent failed-attempt callbacks cannot
+///    overwrite each other's counters. Corrupt or incomplete persisted lockout
+///    state fails closed by permanently locking the local authentication gate.
 class PinLockoutService {
   PinLockoutService(this._storage);
 
   final SecureKeyValueStore _storage;
+  Future<void>? _mutationTail;
 
   int get maxAttempts => AppConstants.maxPinAttempts;
   Duration get lockoutDuration => AppConstants.lockoutDuration;
 
-  /// Whether the user is currently locked out, including a permanent lock.
   Future<bool> isLockedOut() async {
     if (await isPermanentlyLocked()) return true;
+    if (await _hasCorruptLockoutState()) {
+      await _failClosed();
+      return true;
+    }
     final until = await _lockoutUntil();
     if (until == null) return false;
     final now = DateTime.now();
     final started = await _lockoutStarted();
-
-    // A wall-clock rollback must never make an active lockout appear expired.
-    // Keep the lock until the persisted deadline is reached in wall time.
     if (started != null && now.isBefore(started)) return true;
     if (now.isBefore(until)) return true;
-
     await _clearActiveLockout();
     return false;
   }
 
-  /// After [AppConstants.maxLockoutCycles] lockouts the device is permanently
-  /// locked. Only the recovery password can unlock it again.
   Future<bool> isPermanentlyLocked() async {
     final value = await _storage.read(AppConstants.keyPermanentLock);
     return value == '1';
   }
 
-  /// Remaining lockout duration, or null when not locked out. Returns a long
-  /// fixed duration for a permanent lock so callers show a stable "locked"
-  /// state instead of a nonsense countdown.
   Future<Duration?> remainingLockout() async {
     if (await isPermanentlyLocked()) {
+      return AppConstants.lockoutMaxDuration;
+    }
+    if (await _hasCorruptLockoutState()) {
+      await _failClosed();
       return AppConstants.lockoutMaxDuration;
     }
     final until = await _lockoutUntil();
@@ -63,9 +60,6 @@ class PinLockoutService {
     final now = DateTime.now();
     final started = await _lockoutStarted();
     if (started != null && now.isBefore(started)) {
-      // Clock rollback: report the original lockout duration rather than a
-      // misleading negative/expired countdown. `isLockedOut()` remains the
-      // authoritative gate.
       return AppConstants.lockoutMaxDuration;
     }
     final remaining = until.difference(now);
@@ -76,50 +70,61 @@ class PinLockoutService {
     return remaining;
   }
 
-  /// Attempts left before the next lockout. Only meaningful when not locked
-  /// out (the counter is cleared when a lockout starts).
   Future<int> remainingAttempts() async {
     if (await isPermanentlyLocked()) return 0;
     final attempts = await _failedAttempts();
     return max(0, maxAttempts - attempts);
   }
 
-  /// Records a failed attempt. Returns true when this attempt starts (or
-  /// continues) a lockout.
-  Future<bool> registerFailedAttempt() async {
-    if (await isPermanentlyLocked()) return true;
-    final attempts = await _failedAttempts();
-    final next = attempts + 1;
-    if (next < maxAttempts) {
-      await _storage.write(AppConstants.keyFailedAttempts, '$next');
-      return false;
-    }
-    await _storage.remove(AppConstants.keyFailedAttempts);
-    final cycles = await _lockoutCycles() + 1;
-    await _storage.write(AppConstants.keyLockoutCycles, '$cycles');
-    if (cycles >= AppConstants.maxLockoutCycles) {
-      await _storage.write(AppConstants.keyPermanentLock, '1');
+  /// Serializes mutations because secure storage is not an atomic counter.
+  Future<bool> registerFailedAttempt() {
+    return _serializeMutation(() async {
+      if (await isPermanentlyLocked()) return true;
+      if (await _hasCorruptLockoutState()) {
+        await _failClosed();
+        return true;
+      }
+
+      final until = await _lockoutUntil();
+      final started = await _lockoutStarted();
+      if (until != null && started != null) {
+        final now = DateTime.now();
+        if (now.isBefore(started) || now.isBefore(until)) return true;
+        await _clearActiveLockout();
+      }
+
+      final attempts = await _failedAttempts();
+      final next = attempts + 1;
+      if (next < maxAttempts) {
+        await _storage.write(AppConstants.keyFailedAttempts, '$next');
+        return false;
+      }
+      await _storage.remove(AppConstants.keyFailedAttempts);
+      final cycles = await _lockoutCycles() + 1;
+      await _storage.write(AppConstants.keyLockoutCycles, '$cycles');
+      if (cycles >= AppConstants.maxLockoutCycles) {
+        await _storage.write(AppConstants.keyPermanentLock, '1');
+        await _clearActiveLockout();
+      } else {
+        final startedAt = DateTime.now();
+        final untilAt = startedAt.add(_escalatedDuration(cycles));
+        await _storage.write(
+            AppConstants.keyLockoutStarted, startedAt.toIso8601String());
+        await _storage.write(
+            AppConstants.keyLockoutUntil, untilAt.toIso8601String());
+      }
+      return true;
+    });
+  }
+
+  Future<void> reset() {
+    return _serializeMutation(() async {
       await _clearActiveLockout();
-    } else {
-      final started = DateTime.now();
-      final until = started.add(_escalatedDuration(cycles));
-      await _storage.write(
-          AppConstants.keyLockoutStarted, started.toIso8601String());
-      await _storage.write(
-          AppConstants.keyLockoutUntil, until.toIso8601String());
-    }
-    return true;
+      await _storage.remove(AppConstants.keyLockoutCycles);
+      await _storage.remove(AppConstants.keyPermanentLock);
+    });
   }
 
-  /// Clears the counter, any active lockout, and lockout cycles (after a
-  /// successful unlock or recovery).
-  Future<void> reset() async {
-    await _clearActiveLockout();
-    await _storage.remove(AppConstants.keyLockoutCycles);
-    await _storage.remove(AppConstants.keyPermanentLock);
-  }
-
-  /// Doubles the base lockout each cycle, capped at [AppConstants.lockoutMaxDuration].
   Duration _escalatedDuration(int cycles) {
     final multiplier = 1 << min(cycles - 1, 16);
     final duration = lockoutDuration * multiplier;
@@ -130,12 +135,19 @@ class PinLockoutService {
 
   Future<int> _failedAttempts() async {
     final value = await _storage.read(AppConstants.keyFailedAttempts);
-    return int.tryParse(value ?? '') ?? 0;
+    final parsed = int.tryParse(value ?? '');
+    if (parsed == null || parsed < 0 || parsed >= maxAttempts) {
+      if (value == null) return 0;
+      return maxAttempts;
+    }
+    return parsed;
   }
 
   Future<int> _lockoutCycles() async {
     final value = await _storage.read(AppConstants.keyLockoutCycles);
-    return int.tryParse(value ?? '') ?? 0;
+    final parsed = int.tryParse(value ?? '');
+    if (parsed == null || parsed < 0) return AppConstants.maxLockoutCycles;
+    return parsed;
   }
 
   Future<DateTime?> _lockoutUntil() async {
@@ -150,9 +162,49 @@ class PinLockoutService {
     return DateTime.tryParse(value);
   }
 
+  Future<bool> _hasCorruptLockoutState() async {
+    final untilRaw = await _storage.read(AppConstants.keyLockoutUntil);
+    final startedRaw = await _storage.read(AppConstants.keyLockoutStarted);
+    final attemptsRaw = await _storage.read(AppConstants.keyFailedAttempts);
+    final cyclesRaw = await _storage.read(AppConstants.keyLockoutCycles);
+
+    final hasUntil = untilRaw != null;
+    final hasStarted = startedRaw != null;
+    if (hasUntil != hasStarted) return true;
+    if (hasUntil) {
+      final until = DateTime.tryParse(untilRaw!);
+      final started = DateTime.tryParse(startedRaw!);
+      if (until == null || started == null || !started.isBefore(until)) {
+        return true;
+      }
+    }
+    final attempts = int.tryParse(attemptsRaw ?? '0');
+    if (attempts == null || attempts < 0 || attempts >= maxAttempts) return true;
+    final cycles = int.tryParse(cyclesRaw ?? '0');
+    if (cycles == null || cycles < 0) return true;
+    return false;
+  }
+
+  Future<void> _failClosed() async {
+    await _storage.write(AppConstants.keyPermanentLock, '1');
+    await _clearActiveLockout();
+  }
+
   Future<void> _clearActiveLockout() async {
     await _storage.remove(AppConstants.keyLockoutUntil);
     await _storage.remove(AppConstants.keyLockoutStarted);
     await _storage.remove(AppConstants.keyFailedAttempts);
+  }
+
+  Future<T> _serializeMutation<T>(Future<T> Function() action) async {
+    final previous = _mutationTail;
+    final done = Completer<void>();
+    _mutationTail = done.future;
+    if (previous != null) await previous;
+    try {
+      return await action();
+    } finally {
+      if (!done.isCompleted) done.complete();
+    }
   }
 }
