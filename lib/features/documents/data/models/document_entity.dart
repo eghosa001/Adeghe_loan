@@ -29,6 +29,13 @@ extension CustomerDocumentTypeLabel on CustomerDocumentType {
       orElse: () => CustomerDocumentType.other,
     );
   }
+
+  static CustomerDocumentType strictFromValue(String? value) {
+    for (final type in CustomerDocumentType.values) {
+      if (type.name == value) return type;
+    }
+    throw FormatException('Unknown document type: $value');
+  }
 }
 
 class CustomerDocument {
@@ -66,16 +73,42 @@ class CustomerDocument {
         'uploaded_at': uploadedAt.toIso8601String(),
       };
 
-  factory CustomerDocument.fromMap(Map<String, Object?> map) =>
-      CustomerDocument(
-        id: map['id']! as String,
-        customerId: map['customer_id']! as String,
-        loanId: map['loan_id'] as String?,
-        type: CustomerDocumentTypeLabel.fromValue(map['doc_type'] as String?),
-        encryptedPath: map['file_path']! as String,
-        originalName: map['original_name'] as String? ?? 'Document',
-        mimeType: map['mime_type'] as String? ?? 'application/octet-stream',
-        uploadedAt: DateTime.tryParse(map['uploaded_at']! as String) ??
-            DateTime.fromMillisecondsSinceEpoch(0),
-      );
+  factory CustomerDocument.fromMap(Map<String, Object?> map) {
+    String requiredString(String key) {
+      final value = map[key];
+      if (value is! String || value.trim().isEmpty) {
+        throw FormatException('Invalid document field: $key');
+      }
+      return value;
+    }
+
+    final uploadedRaw = requiredString('uploaded_at');
+    final uploadedAt = DateTime.tryParse(uploadedRaw);
+    if (uploadedAt == null) {
+      throw FormatException('Invalid document date: $uploadedRaw');
+    }
+
+    final mimeType = requiredString('mime_type');
+    const supportedMimeTypes = {
+      'application/pdf',
+      'image/png',
+      'image/jpeg',
+    };
+    if (!supportedMimeTypes.contains(mimeType)) {
+      throw FormatException('Unsupported document MIME type: $mimeType');
+    }
+
+    return CustomerDocument(
+      id: requiredString('id'),
+      customerId: requiredString('customer_id'),
+      loanId: (map['loan_id'] as String?)?.trim().isEmpty == true
+          ? null
+          : map['loan_id'] as String?,
+      type: CustomerDocumentTypeLabel.strictFromValue(map['doc_type'] as String?),
+      encryptedPath: requiredString('file_path'),
+      originalName: requiredString('original_name'),
+      mimeType: mimeType,
+      uploadedAt: uploadedAt,
+    );
+  }
 }
