@@ -311,8 +311,6 @@ class BackupService {
             await _secureStorage.setDatabaseKey(recoveredDbKey);
             keyChanged = true;
           }
-          if (await rollbackFile.exists()) await rollbackFile.delete();
-          if (await docsRollbackDirectory.exists()) await docsRollbackDirectory.delete(recursive: true);
         } catch (_) {
           try {
             if (documentsSwapped) {
@@ -331,6 +329,9 @@ class BackupService {
           rethrow;
         }
       });
+
+      if (await rollbackFile.exists()) await rollbackFile.delete();
+      if (await docsRollbackDirectory.exists()) await docsRollbackDirectory.delete(recursive: true);
     } finally {
       _transferInProgress = false;
     }
