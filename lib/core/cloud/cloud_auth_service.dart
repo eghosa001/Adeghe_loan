@@ -68,7 +68,15 @@ class CloudAuthService {
     await instanceClient.auth
         .signInWithPassword(email: email, password: password);
     final user = instanceClient.auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      // Fail closed. A successful Auth call without a usable session must never
+      // leave an indeterminate authenticated state that callers could mistake
+      // for a valid owner session.
+      try {
+        await instanceClient.auth.signOut();
+      } catch (_) {}
+      throw StateError('Cloud sign-in did not create a valid session.');
+    }
     try {
       final claim = await _callRpc('claim_owner');
       if (claim == emailNotAuthorizedCode) {
