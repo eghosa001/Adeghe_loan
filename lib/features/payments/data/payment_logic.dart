@@ -55,6 +55,11 @@ PaymentAmounts computePaymentSplit({
     throw ArgumentError.value(outstandingBalance, 'outstandingBalance',
         'must be a finite number >= 0');
   }
+  if (installmentDue != null &&
+      (!installmentDue.isFinite || installmentDue < 0)) {
+    throw ArgumentError.value(installmentDue, 'installmentDue',
+        'must be null or a finite number >= 0');
+  }
 
   // The cap is the unpaid installment — but never more than what is actually
   // owed. Without the clamp a payment on a nearly-settled loan whose
@@ -65,17 +70,22 @@ PaymentAmounts computePaymentSplit({
       ? min(installmentDue, outstandingBalance)
       : outstandingBalance;
   final rawLoanPaid = min(paymentAmount, cap);
-  // Round to cents so floating-point dust (e.g. 0.001 surpluses) never lands
-  // in the savings balance or the loan balance.
-  final loanPaid = CurrencyUtils.roundToCents(rawLoanPaid);
-  final surplus = CurrencyUtils.roundToCents(paymentAmount - rawLoanPaid);
-  final newBalance =
-      CurrencyUtils.roundToCents(max(0.0, outstandingBalance - loanPaid));
+
+  // Perform the split in minor units so the two destinations always reconcile
+  // exactly to the entered payment after currency rounding. Doing the surplus
+  // calculation from [rawLoanPaid] while rounding [loanPaid] separately can
+  // otherwise create a one-cent accounting mismatch at half-cent boundaries.
+  final paymentCents = CurrencyUtils.toMinorUnits(paymentAmount);
+  final capCents = CurrencyUtils.toMinorUnits(cap);
+  final loanPaidCents = min(paymentCents, capCents);
+  final surplusCents = paymentCents - loanPaidCents;
+  final outstandingCents = CurrencyUtils.toMinorUnits(outstandingBalance);
+  final newBalanceCents = max(0, outstandingCents - loanPaidCents);
 
   return PaymentAmounts(
-    appliedToLoan: loanPaid,
-    overpaymentSurplus: surplus,
-    newLoanBalance: newBalance,
+    appliedToLoan: CurrencyUtils.fromMinorUnits(loanPaidCents),
+    overpaymentSurplus: CurrencyUtils.fromMinorUnits(surplusCents),
+    newLoanBalance: CurrencyUtils.fromMinorUnits(newBalanceCents),
   );
 }
 
