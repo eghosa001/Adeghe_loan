@@ -10,9 +10,10 @@ import 'package:path_provider/path_provider.dart';
 import '../constants/app_constants.dart';
 import '../security/secure_storage_service.dart';
 import 'migrations.dart';
+import 'cloud_sync_schema_migration.dart';
 
 class DatabaseService {
-  static const int _databaseVersion = 24;
+  static const int _databaseVersion = 25;
   final SecureStorageService _secureStorage;
   final Future<Database> Function()? _openOverride;
 
@@ -93,10 +94,6 @@ class DatabaseService {
     }
   }
 
-  /// Opens a database file read-only with the supplied SQLCipher key and checks
-  /// its schema version. This is deliberately independent of local secure
-  /// storage so a portable backup can be validated with the key recovered from
-  /// its authenticated manifest before replacing the live database.
   Future<bool> verifyDatabaseFile(String path, {String? encryptionKey}) async {
     final key = encryptionKey ?? await _secureStorage.getDatabaseKey();
     Database? db;
@@ -178,9 +175,13 @@ class DatabaseService {
     await db.execute('''CREATE TABLE savings_transactions (id TEXT PRIMARY KEY, savings_account_id TEXT NOT NULL, type TEXT NOT NULL, amount REAL NOT NULL, reference_loan_payment_id TEXT, note TEXT, created_at TEXT NOT NULL, updated_at TEXT, FOREIGN KEY (savings_account_id) REFERENCES savings_accounts(id) ON DELETE CASCADE)''');
     await _createIndexes(db);
     await DatabaseMigrations.createSyncSchema(db);
+    await CloudSyncSchemaMigration.install(db);
   }
 
-  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async => DatabaseMigrations.run(db, oldVersion, newVersion);
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    await DatabaseMigrations.run(db, oldVersion, newVersion);
+    if (oldVersion < 25) await CloudSyncSchemaMigration.install(db);
+  }
 
   Future<void> _createIndexes(Database db) async {
     await db.execute('CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(full_name)');
