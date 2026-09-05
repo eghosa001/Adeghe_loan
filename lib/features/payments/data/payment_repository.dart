@@ -1,5 +1,3 @@
-import 'dart:math' show min, max;
-
 import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
@@ -47,8 +45,7 @@ class PaymentRepository {
     final paidResult = await txn.rawQuery('''
       SELECT COALESCE(SUM(p.amount - COALESCE(st.amount, 0.0)), 0.0) AS total
       FROM payments p
-      LEFT JOIN savings_transactions st
-        ON st.reference_loan_payment_id = p.id AND st.type = 'overpayment'
+      LEFT JOIN savings_transactions st ON st.reference_loan_payment_id = p.id AND st.type = 'overpayment'
       WHERE p.loan_id = ? AND p.status = 'completed'
     ''', [loanId]);
     double totalPaid = (paidResult.first['total'] as num?)?.toDouble() ?? 0.0;
