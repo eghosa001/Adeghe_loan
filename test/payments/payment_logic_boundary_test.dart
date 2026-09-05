@@ -62,4 +62,36 @@ void main() {
       );
     });
   });
+
+  group('computeSavingsReversal accounting boundaries', () {
+    test('reverses the full overpayment when savings can cover it', () {
+      final result = computeSavingsReversal(
+        balance: 100.00,
+        overpaymentSurplus: 25.00,
+      );
+
+      expect(result.$1, 75.00);
+      expect(result.$2, 25.00);
+    });
+
+    test('rejects partial reversal when savings cannot cover the credit', () {
+      expect(
+        () => computeSavingsReversal(
+          balance: 10.00,
+          overpaymentSurplus: 25.00,
+        ),
+        throwsStateError,
+      );
+    });
+
+    test('rejects non-finite savings balance', () {
+      expect(
+        () => computeSavingsReversal(
+          balance: double.infinity,
+          overpaymentSurplus: 1.00,
+        ),
+        throwsArgumentError,
+      );
+    });
+  });
 }
