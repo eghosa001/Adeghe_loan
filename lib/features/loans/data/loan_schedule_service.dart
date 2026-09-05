@@ -59,20 +59,27 @@ class LoanScheduleService {
     final effectiveHolidays = holidays ?? (await db.query('holidays'))
         .map((row) => Holiday.fromMap(row)).toList(growable: false);
     final effectiveApplied = totalAppliedToLoan ?? await _loadApplied(db, loan.id);
+    if (!effectiveApplied.isFinite || effectiveApplied < 0) {
+      throw StateError('Cannot rebuild loan ${loan.id}: applied payment total is invalid.');
+    }
+
     final remaining = (loan.totalRepayment - effectiveApplied)
         .clamp(0.0, loan.totalRepayment).toDouble();
 
-    if (loan.status != LoanStatus.cancelled && loan.status != LoanStatus.pending) {
-      await db.update('loans', {
-        'outstanding_balance': remaining,
-        'status': remaining <= 0.005 ? LoanStatus.completed.name : LoanStatus.active.name,
-      }, where: 'id = ?', whereArgs: [loan.id]);
-    }
-
-    final result = LoanScheduleCalculator.build(
-      loan: loan, holidays: effectiveHolidays, totalAppliedToLoan: effectiveApplied,
-    );
+    // Loan balance/status and its derived repayment schedule are one logical
+    // state. Updating the loan first and the schedule in a separate transaction
+    // could leave them disagreeing after an interruption. Commit both together.
     await db.transaction((txn) async {
+      if (loan.status != LoanStatus.cancelled && loan.status != LoanStatus.pending) {
+        await txn.update('loans', {
+          'outstanding_balance': remaining,
+          'status': remaining <= 0.005 ? LoanStatus.completed.name : LoanStatus.active.name,
+        }, where: 'id = ?', whereArgs: [loan.id]);
+      }
+
+      final result = LoanScheduleCalculator.build(
+        loan: loan, holidays: effectiveHolidays, totalAppliedToLoan: effectiveApplied,
+      );
       await txn.delete('repayment_schedule', where: 'loan_id = ?', whereArgs: [loan.id]);
       final batch = txn.batch();
       for (final installment in result.installments) {
