@@ -24,8 +24,6 @@ class PaymentRepository {
     return 'REC-$date-${const Uuid().v4().substring(0, 8)}';
   }
 
-  /// Applies [amount] to pending/partial repayment_schedule entries for [loanId]
-  /// in due-date order, marking each as 'paid' or 'partial' accordingly.
   Future<void> _applyPaymentToSchedule(
       Transaction txn, String loanId, double amount) async {
     final pendingSchedules = await txn.rawQuery(
@@ -64,8 +62,6 @@ class PaymentRepository {
     await batch.commit(noResult: true);
   }
 
-  /// Recalculates repayment_schedule statuses from scratch using the total
-  /// amount actually applied to the loan for each completed payment.
   Future<void> _recalculateScheduleFromPayments(
       Transaction txn, String loanId) async {
     final paidResult = await txn.rawQuery(
@@ -123,8 +119,6 @@ class PaymentRepository {
     await batch.commit(noResult: true);
   }
 
-  /// Credits a surplus amount to the customer's savings account and records
-  /// the transaction. Called inside an active [txn].
   Future<void> _creditOverpaymentToSavings(
     Transaction txn,
     String customerId,
@@ -189,18 +183,11 @@ class PaymentRepository {
     double? installmentDue,
     String? clientRequestId,
   }) async {
-    // Guard at the repository boundary: NaN/±Infinity (e.g. "1e309") would
-    // otherwise flow into the schedule math and be stored as NULL, crashing
-    // every payment-list read via `Payment.fromMap (amount as num)`.
     if (!amount.isFinite || amount <= 0) {
       throw Exception('Invalid payment amount. Please enter a valid amount.');
     }
     final db = await _db;
     final payment = await db.transaction((txn) async {
-      // Idempotency: if the caller supplied a client-side request key that was
-      // already recorded, return the existing payment instead of applying the
-      // payment a second time. This stops a double-tap or a retry of the same
-      // logical payment from creating a duplicate.
       if (clientRequestId != null && clientRequestId.trim().isNotEmpty) {
         final existing = await txn.query(
           'payments',
@@ -218,11 +205,11 @@ class PaymentRepository {
       if (loanRows.isEmpty) throw Exception('Loan not found');
 
       final loan = loanRows.first;
-      // Money can only be applied to an open (active/defaulted) loan. Rejecting
-      // completed/cancelled loans at the repository boundary (not just in the
-      // UI) prevents a deep-link or direct call from recording a payment on a
-      // closed loan, which would otherwise credit the whole amount to savings
-      // with no loan offset.
+      final loanCustomerId = loan['customer_id'] as String?;
+      if (loanCustomerId == null || loanCustomerId != customerId) {
+        throw Exception('Loan does not belong to the specified customer.');
+      }
+
       final loanStatusBefore = loan['status'] as String? ?? 'active';
       if (loanStatusBefore == 'completed' ||
           loanStatusBefore == 'cancelled') {
@@ -232,10 +219,6 @@ class PaymentRepository {
       final outstanding = (loan['outstanding_balance'] as num).toDouble();
       final priorLoanStatus = loan['status'] as String;
 
-      // The loan receives the payment up to the current installment due;
-      // any excess over the installment is credited to savings. When no
-      // installment context is supplied the payment caps at the outstanding
-      // balance so full settlements apply entirely to the loan.
       final split = computePaymentSplit(
         paymentAmount: amount,
         outstandingBalance: outstanding,
@@ -243,10 +226,6 @@ class PaymentRepository {
       );
       final loanStatus = split.newLoanBalance <= 0.005 ? 'completed' : 'active';
 
-      // Optimistic compare-and-swap: only apply this payment if the outstanding
-      // balance is still exactly what we computed against. If another write
-      // already moved it (a concurrent/duplicate repayment), the update affects
-      // 0 rows and we abort rather than double-apply against a stale balance.
       final updated = await txn.rawUpdate(
         'UPDATE loans SET outstanding_balance = ?, status = ? '
         'WHERE id = ? AND outstanding_balance = ?',
@@ -271,8 +250,11 @@ class PaymentRepository {
         receiptNumber: receiptNumber,
         paymentDate: DateTime.now(),
         collector: collector,
-        type: split.overpaymentSurplus > 0 ? PaymentType.overpayment :
-              (split.newLoanBalance <= 0.005 ? PaymentType.full : PaymentType.partial),
+        type: split.overpaymentSurplus > 0
+            ? PaymentType.overpayment
+            : (split.newLoanBalance <= 0.005
+                ? PaymentType.full
+                : PaymentType.partial),
         status: PaymentStatus.completed,
         remarks: remarks,
         priorLoanStatus: priorLoanStatus,
@@ -288,13 +270,9 @@ class PaymentRepository {
 
       return payment;
     });
-    // Best-effort derived rebuild so the stored schedule matches what another
-    // device derives from the same source data (payments + savings surplus).
     try {
       await _scheduleService?.rebuildSchedule(loanId);
-    } catch (_) {
-      // The transaction already marked the schedule paid.
-    }
+    } catch (_) {}
     return payment;
   }
 
@@ -336,8 +314,6 @@ class PaymentRepository {
           ? 0.0
           : (savingsCreditRows.first['amount'] as num).toDouble();
 
-      // A loan cleared with savings withdrew from the savings account; the
-      // reversal must refund that withdrawal back into savings.
       final savingsWithdrawalRows = await txn.query(
         'savings_transactions',
         where: 'reference_loan_payment_id = ? AND type = ?',
@@ -348,7 +324,38 @@ class PaymentRepository {
           ? 0.0
           : (savingsWithdrawalRows.first['amount'] as num).toDouble();
 
-      final appliedToLoan = max(0.0, amount - overpaymentSurplus);
+      // Validate the savings side BEFORE changing payment/loan state. An
+      // overpayment reversal is atomic: either the entire savings credit is
+      // removed or nothing is reversed.
+      String? savingsAccountId;
+      double? savingsNewBalance;
+      if (overpaymentSurplus > 0) {
+        final accountRows = await txn.query(
+          'savings_accounts',
+          columns: ['id', 'balance'],
+          where: 'customer_id = ?',
+          whereArgs: [customerId],
+          limit: 1,
+        );
+        if (accountRows.isEmpty) {
+          throw StateError(
+              'Cannot reverse this payment: the required savings account is missing.');
+        }
+        final accountId = accountRows.first['id'] as String;
+        final currentBalance =
+            (accountRows.first['balance'] as num?)?.toDouble() ?? 0.0;
+        final reversal = computeSavingsReversal(
+          balance: currentBalance,
+          overpaymentSurplus: overpaymentSurplus,
+        );
+        savingsAccountId = accountId;
+        savingsNewBalance = reversal.$1;
+      }
+
+      final appliedToLoan = computeReversalLoanDelta(
+        paymentAmount: amount,
+        overpaymentSurplus: overpaymentSurplus,
+      );
 
       await txn.update(
         'payments',
@@ -358,11 +365,6 @@ class PaymentRepository {
       );
 
       final storedPriorStatus = payment['prior_loan_status'] as String?;
-      // Restore the exact pre-payment status (e.g. 'defaulted') recorded when
-      // the payment was created. For legacy rows without the column, fall back
-      // to 'active' — NEVER the loan's current status: after a full payment the
-      // current status is 'completed', and restoring that would leave the loan
-      // stuck as "completed" with a freshly-restored positive balance.
       final previousStatus = storedPriorStatus ?? 'active';
       await txn.rawUpdate(
         'UPDATE loans SET outstanding_balance = outstanding_balance + ?, '
@@ -370,38 +372,23 @@ class PaymentRepository {
         [appliedToLoan, previousStatus, capturedLoanId],
       );
 
-      if (overpaymentSurplus > 0) {
-        final accountRows = await txn.query(
+      if (savingsAccountId != null && savingsNewBalance != null) {
+        await txn.update(
           'savings_accounts',
-          columns: ['id', 'balance'],
-          where: 'customer_id = ?',
-          whereArgs: [customerId],
-          limit: 1,
+          {'balance': savingsNewBalance},
+          where: 'id = ?',
+          whereArgs: [savingsAccountId],
         );
-        if (accountRows.isNotEmpty) {
-          final accountId = accountRows.first['id'] as String;
-          final currentBalance =
-              (accountRows.first['balance'] as num?)?.toDouble() ?? 0.0;
-          final toDeduct = min(overpaymentSurplus, currentBalance);
-          final newBalance = currentBalance - toDeduct;
 
-          await txn.update(
-            'savings_accounts',
-            {'balance': newBalance},
-            where: 'id = ?',
-            whereArgs: [accountId],
-          );
-
-          await txn.insert('savings_transactions', {
-            'id': const Uuid().v4(),
-            'savings_account_id': accountId,
-            'type': 'withdrawal',
-            'amount': toDeduct,
-            'reference_loan_payment_id': paymentId,
-            'note': 'Overpayment reversal — Loan: $capturedLoanId',
-            'created_at': DateTime.now().toIso8601String(),
-          });
-        }
+        await txn.insert('savings_transactions', {
+          'id': const Uuid().v4(),
+          'savings_account_id': savingsAccountId,
+          'type': 'withdrawal',
+          'amount': overpaymentSurplus,
+          'reference_loan_payment_id': paymentId,
+          'note': 'Overpayment reversal — Loan: $capturedLoanId',
+          'created_at': DateTime.now().toIso8601String(),
+        });
       }
 
       if (savingsToRefund > 0) {
@@ -412,42 +399,39 @@ class PaymentRepository {
           whereArgs: [customerId],
           limit: 1,
         );
-        if (accountRows.isNotEmpty) {
-          final accountId = accountRows.first['id'] as String;
-          final currentBalance =
-              (accountRows.first['balance'] as num?)?.toDouble() ?? 0.0;
-          final newBalance = currentBalance + savingsToRefund;
-
-          await txn.update(
-            'savings_accounts',
-            {'balance': newBalance},
-            where: 'id = ?',
-            whereArgs: [accountId],
-          );
-
-          await txn.insert('savings_transactions', {
-            'id': const Uuid().v4(),
-            'savings_account_id': accountId,
-            'type': 'deposit',
-            'amount': savingsToRefund,
-            'reference_loan_payment_id': paymentId,
-            'note': 'Savings-cleared payment reversal — Loan: $capturedLoanId',
-            'created_at': DateTime.now().toIso8601String(),
-          });
+        if (accountRows.isEmpty) {
+          throw StateError(
+              'Cannot refund savings-cleared payment: savings account is missing.');
         }
+        final accountId = accountRows.first['id'] as String;
+        final currentBalance =
+            (accountRows.first['balance'] as num?)?.toDouble() ?? 0.0;
+        final newBalance = currentBalance + savingsToRefund;
+
+        await txn.update(
+          'savings_accounts',
+          {'balance': newBalance},
+          where: 'id = ?',
+          whereArgs: [accountId],
+        );
+
+        await txn.insert('savings_transactions', {
+          'id': const Uuid().v4(),
+          'savings_account_id': accountId,
+          'type': 'deposit',
+          'amount': savingsToRefund,
+          'reference_loan_payment_id': paymentId,
+          'note': 'Savings-cleared payment reversal — Loan: $capturedLoanId',
+          'created_at': DateTime.now().toIso8601String(),
+        });
       }
 
       await _recalculateScheduleFromPayments(txn, capturedLoanId);
-      // Return capturedLoanId for the post-transaction rebuild
       return capturedLoanId;
     });
-    // Best-effort derived rebuild after the reversal so the stored schedule
-    // matches the derived one from the remaining completed payments.
     try {
       await _scheduleService?.rebuildSchedule(capturedLoanId);
-    } catch (_) {
-      // The transaction already recalculated the schedule.
-    }
+    } catch (_) {}
   }
 
   Future<List<Payment>> getPaymentsForLoan(String loanId) async {
@@ -456,14 +440,11 @@ class PaymentRepository {
       'payments',
       where: 'loan_id = ?',
       whereArgs: [loanId],
-      // created_at breaks the same-day tie (payment_date is a date-only
-      // string) so payments recorded minutes apart render in a stable order.
       orderBy: 'payment_date DESC, created_at DESC',
     );
     return rows.map((e) => Payment.fromMap(e)).toList(growable: false);
   }
 
-  /// Clears an active loan using the customer's savings balance.
   Future<void> clearLoanWithSavings({
     required String loanId,
     required String customerId,
@@ -474,6 +455,10 @@ class PaymentRepository {
           await txn.query('loans', where: 'id = ?', whereArgs: [loanId]);
       if (loanRows.isEmpty) throw Exception('Loan not found.');
       final loan = loanRows.first;
+      final loanCustomerId = loan['customer_id'] as String?;
+      if (loanCustomerId == null || loanCustomerId != customerId) {
+        throw Exception('Loan does not belong to the specified customer.');
+      }
       final outstanding = (loan['outstanding_balance'] as num).toDouble();
       if (!outstanding.isFinite || outstanding <= 0) {
         throw Exception('Loan has no valid outstanding balance.');
@@ -524,16 +509,11 @@ class PaymentRepository {
         collector: 'System — Savings',
         type: PaymentType.full,
         status: PaymentStatus.completed,
-        // The loan was active (checked above); record that so a reversal can
-        // restore 'active' instead of leaving it stuck on 'completed' with a
-        // positive outstanding balance.
         priorLoanStatus: 'active',
         createdAt: DateTime.now(),
       );
       await txn.insert('payments', payment.toMap());
 
-      // Link the savings withdrawal to the payment so reversing the payment
-      // can refund the exact amount back into savings.
       await txn.insert('savings_transactions', {
         'id': const Uuid().v4(),
         'savings_account_id': accountId,
@@ -557,13 +537,8 @@ class PaymentRepository {
         whereArgs: [loanId],
       );
     });
-    // Best-effort derived rebuild so the stored schedule reflects the savings
-    // clear (all installments paid). The rebuild excludes the linked savings
-    // withdrawal from the applied total — a savings clear is fully loan-applied.
     try {
       await _scheduleService?.rebuildSchedule(loanId);
-    } catch (_) {
-      // The transaction already marked the schedule paid.
-    }
+    } catch (_) {}
   }
 }
