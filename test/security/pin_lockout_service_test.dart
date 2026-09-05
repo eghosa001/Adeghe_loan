@@ -44,4 +44,36 @@ void main() {
     expect(store.values[AppConstants.keyLockoutStarted], isNull);
     expect(store.values[AppConstants.keyLockoutUntil], isNull);
   });
+
+  test('concurrent failures are serialized and cannot lose attempts', () async {
+    final store = _MemoryStore();
+    final service = PinLockoutService(store);
+
+    final results = await Future.wait(
+      List.generate(5, (_) => service.registerFailedAttempt()),
+    );
+
+    expect(results.where((locked) => locked).length, 1);
+    expect(await service.isLockedOut(), isTrue);
+  });
+
+  test('corrupt lockout state fails closed instead of unlocking', () async {
+    final store = _MemoryStore();
+    store.values[AppConstants.keyLockoutUntil] = 'not-a-date';
+    store.values[AppConstants.keyLockoutStarted] = 'not-a-date';
+    final service = PinLockoutService(store);
+
+    expect(await service.isLockedOut(), isTrue);
+    expect(await service.isPermanentlyLocked(), isTrue);
+  });
+
+  test('incomplete lockout state fails closed', () async {
+    final store = _MemoryStore();
+    store.values[AppConstants.keyLockoutUntil] =
+        DateTime.now().add(const Duration(minutes: 5)).toIso8601String();
+    final service = PinLockoutService(store);
+
+    expect(await service.isLockedOut(), isTrue);
+    expect(await service.isPermanentlyLocked(), isTrue);
+  });
 }
